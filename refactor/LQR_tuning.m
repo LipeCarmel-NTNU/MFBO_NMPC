@@ -1,4 +1,6 @@
 clear all; close all; clc
+rng(1)
+%%
 get_par
 
 model = @(x, u)  dilution_reduced(0, x, u, par);
@@ -41,12 +43,12 @@ R = diag([1 1 1e-2]);
 
 % Initial conditions
 x0 = xss;
-x0(2) = xss(2)*0.25;
 x0(2) = 2;
+x0(3) = 1;
 
 Tf = 20;
 
-var0 = [-1.3936    3.7000   -0.9948    1.7205   -3.3703]; % Q(1,1) = 1
+var0 = [-1    2   1    -1   -1]; % Q(1,1) = 1
 %%
 J0 = cost_LQR(var0, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt);
 [optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0);
@@ -87,6 +89,9 @@ for i = 1:3
 end
 
 set_font_size()
+%%
+figure;
+stairs(Tode, U)
 
 function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
     % Number of steps
@@ -174,5 +179,8 @@ function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
     [K,S,e] = lqrd(A,B,Q,R,Ts);
 
     [Yode, ~, Uode] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
-    J = sum(sumsqr(Yode - xsp)) + 0.1*sum(sumsqr(diff(Uode)));
+
+    ssr = sumsqr(Yode - xsp);
+    reg = sum(sumsqr(diff(Uode)));
+    J = ssr + reg;
 end
