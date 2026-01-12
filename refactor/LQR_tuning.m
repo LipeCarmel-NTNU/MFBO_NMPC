@@ -51,6 +51,7 @@ Tf = 20;
 var0 = [-1    2   1    -1   -1]; % Q(1,1) = 1
 %%
 J0 = cost_LQR(var0, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt);
+opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',true);
 [optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0);
 
 %%
@@ -180,7 +181,9 @@ function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
 
     [Yode, ~, Uode] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
-    ssr = sumsqr(Yode - xsp);
+    r = Yode - xsp;
+    sr = sum(r.^2);
+    ssr = sum(sr * [10; 1; 1]);
     reg = sum(sumsqr(diff(Uode)));
     J = ssr + reg;
 end

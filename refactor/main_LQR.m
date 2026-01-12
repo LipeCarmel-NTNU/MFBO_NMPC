@@ -38,8 +38,9 @@ Ts = 20/3600;
 % R = diag([1 1 1e-2]);
 
 % % Volume and sugar tightly controlled
-Q = diag([1 1 1e3]);
-R = diag([1 1 1e-2]);
+opt_tuning = [-0.3628    4.5735   -3.9818    1.9878   -2.7478];
+Q = diag([1 10.^opt_tuning(1:2)]);
+R = diag(10.^opt_tuning(3:end));
 
 [K,S,e] = lqrd(A,B,Q,R,Ts);
 
