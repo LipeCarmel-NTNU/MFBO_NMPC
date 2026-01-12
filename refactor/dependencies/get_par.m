@@ -1,0 +1,9 @@
+par.Sin = 70;
+par.mu_max = 0.2730;
+par.mu = par.mu_max;
+par.Ks = 0.007;
+par.kd = 0.006;
+par.Y_XS = 0.42042;
+par.Y_XSinv = 1/par.Y_XS;
+par.Y_CO2X = 0.54308;
+par.Y_CO2Xinv = 1/par.Y_CO2X;
