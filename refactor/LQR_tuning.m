@@ -28,19 +28,6 @@ Vsp = 1;
 % Sampling
 Ts = 1/60;
 
-% First try
-Q = diag([1 1 1]);
-R = diag([1 1 1]);
-% Volume tightly
-Q = diag([1 1 1]);
-R = diag([1 1 1e-2]);
-% % Volume and sugar tightly
-% % Volume and sugar tightly
-% Q = diag([100 1 1e3]);
-% R = diag([10 1 1e-3]);
-
-
-
 % Initial conditions
 x0 = xss;
 x0(1) = 1.1;
@@ -49,14 +36,13 @@ x0(3) = 1;
 
 Tf = 20;
 
-%%
+%% Tuning
 var0 =  [0 0 0 0 log10(0.5)]; % Q(1,1) = 1
 J0 = cost_LQR(var0, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt);
 opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',true, 'MaxFunctionEvaluations', 2000);
 [optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0, opt_options);
 
-%%
-
+%% Simulation
 tuning_par = optvar;
 [K, Qi, Ri] = build_LQR(tuning_par, A, B, Ts)
 
@@ -92,32 +78,6 @@ figure(1);
 stairs(Tode, U)
 figure(2)
 function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
-    % LQR_simulation for incremental LQR (delta-u LQR)
-    %
-    % Assumes K is designed for the augmented state:
-    %   z = [x_tilde; u_tilde_prev]
-    % where
-    %   x_tilde = x - yss
-    %   u_tilde_prev = (u_prev - uss)
-    % and the control law is
-    %   delta_u_tilde = -K * z
-    % so that
-    %   u = u_prev + delta_u_tilde
-    %
-    % Inputs:
-    %   system : function handle f(t,x,u) returning xdot (or x_{k+1} model)
-    %   Ts     : sample time (hours)
-    %   Tf     : final time (hours)
-    %   y0     : initial state (absolute)
-    %   K      : incremental LQR gain (size m x (n+m))
-    %   yss    : setpoint state (absolute)
-    %   uss    : setpoint input (absolute)
-    %   ode_opt: odeset options
-    %
-    % Outputs:
-    %   Y : state trajectory (absolute)
-    %   T : time vector
-    %   U : input trajectory (absolute), piecewise-constant over [T(k-1),T(k)]
 
     % Steps
     num_sim = ceil(Tf/Ts);
@@ -141,7 +101,6 @@ function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
     % Initialise previous input at setpoint (piecewise-constant hold)
     u_prev = uss(:);
 
-    % (Optional) store also the initial input
     U(1,:) = u_prev(:).';
 
     for k = 2:num_sim
@@ -250,7 +209,6 @@ function [K, Qi, Ri] = build_LQR(log10w, A, B, Ts)
         warning('something went wrong. Probably infinite cost somewhere')
         keyboard
     end
-
 
     % The following yields an interesting structure, but cant be trusted
     % Ai = [A, B;
