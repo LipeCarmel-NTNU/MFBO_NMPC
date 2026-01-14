@@ -21,7 +21,7 @@ unco = length(A) - rank(controllability);
 %% Construct the LQR
 
 % Targets
-Xsp = 20;
+Xsp = 15;
 Vsp = 1;
 [xsp, usp] = find_ss(Vsp, Xsp, par, model, ode_opt);
 
@@ -43,19 +43,22 @@ R = diag([1 1 1e-2]);
 
 % Initial conditions
 x0 = xss;
-x0(2) = 2;
+x0(1) = 1.1;
+x0(2) = 5;
 x0(3) = 1;
 
 Tf = 20;
 
 %%
-var0 = [0    0   -1    -1   -1]; % Q(1,1) = 1
+var0 =  [0 0 0 0 log10(0.5)]; % Q(1,1) = 1
 J0 = cost_LQR(var0, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt);
-opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',true);
+opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',true, 'MaxFunctionEvaluations', 2000);
 [optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0, opt_options);
 
 %%
-K = build_LQR(optvar, A, B, Ts);
+
+tuning_par = optvar;
+[K, Qi, Ri] = build_LQR(tuning_par, A, B, Ts)
 
 [Yode, Tode, U] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
@@ -84,36 +87,37 @@ for i = 1:3
 end
 
 set_font_size()
-%%
-figure;
+
+figure(1);
 stairs(Tode, U)
+figure(2)
 function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
-% LQR_simulation for incremental LQR (delta-u LQR)
-%
-% Assumes K is designed for the augmented state:
-%   z = [x_tilde; u_tilde_prev]
-% where
-%   x_tilde = x - yss
-%   u_tilde_prev = (u_prev - uss)
-% and the control law is
-%   delta_u_tilde = -K * z
-% so that
-%   u = u_prev + delta_u_tilde
-%
-% Inputs:
-%   system : function handle f(t,x,u) returning xdot (or x_{k+1} model)
-%   Ts     : sample time (hours)
-%   Tf     : final time (hours)
-%   y0     : initial state (absolute)
-%   K      : incremental LQR gain (size m x (n+m))
-%   yss    : setpoint state (absolute)
-%   uss    : setpoint input (absolute)
-%   ode_opt: odeset options
-%
-% Outputs:
-%   Y : state trajectory (absolute)
-%   T : time vector
-%   U : input trajectory (absolute), piecewise-constant over [T(k-1),T(k)]
+    % LQR_simulation for incremental LQR (delta-u LQR)
+    %
+    % Assumes K is designed for the augmented state:
+    %   z = [x_tilde; u_tilde_prev]
+    % where
+    %   x_tilde = x - yss
+    %   u_tilde_prev = (u_prev - uss)
+    % and the control law is
+    %   delta_u_tilde = -K * z
+    % so that
+    %   u = u_prev + delta_u_tilde
+    %
+    % Inputs:
+    %   system : function handle f(t,x,u) returning xdot (or x_{k+1} model)
+    %   Ts     : sample time (hours)
+    %   Tf     : final time (hours)
+    %   y0     : initial state (absolute)
+    %   K      : incremental LQR gain (size m x (n+m))
+    %   yss    : setpoint state (absolute)
+    %   uss    : setpoint input (absolute)
+    %   ode_opt: odeset options
+    %
+    % Outputs:
+    %   Y : state trajectory (absolute)
+    %   T : time vector
+    %   U : input trajectory (absolute), piecewise-constant over [T(k-1),T(k)]
 
     % Steps
     num_sim = ceil(Tf/Ts);
@@ -154,12 +158,9 @@ function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
         % Absolute input update
         uk = u_prev + du_tilde;
 
-        % Constraints (keep exactly as you had them)
+        % Constraints
         uk = max(uk, zeros(m,1));
         uk = min(uk, 0.4*ones(m,1));
-        if uk(1) > 0.4
-            uk(1) = 0.4;
-        end
 
         % ODE over the interval with piecewise-constant uk
         ode_current = @(t, y) system(t, y, uk);
@@ -193,8 +194,11 @@ function [xss, uss] = find_ss(V, X, par, model, ode_opt)
     uss = [Fin 0 Fin];
     u = uss;
     TSPAN = [0 10];
-    [t, x] = ode45(@(t,x) model(x, u), TSPAN, [V, X, S], ode_opt); % check
+    [t, x] = ode15s(@(t,x) model(x, u), TSPAN, [V, X, S], ode_opt); % check
     xss = x(end, :);
+    if abs( X - xss(2) ) > 1e-5
+        warning('Check steady-state')
+    end
 end
 
 function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
@@ -203,16 +207,20 @@ function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
     [Yode, ~, Uode] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
     r = Yode - xsp;
+    r = r.*[10 1 1];
     sr = sum(r.^2);
-    ssr = sum(sr * [10; 1; 1]);
-    reg = sum(sumsqr(diff(Uode)));
-    J = ssr + reg;
+    ssr = sum(sr);                             % 1.7539e+03
+    reg = 1e4*sum(sumsqr(diff(Uode)));         % 173.2546        1e.2*sum
+    reg2 = 1e2*sumsqr(var);                    %  25.4240
+    J = ssr + reg + reg2;
+    disp(J)
+    disp(reg2)
 end
 
-function K = build_LQR(var, A, B, Ts)
-    var = 10.^var;
-    q = var(1:2);
-    r = var(3:end);
+function [K, Qi, Ri] = build_LQR(log10w, A, B, Ts)
+    w = 10.^log10w;
+    q = w(1:2);
+    r = w(3:end);
 
     Q = diag([1 q]);
     R = diag(r);
@@ -225,18 +233,23 @@ function K = build_LQR(var, A, B, Ts)
     sysc = ss(A,B,eye(n),zeros(n,m));
     sysd = c2d(sysc, Ts, 'zoh');
     Ad = sysd.A;  Bd = sysd.B;
-    
+
     % incremental form
     Ai = [Ad, Bd;
-          zeros(m,n), eye(m)];
+        zeros(m,n), eye(m)];
     Bi = [Bd;
-          eye(m)];
-    
-    
+        eye(m)];
+
+
     Qi = blkdiag(Q, zeros(m));  % Q only on the natural states
     Ri = R;                     % R acts on delta u explicitly
-    
-    K = dlqr(Ai, Bi, Qi, Ri);
+
+    try
+        K = dlqr(Ai, Bi, Qi, Ri);
+    catch
+        warning('something went wrong. Probably infinite cost somewhere')
+        keyboard
+    end
 
 
     % The following yields an interesting structure, but cant be trusted
