@@ -48,20 +48,14 @@ x0(3) = 1;
 
 Tf = 20;
 
-var0 = [-1    2   1    -1   -1]; % Q(1,1) = 1
 %%
+var0 = [0    0   -1    -1   -1]; % Q(1,1) = 1
 J0 = cost_LQR(var0, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt);
 opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',true);
-[optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0);
+[optvar, J] = fminunc(@(var) cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt), var0, opt_options);
 
 %%
-var = 10.^optvar;
-q = var(1:2);
-r = var(3:end);
-
-Q = diag([1 q]);
-R = diag(r);
-[K,S,e] = lqrd(A,B,Q,R,Ts);
+K = build_LQR(optvar, A, B, Ts);
 
 [Yode, Tode, U] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
@@ -93,65 +87,98 @@ set_font_size()
 %%
 figure;
 stairs(Tode, U)
-
 function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
-    % Number of steps
+% LQR_simulation for incremental LQR (delta-u LQR)
+%
+% Assumes K is designed for the augmented state:
+%   z = [x_tilde; u_tilde_prev]
+% where
+%   x_tilde = x - yss
+%   u_tilde_prev = (u_prev - uss)
+% and the control law is
+%   delta_u_tilde = -K * z
+% so that
+%   u = u_prev + delta_u_tilde
+%
+% Inputs:
+%   system : function handle f(t,x,u) returning xdot (or x_{k+1} model)
+%   Ts     : sample time (hours)
+%   Tf     : final time (hours)
+%   y0     : initial state (absolute)
+%   K      : incremental LQR gain (size m x (n+m))
+%   yss    : setpoint state (absolute)
+%   uss    : setpoint input (absolute)
+%   ode_opt: odeset options
+%
+% Outputs:
+%   Y : state trajectory (absolute)
+%   T : time vector
+%   U : input trajectory (absolute), piecewise-constant over [T(k-1),T(k)]
+
+    % Steps
     num_sim = ceil(Tf/Ts);
 
-    % Initialize output arrays
-    ny = length(yss);        % Number of state variables
-    nu = length(uss);        % Number of input variables
-    Y = zeros(num_sim, ny);
-    U = zeros(num_sim, nu);
-    T = zeros(num_sim, 1);  % Time vector
+    % Dimensions
+    n = length(yss);
+    m = length(uss);
 
-    % Set initial conditions
-    Y(1, :) = y0;
-    T(1) = 0;
+    % Preallocate
+    Y = zeros(num_sim, n);
+    U = zeros(num_sim, m);
+    T = zeros(num_sim, 1);
 
-    % Current state and time
-    y_current = y0;
+    % Initialise
+    Y(1,:) = y0(:).';
+    T(1)   = 0;
+
+    y_current = y0(:);
     t_current = 0;
 
-    % Loop through each time step
-    for k = 2 : num_sim
-        % Measure
-        ym = y_current(:) - yss(:);
-        % ym(3) = max(ym(3) - 2, 0);
-        %ym(1) = ym(1) + normrnd(0, 0.1);
+    % Initialise previous input at setpoint (piecewise-constant hold)
+    u_prev = uss(:);
 
-            % Kp = 2;
-            % Ssp = Kp*(yss(2) - y_current(2));
-            % Ssp = min([3 Ssp]);
-            % ym(3) = ym(3) - Ssp;
+    % (Optional) store also the initial input
+    U(1,:) = u_prev(:).';
 
-        % Define the piecewise constant value of u
-        uk = uss(:) - K*ym;
-        uk = max(uk, zeros(nu, 1));
-        uk = min(uk, 0.4*ones(nu, 1));
-        if uk(1)>0.4
-            uk(1)=0.4;
+    for k = 2:num_sim
+        % Deviations
+        x_tilde      = y_current - yss(:);
+        u_tilde_prev = u_prev    - uss(:);
+
+        % Augmented deviation state
+        z = [x_tilde; u_tilde_prev];
+
+        % Incremental control in deviation coordinates
+        du_tilde = -K * z;
+
+        % Absolute input update
+        uk = u_prev + du_tilde;
+
+        % Constraints (keep exactly as you had them)
+        uk = max(uk, zeros(m,1));
+        uk = min(uk, 0.4*ones(m,1));
+        if uk(1) > 0.4
+            uk(1) = 0.4;
         end
-        %disp(uk)
 
-        % Define the ODE function for the current interval
+        % ODE over the interval with piecewise-constant uk
         ode_current = @(t, y) system(t, y, uk);
-
-        % Solve the ODE from t_current to t_current + Ts
         [t_span, y_span] = ode45(ode_current, [t_current, t_current + Ts], y_current, ode_opt);
 
-        % Update current state and time
-        y_current = y_span(end, :);
-        y_current(y_current<0) = 0;
+        % Update state/time
+        y_current = y_span(end,:).';
+        y_current(y_current < 0) = 0;  % keep your non-negativity safeguard
         t_current = t_span(end);
 
-        % Store results
-        Y(k, :) = y_current;
-        U(k, :) = uk';
-        T(k) = t_current;
+        % Store
+        Y(k,:) = y_current.';
+        U(k,:) = uk.';
+        T(k)   = t_current;
+
+        % Update previous input for next increment
+        u_prev = uk;
     end
 end
-
 
 function [xss, uss] = find_ss(V, X, par, model, ode_opt)
     % Starvation:
@@ -171,13 +198,7 @@ function [xss, uss] = find_ss(V, X, par, model, ode_opt)
 end
 
 function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
-    var = 10.^var;
-    q = var(1:2);
-    r = var(3:end);
-
-    Q = diag([1 q]);
-    R = diag(r);
-    [K,S,e] = lqrd(A,B,Q,R,Ts);
+    K = build_LQR(var, A, B, Ts);
 
     [Yode, ~, Uode] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
@@ -186,4 +207,45 @@ function J = cost_LQR(var, A, B, model, Ts, Tf, x0, xsp, usp, ode_opt)
     ssr = sum(sr * [10; 1; 1]);
     reg = sum(sumsqr(diff(Uode)));
     J = ssr + reg;
+end
+
+function K = build_LQR(var, A, B, Ts)
+    var = 10.^var;
+    q = var(1:2);
+    r = var(3:end);
+
+    Q = diag([1 q]);
+    R = diag(r);
+
+    % LQR
+    n = size(A,1);
+    m = size(B,2);
+
+    % Discretise
+    sysc = ss(A,B,eye(n),zeros(n,m));
+    sysd = c2d(sysc, Ts, 'zoh');
+    Ad = sysd.A;  Bd = sysd.B;
+    
+    % incremental form
+    Ai = [Ad, Bd;
+          zeros(m,n), eye(m)];
+    Bi = [Bd;
+          eye(m)];
+    
+    
+    Qi = blkdiag(Q, zeros(m));  % Q only on the natural states
+    Ri = R;                     % R acts on delta u explicitly
+    
+    K = dlqr(Ai, Bi, Qi, Ri);
+
+
+    % The following yields an interesting structure, but cant be trusted
+    % Ai = [A, B;
+    %       zeros(m,n), zeros(m)];
+    % Bi = [B;
+    %       eye(m)];
+    % Qi = blkdiag(Q, zeros(m));   % penalise x only
+    % Ri = R*Ts^2;                 % The input is dudt and scalling matters
+    % [K2,S,e] = lqrd(Ai,Bi,Qi,Ri,Ts);
+
 end
