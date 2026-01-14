@@ -44,7 +44,7 @@ opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',tr
 
 %% Simulation
 tuning_par = optvar;
-[K, Qi, Ri] = build_LQR(tuning_par, A, B, Ts)
+[K, Qi, Ri] = build_LQR(tuning_par, A, B, Ts);
 
 [Yode, Tode, U] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
