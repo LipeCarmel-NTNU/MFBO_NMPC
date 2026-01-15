@@ -197,15 +197,14 @@ classdef MPC_abstract < handle
         end
 
         %% Integrator
-        function states = integrator(obj, x0, uk)
+        function x_next = integrator(obj, x0, uk)
+
             h = obj.Ts;
-
-            states = zeros(N + 1, obj.nx);
-            states(1, :) = x0;
-
             [~,y] = RKF45_book(@(t,x) obj.model(x, uk), [0 h], x0, h);
 
-            states(end,:) = y(end,:);
+            % It would also be ok to change the code to return y to enforce
+            % constraints between nodes. Not necessary for small Ts.
+            x_next = y(end,:);
         end
 
         %% Constraints

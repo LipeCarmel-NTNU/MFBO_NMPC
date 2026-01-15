@@ -8,7 +8,8 @@ addpath(genpath(current_dir))
 get_par
 
 %% System sampling rate
-dt = 1/60;
+dt = 6/60;
+
 
 %% Model definition
 
@@ -27,24 +28,24 @@ MPC.Ts = dt; % Sampling time in hours
 
 % Properties that modify the constraint matrices of the optimization
 % require the constraints() method to be enforced
-MPC.p = 60;
-MPC.m = 3;
+MPC.p = 5;
+MPC.m = 2;
 MPC.Q_S = 2;
 MPC.constraints();
 
 MPC.dilution = 1e7; % dilution is not allowedl
 
 % Parallel computation can be faster on most machines
-if not(MPC.optimizer_options.UseParallel)
-    % setup parallel
-    c = parcluster('Processes');
-    delete(c.Jobs)
-    delete(gcp('nocreate'))
-    parpool(5, 'IdleTimeout', inf);
-
-    MPC.optimizer_options.UseParallel = true;
-    MPC.optimizer_options.MaxIterations = 1000;
-end
+% if not(MPC.optimizer_options.UseParallel)
+%     % setup parallel
+%     c = parcluster('Processes');
+%     delete(c.Jobs)
+%     delete(gcp('nocreate'))
+%     parpool(5, 'IdleTimeout', inf);
+% 
+%     MPC.optimizer_options.UseParallel = true;
+%     MPC.optimizer_options.MaxIterations = 1000;
+% end
 
 % To calculate control actions use MPC.solve(x, u) where x and u are row
 % vectors representing the current state and previous action.
