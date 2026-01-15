@@ -25,7 +25,8 @@ classdef MPC_abstract < handle
         Ymin    % Lower bounds for the states (1 x nx)
         Ymax    % Upper bounds for the states (1 x nx)
 
-        umax
+        umax    % Upper bounds for the inputs (1 x nu)
+        umin    % Lower bounds for the inputs (1 x nu)
 
         wL      % Lower bounds for the decision variables
         wU      % Upper bounds for the decision variables
@@ -287,7 +288,8 @@ classdef MPC_abstract < handle
 
 
             % Lower bound for control actions
-            uL =   0 * ones(len_u, 1);
+            uL = ones(obj.m, obj.nu).*obj.umin;
+            uL = reshape(uL ,[], 1);
 
             % Upper bound for control actions
             uU = ones(obj.m, obj.nu).*obj.umax;

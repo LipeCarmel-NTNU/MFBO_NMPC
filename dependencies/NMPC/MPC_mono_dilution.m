@@ -27,7 +27,8 @@ classdef MPC_mono_dilution < MPC_abstract
         Ymax = [2 50 20 Inf]
 
         umax = 0.4*[1 1 1]
-
+        umin = zeros(1, 3)
+        
         dilution = 1e7
 
         wL      % Lower bounds for the decision variables
