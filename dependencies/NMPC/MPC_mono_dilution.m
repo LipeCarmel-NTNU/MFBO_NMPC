@@ -48,20 +48,8 @@ classdef MPC_mono_dilution < MPC_abstract
     end
     methods
         function obj = MPC_mono_dilution(model)
-            % MPC Constructor
-            %   Initializes the MPC object with the provided model and position setpoints.
-            %
-            %   Inputs:
-            %       model - System model function handle
-            %       Vsp - Setpoint for volume (L)
-            %       Xsp - Setpoint for biomass (g/L)x
-
-            obj.model = model;
-
-            [obj.wL, obj.wU] = obj.constraints();
-
-            obj.test_dimensions()
-            obj.validate();
+            % Initialization inherited from abstract class
+            obj = obj.init(model);
         end
 
         function [L] = objfun(obj, w, u_init)

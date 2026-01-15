@@ -52,6 +52,23 @@ classdef MPC_abstract < handle
     end
 
     methods
+        %% Initialization
+        function obj = init(obj, model)
+            % MPC Constructor to be used by child objects
+            %   Initializes the MPC object with the provided model and
+            %   builds constraints.
+            %
+            %   Inputs:
+            %       model - System model function handle
+
+            obj.model = model;
+
+            [obj.wL, obj.wU] = obj.constraints();
+
+            obj.test_dimensions()
+            obj.validate();
+        end
+
         %% Optimization
         function [uk, x, u] = solve(obj, x_init, u_init)
             %
