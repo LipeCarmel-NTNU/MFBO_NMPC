@@ -209,7 +209,7 @@ classdef MPC_abstract < handle
 
         %% Constraints
 
-        function [c, ceq] = confun(obj, w, x_init, u_init)
+        function [c, ceq] = confun(obj, w, x_init)
             % CONFUN Constraint function
             %   Computes the continuity and initial state constraints for
             % the optimization problem (compatible with fmincon).

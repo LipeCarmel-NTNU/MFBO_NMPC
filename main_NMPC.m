@@ -55,10 +55,10 @@ help MPC.solve
 %% Initial conditions
 
 % Duration of the simulation
-tf = 20;                % h
+tf = 10;                % h
 
 V_0 = 1;
-X_0 = 2;
+X_0 = 10;
 S_0 = 0;
 CO2_0 = 0.0049;
 
