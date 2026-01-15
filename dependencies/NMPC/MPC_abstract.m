@@ -15,7 +15,7 @@ classdef MPC_abstract < handle
 
         nx                         % Number of states
         nu                         % Number of manipulated variables
-        
+
         %% Constraints
         Vmin
         Vmax
@@ -23,8 +23,8 @@ classdef MPC_abstract < handle
         Xmin
         Xmax
 
-        % Numerical error may yield negligible negative sugar values. 
-        % If this error becomes significant, reduce min_integrator_step, 
+        % Numerical error may yield negligible negative sugar values.
+        % If this error becomes significant, reduce min_integrator_step,
         % otherwise ignore it
         Smin
         Smax
@@ -38,12 +38,9 @@ classdef MPC_abstract < handle
         Ucon    % Upper bounds for the states (1 x nx)
         wL      % Lower bounds for the decision variables
         wU      % Upper bounds for the decision variables
-        
+
         %% Integrator and Optimizer
-        min_integrator_step    % Minimum integration step size required to solve the ode (h)
-
         optimizer_options
-
         latest_wopt
 
         %% DEBUG
@@ -57,19 +54,18 @@ classdef MPC_abstract < handle
 
     properties (Dependent)
         tf                              % Final time (h)
-        n_integrator_steps              % Number of integration steps per multiple shooting subinterval
     end
 
     methods (Abstract)
         objfun(obj)
     end
-    
-    methods
 
+    methods
+        %% Optimization
         function [uk, x, u] = solve(obj, x_init, u_init)
             %
             % [uk, x, u] = obj.solve(x_init, u_init)
-            % This method computes the optimal control inputs (uk) and the corresponding state trajectory (x) 
+            % This method computes the optimal control inputs (uk) and the corresponding state trajectory (x)
             % and control inputs (u) based on the initial state (x_init) and initial control inputs (u_init).
             %
             % Inputs:
@@ -81,18 +77,18 @@ classdef MPC_abstract < handle
             %   x     - State trajectory over the prediction horizon
             %   u     - Control inputs over the prediction horizon
             %
-            % The method utilizes a moving horizon approach, where the 
-            % previous solution is used as a guess 
+            % The method utilizes a moving horizon approach, where the
+            % previous solution is used as a guess
             % for the optimization problem.
             %
             % The method also handles cases of infeasibility by first
             % satisfying continuity constraints then trying to solve the
             % optimization problem again. If the optimization fails again a
             % warning is thrown and u(k+1|k-1) is returned. Consider
-            % adjusting the optimizer_options if such cases (mainly 
-            % increasing MaxIter) 
+            % adjusting the optimizer_options if such cases (mainly
+            % increasing MaxIter)
 
-            
+
             % Use the previous solution as a guess if it is available
             if isempty(obj.latest_wopt)
                 % Solve the first iteration with no information
@@ -118,8 +114,8 @@ classdef MPC_abstract < handle
                 w0 = guess_from_initial(obj, x_init, u);
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
             end
-            
-            % In case of infeasibility, solve the ode with the u from the 
+
+            % In case of infeasibility, solve the ode with the u from the
             % current solution thus ensuring satisfaction of the continuity
             % constraints. This tends to guide the optimizer to a feasible
             % solution
@@ -146,7 +142,7 @@ classdef MPC_abstract < handle
             end
 
         end
-        
+
         function [uk, x, u, fval] = solve_first_iter(obj, x_init, u_init)
             % Solve
             obj.constraints();
@@ -154,44 +150,69 @@ classdef MPC_abstract < handle
             [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
 
         end
-        
+
         function [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init)
             % is_infeasible(obj, w0, x_init)
             [wopt,fval,exitflag] = fmincon(@(w) obj.objfun(w, u_init),w0,...
-                    [],[],[],[],obj.wL,obj.wU,...
-                    @(w) obj.confun(w, x_init),...
-                    obj.optimizer_options);
+                [],[],[],[],obj.wL,obj.wU,...
+                @(w) obj.confun(w, x_init),...
+                obj.optimizer_options);
             if exitflag >= 0
                 obj.latest_wopt = wopt;
             end
             obj.latest_flag = exitflag;
-            
+
             % Extract states and controls
             [x, u] = obj.data_from_w(wopt);
             obj.validate(false, x, u);
             uk = u(1, :);
         end
-        
-        function tf = get.tf(obj)
-            % GET.TF Getter for final time
-            %   Computes the final time based on the prediction horizon and
-            % the sampling time.
+
+        function [states_atNodes] = confun_initial(obj, x_init, u)
+            % CONFUN_INITIAL Initial constraint function
+            %   Computes the states at nodes based on initial conditions for the optimization problem.
+            %
+            %   Inputs:
+            %       x_init - Initial state vector
+            %       u - Control matrix (m x nu)
             %
             %   Outputs:
-            %       tf - Final time  (h)
+            %       states_atNodes - States at each node
 
-            tf = obj.p * obj.Ts;
+            % Initialize states at nodes
+            states_atNodes = [x_init; zeros(obj.p, obj.nx)];
+
+            % Single shooting in each subinterval using RK4 integration
+            for i = 1:obj.p
+                x0 = states_atNodes(i, :);
+                if i <= obj.m
+                    uk = u(i, :);
+                end
+
+                % Integration between the nodes
+                states = obj.integrator(x0, uk);
+
+                states_atNodes(i + 1, :) = states(end, :);
+            end
         end
-        
-        function n = get.n_integrator_steps(obj)
-            % Computes the number of integrator steps to preserve numerical
-            % precision.
-            n = max(1, round(obj.Ts / obj.min_integrator_step));
+
+        %% Integrator
+        function states = integrator(obj, x0, uk)
+            h = obj.Ts;
+
+            states = zeros(N + 1, obj.nx);
+            states(1, :) = x0;
+
+            [~,y] = RKF45_book(@(t,x) obj.model(x, uk), [0 h], x0, h);
+
+            states(end,:) = y(end,:);
         end
-        
+
+        %% Constraints
+
         function [c, ceq] = confun(obj, w, x_init, u_init)
             % CONFUN Constraint function
-            %   Computes the continuity and initial state constraints for 
+            %   Computes the continuity and initial state constraints for
             % the optimization problem (compatible with fmincon).
             %
             %   Inputs:
@@ -204,72 +225,33 @@ classdef MPC_abstract < handle
 
             % Extract states and control actions
             [x, u] = obj.data_from_w(w);
-        
-            
+
+
             % Initialize states at nodes
             states_atNodes = zeros(obj.p + 1, obj.nx);
-            
+
             % Single shooting in each subinterval using RK4 integration
             for i = 1:obj.p
                 x0 = x(i, :);
                 if i <= obj.m
                     uk = u(i, :);
                 end
-                
+
                 % Integration between the nodes
                 states = obj.integrator(x0, uk);
 
                 states_atNodes(i + 1, :) = states(end, :);
             end
-            
+
             % Continuity constraints
             ceq_temp = x(2:end, :) - states_atNodes(2:end, :);
             ceq_temp = [ceq_temp; x(1, :) - x_init];
-            
+
             % Equality constraints
             ceq = reshape(ceq_temp, [], 1);
-            
+
             % Non-linear inequality constraints (none)
             c = [];
-        end
-
-        
-        function [states_atNodes] = confun_initial(obj, x_init, u)
-            % CONFUN_INITIAL Initial constraint function
-            %   Computes the states at nodes based on initial conditions for the optimization problem.
-            %
-            %   Inputs:
-            %       x_init - Initial state vector
-            %       u - Control matrix (m x nu)
-            %
-            %   Outputs:
-            %       states_atNodes - States at each node
-            
-            % Initialize states at nodes
-            states_atNodes = [x_init; zeros(obj.p, obj.nx)];
-            
-            % Single shooting in each subinterval using RK4 integration
-            for i = 1:obj.p
-                x0 = states_atNodes(i, :);
-                if i <= obj.m
-                    uk = u(i, :);
-                end
-                
-                % Integration between the nodes
-                states = obj.integrator(x0, uk);
-
-                states_atNodes(i + 1, :) = states(end, :);
-            end
-        end
-
-        function [x, u] = data_from_w(obj, w)
-            % Returns [x, u] from the decision variable vector.
-
-            len_x =  obj.nx * (obj.p + 1);  % length of x vector (nx initial states + p predictions)
-            len_u = obj.m*obj.nu;           % length of u vector (nu * m control actions)
-
-            x = reshape(w(1 : len_x), [], obj.nx);
-            u = reshape(w(len_x + 1: len_x + len_u), [], obj.nu);
         end
 
         function [wL, wU] = constraints(obj)
@@ -286,31 +268,31 @@ classdef MPC_abstract < handle
             len_x =  obj.nx * (obj.p + 1);  % length of x vector (nx initial states + p predictions)
             len_u = obj.m*obj.nu;           % length of u vector (nu * m control actions)
 
-            %% Lower and upper bouds
-            
+            % Lower and upper bouds
+
             % Lower bound for states
             xL =  ones(obj.p + 1, obj.nx).*obj.Lcon;
             xL = reshape(xL ,[], 1);
-            
+
             % Upper bound for states
             xU =  ones(obj.p + 1, obj.nx).*obj.Ucon;
             xU = reshape(xU ,[], 1);
-            
-            
+
+
             % Lower bound for control actions
             uL =   0 * ones(len_u, 1);
 
             % Upper bound for control actions
             uU = ones(obj.m, obj.nu).*obj.umax;
-            uU = reshape(uU ,[], 1);      
+            uU = reshape(uU ,[], 1);
 
             wL = [xL; uL];
             wU = [xU; uU];
-            
+
             obj.wL = wL;
             obj.wU = wU;
 
-            %% Linear inequality constraints
+            % Linear inequality constraints
             % Aeq = [zeros(len_u, len_x), eye(len_u), - eye(len_u)]; % 0 + u - s <= umax
             % beq = reshape(ones(obj.m, obj.nu).*obj.umax, [], 1);
             % obj.Aeq = Aeq;
@@ -318,6 +300,18 @@ classdef MPC_abstract < handle
 
 
         end
+
+        %% Helper
+        function [x, u] = data_from_w(obj, w)
+            % Returns [x, u] from the decision variable vector.
+
+            len_x =  obj.nx * (obj.p + 1);  % length of x vector (nx initial states + p predictions)
+            len_u = obj.m*obj.nu;           % length of u vector (nu * m control actions)
+
+            x = reshape(w(1 : len_x), [], obj.nx);
+            u = reshape(w(len_x + 1: len_x + len_u), [], obj.nu);
+        end
+
 
         function w0 = guess_from_initial(obj, x_init, u_init)
             % GUESS Initial guess for the decision variables
@@ -341,12 +335,13 @@ classdef MPC_abstract < handle
             w0_u = reshape(u, [], 1);                                % Reshape control actions to a vector
             w0 = [w0_x; w0_u];                                       % Combine states and control actions for initial guess
         end
-        
+
+        %% Validation
         function L = eval_cost(obj, x_init, u_init, u)
             arguments
-                obj 
-                x_init 
-                u_init 
+                obj
+                x_init
+                u_init
                 u = []
             end
             if isempty(u)
@@ -362,17 +357,6 @@ classdef MPC_abstract < handle
             assert(length(obj.Lcon) == obj.nx, sprintf('Incorrect dimensions for Lcon (%d) and/or nx (%d)', length(obj.Lcon), obj.nx));
             assert(length(obj.Ucon) == obj.nx, sprintf('Incorrect dimensions for Ucon (%d) and/or nx (%d)', length(obj.Ucon), obj.nx));
             assert(length(obj.umax) == obj.nu, sprintf('Incorrect dimensions for umax (%d) and/or nu (%d)', length(obj.umax), obj.nu));
-
-        end
-        
-        function test_guess(obj)
-            % Solve the open loop problem
-            w0 = guess_from_initial(obj, obj.debug_x, obj.debug_u);
-
-            % Calculate continuity constraints
-            [c, ceq] = confun(obj, w0, obj.debug_x);
-
-            assert(all(ceq == 0), "Non-linear constraints not satisfied for the guess solution")
 
         end
 
@@ -430,17 +414,7 @@ classdef MPC_abstract < handle
             end
 
         end
-   
-        function states = integrator(obj, x0, uk)
-            h = obj.Ts;
-            
-            states = zeros(N + 1, obj.nx);
-            states(1, :) = x0;
 
-            [~,y] = RKF45_book(@(t,x) obj.model(x, uk), [0 h], x0, h);
-
-            states(end,:) = y(end,:);
-        end
 
         function [infeasible] = is_infeasible(obj, w0, x_init)
             function check(violation_bool, zero_vec)
@@ -472,8 +446,22 @@ classdef MPC_abstract < handle
             end
         end
 
+        %% Dependent properties
+        function tf = get.tf(obj)
+            % GET.TF Getter for final time
+            %   Computes the final time based on the prediction horizon and
+            % the sampling time.
+            %
+            %   Outputs:
+            %       tf - Final time  (h)
+
+            tf = obj.p * obj.Ts;
+        end
 
     end
+
+
+    %% Static methods
     methods (Static)
         function J = norm_Q(x, Q)
             % NORM_Q Quadratic norm calculation
@@ -488,11 +476,11 @@ classdef MPC_abstract < handle
 
             J = x' * Q * x;
         end
-        
+
         function w = w_from_data(x, u)
             w_x = reshape(x, [], 1);                   % Reshape states to a vector
             w_u = reshape(u, [], 1);                   % Reshape control actions to a vector
-            w = [w_x; w_u];  
+            w = [w_x; w_u];
         end
     end
 end
