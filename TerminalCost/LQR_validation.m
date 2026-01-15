@@ -93,7 +93,7 @@ for i = 1:N_lin
         e = Yode - xss(:).';                 % deviation from operating point
         e2 = sum(e.^2, 2);                   % squared error per time step
         SSE(i,j) = sum(e2);                  % sum over time
-        E1_gt_End(i,j) = (e2(1) > e2(end));  % requested check
+        E1_gt_End(i,j) = (e2(1) > e2(end)); 
 
         if SSE(i,j) > worst.SSE
             worst.SSE  = SSE(i,j);

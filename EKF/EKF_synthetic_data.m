@@ -125,7 +125,8 @@ function [xf, Pf] = ekf_forward_multirate(y_fast, yS, x0, P0, Qd, R_fast, R_S, p
 
         
         x_pred = rk4_step(x_prev, dt, p);
-
+        x_pred(x_pred<0) = 0;
+        
         A = jacobian_A(x_prev, p);
         F = I + dt*A;
 
@@ -245,7 +246,7 @@ function A = jacobian_A(x, p)
     X   = x(2);
     S   = x(3);
 
-    denom = (p.Ks + S + 1e-12);
+    denom = p.Ks + S;
     monod = S/denom;
     dmonod_dS = p.Ks/(denom^2);
 

@@ -1,5 +1,5 @@
 
-function [K, Qi, Ri] = build_LQR(log10w, A, B, Ts)
+function [K, Qi, Ri, Ai, Bi] = build_LQR(log10w, A, B, Ts)
     w = 10.^log10w;
     q = w(1:2);
     r = w(3:end);

@@ -46,10 +46,10 @@ opt_options = optimoptions('fminunc', 'Display','iter-detailed','UseParallel',tr
 tuning_par = optvar;
 [K, Qi, Ri] = build_LQR(tuning_par, A, B, Ts);
 
-[Yode, Tode, U] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
+[Y, T, U] = LQR_simulation(@(t,x,u) model(x, u), Ts, Tf, x0, K, xsp, usp, ode_opt);
 
-t_interp = 0 : Ts : Tode(end);
-X_interp = interp1(Tode, Yode(:, 2), t_interp);
+t_interp = 0 : Ts : T(end);
+X_interp = interp1(T, Y(:, 2), t_interp);
 Jx = trapz(t_interp, Xsp - X_interp);
 
 
@@ -59,7 +59,7 @@ tiledlayout(3,1,'TileSpacing','tight','Padding','tight')
 
 for i = 1:3
     nexttile
-    plot(Tode, Yode(:,i), '-', 'LineWidth', 3, 'Color', colors(i,:)); hold on
+    plot(T, Y(:,i), '-', 'LineWidth', 3, 'Color', colors(i,:)); hold on
     yline(xsp(i), '--', 'LineWidth', 3, 'Color', 'k')
     grid on; box on
     ylabel(sprintf('x_%d', i))
@@ -75,7 +75,7 @@ end
 set_font_size()
 
 figure(1);
-stairs(Tode, U)
+stairs(T, U)
 figure(2)
 
 
