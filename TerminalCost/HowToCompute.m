@@ -1,5 +1,5 @@
 %% Demonstration: LQR designed with (Q_lqr, R_lqr), evaluated with (Q_eval, R_eval)
-% Linear, discrete-time only. No nonlinear model, no saturation.
+% Linear, discrete-time
 clear; close all; clc
 
 %% Plant (choose any stabilisable pair)
@@ -24,7 +24,7 @@ R_lqr = diag([1 1e-2]);
 % Discrete-time LQR gain
 [K, P_lqr, eigAcl] = dlqr(A,B,Q_lqr,R_lqr);
 
-fprintf('max |eig(A-BK)| = %.6f\n', max(abs(eigAcl)));
+fprintf('max |eig(A-BK)| = %.6f\n', max(abs(real(eigAcl))));
 
 %% 2) Evaluation weights (different from tuning)
 Q_eval = diag(10*rand(3, 1));     % change state weighting
