@@ -92,6 +92,7 @@ classdef MPC_abstract < handle
             % adjusting the optimizer_options if such cases (mainly 
             % increasing MaxIter) 
 
+            
             % Use the previous solution as a guess if it is available
             if isempty(obj.latest_wopt)
                 % Solve the first iteration with no information
@@ -100,7 +101,9 @@ classdef MPC_abstract < handle
             elseif obj.latest_flag <= 0
                 % If there is no previous solution, solve withuot
                 % information
+                failed_before = true;
                 [uk, x, u] = solve_first_iter(obj, x_init, u_init);
+
             else
                 % If there is a feasible past solution, apply moving
                 % horizon
@@ -127,66 +130,28 @@ classdef MPC_abstract < handle
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
             end
             if obj.latest_flag < 1
-                warning('MPC - Failed to solve. Using the u(k+1|k-1)')
-                % u = u_init;
-                [~, u] = data_from_w(obj, obj.latest_wopt);
-                if obj.m > 1
-                    uk = u(2, :);
+                if failed_before
+                    warning('MPC - FAILED TWICE')
+                    uk = zeros(1, obj.nu);
                 else
-                    uk = u(1, :);
+                    warning('MPC - Failed to solve. Using the u(k+1|k-1)')
+                    % u = u_init;
+                    [~, u] = data_from_w(obj, obj.latest_wopt);
+                    if obj.m > 1
+                        uk = u(2, :);
+                    else
+                        uk = u(1, :);
+                    end
                 end
             end
 
         end
         
         function [uk, x, u, fval] = solve_first_iter(obj, x_init, u_init)
-            % For the first iteration a simpler problem is solved first, 
-            % then the control actions are interpolated and used as an 
-            % initial guess for the optimizer. 
-            %
-            % Testing indicates that for p=120, m=4, Ts=15s, 
-            % downscaling p by 4 saves 1s and is less likely to undergo 
-            % random slow downs.
-            %
-            % Note:
-            %
-            % The downscaled problems need not converge. The first
-            % downscaled problem should be fast and converge, the others
-            % can be limited to MaxIterations = 10 and they will still
-            % yield sufficiently accurate approximations to speed up the
-            % real optimization problem (quite significantly for complex 
-            % problems). Waiting for convergence is not beneficial because
-            % the downscaled solution will always be an approximation.
-            % This was tested for p=120, m=40, scale_down = [4 3 2 1]
-            % resulting in a total time reduction by 40%. 
-
-            % Original parameters
-            original_p = obj.p;
-            original_m = obj.m;
-            original_Ts = obj.Ts;
-
-            %% Simplify the problem
-            % Scale down the optimization problem keeping the same
-            % prediction horizon in time
-
-            scale_down = [1]; % 1 -> original problem
-            p_vec = ceil(original_p./scale_down);
-            m_vec = ceil(original_m/original_p*p_vec);  % Preserve the proportion of m/p to approximate the time of m
-            Ts_vec =  original_Ts*original_p./p_vec;     % Readjust Ts to preserve p*Ts
-
-            % Solve scaled down problem
-            obj.p = p_vec(1);
-            obj.m = m_vec(1);
-            obj.Ts = Ts_vec(1);
-
             % Solve
             obj.constraints();
             w0 = guess_from_initial(obj, x_init, u_init);
             [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
-
-            
-            %% Scale up
-            % not implemented. The orginal problem is solved
 
         end
         
@@ -467,26 +432,13 @@ classdef MPC_abstract < handle
         end
    
         function states = integrator(obj, x0, uk)
-            % Time step for integration
-            N = obj.n_integrator_steps;
-            % h = obj.Ts / obj.n_integrator_steps;
-
-
+            h = obj.Ts;
+            
             states = zeros(N + 1, obj.nx);
             states(1, :) = x0;
 
-            % % RK4
-            % for j = 1 : N
-            %     k1 = obj.model(states(j, :), uk)';
-            %     k2 = obj.model(states(j, :) + h / 2 * k1, uk)';
-            %     k3 = obj.model(states(j, :) + h / 2 * k2, uk)';
-            %     k4 = obj.model(states(j, :) + h * k3, uk)';
-            %     states(j + 1, :) = states(j, :) + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
-            %     states(j + 1, states(j + 1, :) < 0) = 0;
-            % end
+            [~,y] = RKF45_book(@(t,x) obj.model(x, uk), [0 h], x0, h);
 
-            [~,y] = RKF45_book(@(t,x) obj.model(x, uk), [0 obj.Ts], x0);
-            %[~, y] = ode15s(@(t,x) obj.model(x,uk), [0 obj.Ts], x0);
             states(end,:) = y(end,:);
         end
 
