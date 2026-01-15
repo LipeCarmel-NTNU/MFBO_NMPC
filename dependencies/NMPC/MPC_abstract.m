@@ -17,25 +17,16 @@ classdef MPC_abstract < handle
         nu                         % Number of manipulated variables
 
         %% Constraints
-        Vmin
-        Vmax
-
-        Xmin
-        Xmax
 
         % Numerical error may yield negligible negative sugar values.
         % If this error becomes significant, reduce min_integrator_step,
         % otherwise ignore it
-        Smin
-        Smax
 
-        CO2min
-        CO2max
+        Ymin    % Lower bounds for the states (1 x nx)
+        Ymax    % Upper bounds for the states (1 x nx)
 
         umax
 
-        Lcon    % Lower bounds for the states (1 x nx)
-        Ucon    % Upper bounds for the states (1 x nx)
         wL      % Lower bounds for the decision variables
         wU      % Upper bounds for the decision variables
 
@@ -270,11 +261,11 @@ classdef MPC_abstract < handle
             % Lower and upper bouds
 
             % Lower bound for states
-            xL =  ones(obj.p + 1, obj.nx).*obj.Lcon;
+            xL =  ones(obj.p + 1, obj.nx).*obj.Ymin;
             xL = reshape(xL ,[], 1);
 
             % Upper bound for states
-            xU =  ones(obj.p + 1, obj.nx).*obj.Ucon;
+            xU =  ones(obj.p + 1, obj.nx).*obj.Ymax;
             xU = reshape(xU ,[], 1);
 
 
@@ -353,8 +344,8 @@ classdef MPC_abstract < handle
         function test_dimensions(obj)
             assert(length(obj.debug_u) == obj.nu, sprintf('Incorrect dimensions for debug_u (%d) and/or nu (%d)', length(obj.debug_u), obj.nu));
             assert(length(obj.debug_x) == obj.nx, sprintf('Incorrect dimensions for debug_x (%d) and/or nx (%d)', length(obj.debug_x), obj.nx));
-            assert(length(obj.Lcon) == obj.nx, sprintf('Incorrect dimensions for Lcon (%d) and/or nx (%d)', length(obj.Lcon), obj.nx));
-            assert(length(obj.Ucon) == obj.nx, sprintf('Incorrect dimensions for Ucon (%d) and/or nx (%d)', length(obj.Ucon), obj.nx));
+            assert(length(obj.Ymin) == obj.nx, sprintf('Incorrect dimensions for Ymin (%d) and/or nx (%d)', length(obj.Ymin), obj.nx));
+            assert(length(obj.Ymax) == obj.nx, sprintf('Incorrect dimensions for Ymax (%d) and/or nx (%d)', length(obj.Ymax), obj.nx));
             assert(length(obj.umax) == obj.nu, sprintf('Incorrect dimensions for umax (%d) and/or nu (%d)', length(obj.umax), obj.nu));
 
         end

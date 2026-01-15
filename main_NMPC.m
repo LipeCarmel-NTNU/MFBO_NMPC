@@ -10,9 +10,7 @@ get_par
 %% System sampling rate
 dt = 6/60;
 
-
 %% Model definition
-
 nmpc_model = @(x, u) dilution_Monod_model(0, x, [2, u(:)'], par);
 plant = nmpc_model;
 
@@ -23,29 +21,25 @@ plant = nmpc_model;
 % Control actions are subjected to non-negativity constraints.
 MPC = MPC_mono_dilution(nmpc_model);
 
-% Properties can be overwritten
-MPC.Ts = dt; % Sampling time in hours
+% Sampling time in hours
+MPC.Ts = dt;
 
-% Properties that modify the constraint matrices of the optimization
-% require the constraints() method to be enforced
+% Update optimisation horizons
 MPC.p = 5;
 MPC.m = 2;
-MPC.Q_S = 2;
+
+% Weights
+Q_V = 10;
+Q_X = 1;
+Q_S = 2;
+Q_CO2 = 0;
+MPC.Q = diag([Q_V, Q_X, Q_S, Q_CO2]);
+
+% Update constraint vectors used by the optimiser
 MPC.constraints();
 
-MPC.dilution = 1e7; % dilution is not allowedl
-
-% Parallel computation can be faster on most machines
-% if not(MPC.optimizer_options.UseParallel)
-%     % setup parallel
-%     c = parcluster('Processes');
-%     delete(c.Jobs)
-%     delete(gcp('nocreate'))
-%     parpool(5, 'IdleTimeout', inf);
-% 
-%     MPC.optimizer_options.UseParallel = true;
-%     MPC.optimizer_options.MaxIterations = 1000;
-% end
+% Penalise slack on the dilution-related term
+MPC.dilution = 1e7;
 
 % To calculate control actions use MPC.solve(x, u) where x and u are row
 % vectors representing the current state and previous action.
@@ -53,40 +47,36 @@ MPC.dilution = 1e7; % dilution is not allowedl
 help MPC.solve
 
 %% Initial conditions
-
-% Duration of the simulation
 tf = 10;                % h
 
-V_0 = 1;
-X_0 = 10;
-S_0 = 0;
+V_0   = 1;
+X_0   = 10;
+S_0   = 0;
 CO2_0 = 0.0049;
-
 x0_plant = [V_0, X_0, S_0, CO2_0];
 
-MPC.Xsp = 20;
-MPC.Vsp = 1;
-MPC.Ssp = 0;
+%% Setpoints
+V_sp   = 1;
+X_sp   = 20;
+S_sp   = 0;
+CO2_sp = 0;
+MPC.xsp = [V_sp, X_sp, S_sp, CO2_sp];
 
-
+%% Initial input
 uk = [0, 0, 0];
 
 nu = length(uk);
 nx = length(x0_plant);
 
 %% Simulation setup
-tspan= [0 dt]; % from t to t+dt, or just 0 to dt because the ODE is time invariant
+tspan = [0 dt];             % integration interval per control step
+N = ceil(tf/dt) + 1;        % number of samples including initial condition
 
-N = ceil(tf/dt) + 1;   % number of time samples + initial condition
-
-% Initialization
 U = zeros(N, nu);
 Y = zeros(N, nx);
-Y_sp = zeros(N, nx - 1); % CO2 is open-loop
-
+Y_sp = zeros(N, nx - 1);    % last state is not tracked here
 
 U(1, :) = uk;
-
 
 opts = odeset('NonNegative', [2 3]);
 
@@ -99,20 +89,18 @@ for i = 1 : N
     Y(i, :) = x0_plant;
 
     %% Calculate control action
-    % Cascade
     Kp = 0.8/par.Y_XS;
-    Ssp = Kp*(MPC.Xsp - x0_plant(2));
+    Ssp = Kp*(MPC.xsp(2) - x0_plant(2));
     Ssp = min([3 Ssp]);
-    MPC.Ssp = Ssp;
+    MPC.xsp(3) = Ssp;
 
-    if x0_plant(2) > MPC.Xsp
-        MPC.dilution = 0; % dilution is allowed
+    if x0_plant(2) > MPC.xsp(2)
+        MPC.dilution = 0;
     else
-        % Toggle slacked contraint
         MPC.dilution = 1e7;
     end
 
-    Y_sp(i,:) = [MPC.Vsp, MPC.Xsp, MPC.Ssp];
+    Y_sp(i,:) = MPC.xsp(1:3);
     uk = MPC.solve(x0_plant(:)', uk(:)');
 
     U(i, :) = uk;
@@ -120,14 +108,9 @@ for i = 1 : N
     fprintf('\nControl action: \n')
     disp(uk)
 
-    %% Apply control action to the process and obtain y k+1
-
-    % Plant
-    [T,y] = ode45(@(t,x) plant(x, uk), tspan, x0_plant, opts);
-
-    %% ---------------------------- k+1 -----------------------------------
+    %% Plant propagation
+    [~, y] = ode45(@(t,x) plant(x, uk), tspan, x0_plant, opts);
     x0_plant = y(end, :);
-
 end
 
 %% Results
@@ -137,44 +120,45 @@ T = 0 : dt : (i-1)*dt;
 figure(1);
 clf
 
-% --- Volume ---
+% --- State 1 ---
 subplot(3,1,1);
 plot(T, Y(1:i,1), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
 plot(T, Y_sp(1:i,1), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
 grid on; box on;
 xlabel('Time (h)');
-ylabel('V (L)');
+ylabel('State 1');
 legend('Location','best');
 hold off;
 
-% --- Biomass concentration ---
+% --- State 2 ---
 subplot(3,1,2);
 plot(T, Y(1:i,2), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
 plot(T, Y_sp(1:i,2), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
 grid on; box on;
 xlabel('Time (h)');
-ylabel('X (g/L)');
+ylabel('State 2');
 legend('Location','best');
 hold off;
 
-% --- Substrate concentration ---
+% --- State 3 ---
 subplot(3,1,3);
 plot(T, Y(1:i,3), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
 plot(T, Y_sp(1:i,3), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
 grid on; box on;
 xlabel('Time (h)');
-ylabel('S (g/L)');
+ylabel('State 3');
 legend('Location','best');
 hold off;
 
-
 ax = findall(gcf, 'type', 'axes');
-
-for i = 1:length(ax)
-    ax(i).FontSize = 15;
-    ax(i).XLabel.FontSize = 15;
-    ax(i).YLabel.FontSize = 15;
+for j = 1:length(ax)
+    ax(j).FontSize = 15;
+    ax(j).XLabel.FontSize = 15;
+    ax(j).YLabel.FontSize = 15;
 end
-%%
+
 figure(2)
 plot(T, U, 'LineWidth',2)
+grid on; box on;
+xlabel('Time (h)');
+ylabel('Inputs');
