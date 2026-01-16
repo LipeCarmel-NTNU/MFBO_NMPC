@@ -1,4 +1,4 @@
-classdef MPC_abstract < handle
+classdef NMPC_abstract < handle
     properties (Abstract)
         %% Set-points
         % Depends on the formulation
@@ -54,7 +54,7 @@ classdef MPC_abstract < handle
 
     methods
         %% Initialization
-        function obj = init(obj, model)
+        function obj = init(obj, model, nx, nu)
             % MPC Constructor to be used by child objects
             %   Initializes the MPC object with the provided model and
             %   builds constraints.
@@ -63,6 +63,8 @@ classdef MPC_abstract < handle
             %       model - System model function handle
 
             obj.model = model;
+            obj.nx = nx;
+            obj.nu = nu;
 
             [obj.wL, obj.wU] = obj.constraints();
 
@@ -98,6 +100,8 @@ classdef MPC_abstract < handle
             % increasing MaxIter)
 
 
+            failed_before = false; % to be checked
+            
             % Use the previous solution as a guess if it is available
             if isempty(obj.latest_wopt)
                 % Solve the first iteration with no information

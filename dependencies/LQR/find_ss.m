@@ -4,7 +4,8 @@ function [xss, uss] = find_ss(V, X, par, model, ode_opt)
     Fin = X * par.Y_XSinv * par.kd / par.Sin; % approximate solution
 
     var = [Fin 0]; % solve ss for Fin and S
-    var_opt = fsolve(@(var) model([V, X, var(2)], [var(1), 0, var(1)]), var);
+    options = optimoptions('fsolve', 'Algorithm','levenberg-marquardt');
+    var_opt = fsolve(@(var) model([V, X, var(2)], [var(1), 0, var(1)]), var, options);
     Fin = var_opt(1);
     S = var_opt(2);
 

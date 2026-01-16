@@ -4,47 +4,47 @@ clear all; close all; clc
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir))
 
+%% Settings
+ode_opt = odeset('NonNegative', [2 3]);
+
 %% Get model parameters
 get_par
 
 %% System sampling rate
-dt = 6/60;
+dt = 3/60;
 
 %% Model definition
-nmpc_model = @(x, u) dilution_Monod_model(0, x, [2, u(:)'], par);
-plant = nmpc_model;
+model = @(x, u) dilution_reduced(0, x, u(:)', par);
+plant = model;
 
 %% MPC definition
 
-% MPC_mono_dilution object requires a 4 x 3 process model to be constructed
-% Default setpoints, tuning parameters, and constraints are predefined.
 % Control actions are subjected to non-negativity constraints.
-MPC = MPC_mono_dilution(nmpc_model);
+nx = 3;
+nu = 3;
+NMPC = NMPC_terminal(model, nx, nu);
+NMPC.optimizer_options.UseParallel = true;
 
 % Sampling time in hours
-MPC.Ts = dt;
+NMPC.Ts = dt;
 
 % Update optimisation horizons
-MPC.p = 5;
-MPC.m = 2;
+NMPC.p = 6+1;
+NMPC.m = 3;
 
 % Weights
 Q_V = 10;
 Q_X = 1;
 Q_S = 2;
-Q_CO2 = 0;
-MPC.Q = diag([Q_V, Q_X, Q_S, Q_CO2]);
+NMPC.Q = diag([Q_V, Q_X, Q_S]);
 
 % Update constraint vectors used by the optimiser
-MPC.constraints();
-
-% Penalise slack on the dilution-related term
-MPC.dilution = 1e7;
+NMPC.constraints();
 
 % To calculate control actions use MPC.solve(x, u) where x and u are row
 % vectors representing the current state and previous action.
 % See:
-help MPC.solve
+help NMPC.solve
 
 %% Initial conditions
 tf = 10;                % h
@@ -52,21 +52,24 @@ tf = 10;                % h
 V_0   = 1;
 X_0   = 10;
 S_0   = 0;
-CO2_0 = 0.0049;
-x0_plant = [V_0, X_0, S_0, CO2_0];
+x0_plant = [V_0, X_0, S_0];
 
 %% Setpoints
 V_sp   = 1;
 X_sp   = 20;
 S_sp   = 0;
-CO2_sp = 0;
-MPC.xsp = [V_sp, X_sp, S_sp, CO2_sp];
+NMPC.xsp = [V_sp, X_sp, S_sp];
 
+lqr_tuning = [-2.8127  0.5583  2.5095  -0.4645  -0.9051];
+[P, K, Ai, Bi, xss, uss] = terminal_P(V_sp, X_sp, par, model, ode_opt, dt, lqr_tuning, NMPC.Q, NMPC.Rdu);
+NMPC.P = P;
 %% Initial input
 uk = [0, 0, 0];
 
 nu = length(uk);
 nx = length(x0_plant);
+NMPC.nx = nx;
+NMPC.nu = nu;
 
 %% Simulation setup
 tspan = [0 dt];             % integration interval per control step
@@ -74,11 +77,10 @@ N = ceil(tf/dt) + 1;        % number of samples including initial condition
 
 U = zeros(N, nu);
 Y = zeros(N, nx);
-Y_sp = zeros(N, nx - 1);    % last state is not tracked here
+Y_sp = zeros(N, nx);
 
 U(1, :) = uk;
 
-opts = odeset('NonNegative', [2 3]);
 
 %% Simulation
 timer = tic;
@@ -89,19 +91,9 @@ for i = 1 : N
     Y(i, :) = x0_plant;
 
     %% Calculate control action
-    Kp = 0.8/par.Y_XS;
-    Ssp = Kp*(MPC.xsp(2) - x0_plant(2));
-    Ssp = min([3 Ssp]);
-    MPC.xsp(3) = Ssp;
 
-    if x0_plant(2) > MPC.xsp(2)
-        MPC.dilution = 0;
-    else
-        MPC.dilution = 1e7;
-    end
-
-    Y_sp(i,:) = MPC.xsp(1:3);
-    uk = MPC.solve(x0_plant(:)', uk(:)');
+    Y_sp(i,:) = NMPC.xsp(1:3);
+    uk = NMPC.solve(x0_plant(:)', uk(:)');
 
     U(i, :) = uk;
 
@@ -109,7 +101,7 @@ for i = 1 : N
     disp(uk)
 
     %% Plant propagation
-    [~, y] = ode45(@(t,x) plant(x, uk), tspan, x0_plant, opts);
+    [~, y] = ode45(@(t,x) plant(x, uk), tspan, x0_plant, ode_opt);
     x0_plant = y(end, :);
 end
 
