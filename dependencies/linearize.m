@@ -8,20 +8,9 @@ function varargout = linearize(xss, uss, model)
 
     nx = length(xss);
     nu = length(uss);
-    
-    X = sym('X',[1 nx]).';
-    U = sym('U',[1 nu]).';
-    
-    % Symbolic ODE
-    if nu > 0
-        dXdt = model(X, U);
-    else
-        dXdt = model(X);
-    end
-    
+
     % Symbolic state space
-    Asym = jacobian(dXdt,X);
-    Bsym = jacobian(dXdt,U);
+    [Asym, Bsym, X, U] = symbolic_ss(model, nx, nu);
     
     % State space
     A = double(subs(Asym, [X; U], [xss'; uss']));
@@ -29,8 +18,9 @@ function varargout = linearize(xss, uss, model)
 
     if nargout == 2
         varargout = {A, B};
-        return 
+        return
     end
+
 
     % Laplace transform
     s = tf('s');
