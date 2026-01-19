@@ -29,7 +29,7 @@ NMPC.optimizer_options.UseParallel = true;
 NMPC.Ts = dt;
 
 % Update optimisation horizons
-NMPC.p = 6+1;
+NMPC.p = 10;
 NMPC.m = 3;
 
 % Weights

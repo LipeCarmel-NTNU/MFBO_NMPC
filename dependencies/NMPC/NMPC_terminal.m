@@ -30,7 +30,6 @@ classdef NMPC_terminal < NMPC_abstract
         wU
 
         %% Integrator and Optimizer
-        min_integrator_step = 0.007;
 
         optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','sqp', ...
                 'MaxFunEvals',Inf, 'MaxIterations', 100, ...
