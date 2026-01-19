@@ -18,7 +18,7 @@ Q_eval  = diag([10 1 1]);
 R1_eval = diag([1 2 1]);       % penalty on absolute input deviation u_k - u_ss
 R2_eval = diag([1 1 1e-1]);    % penalty on delta-u
 
-lqr_tuning = [-1.9567    0.0003    1.3962    0.4969   -0.8722    0.0568    0.1182   -0.0894];
+lqr_tuning = [-1.9980    0.0003    1.4849    0.5267   -0.9742    0.0425    0.1074   -0.1175];
 
 % Terminal matrix for the fixed incremental feedback du = -K z
 [P, K, Ai, Bi, xss, uss, LQR_data] = terminal_P_xu_du( ...

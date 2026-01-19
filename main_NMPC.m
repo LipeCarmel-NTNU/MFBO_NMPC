@@ -11,7 +11,7 @@ ode_opt = odeset('NonNegative', [2 3]);
 get_par
 
 %% System sampling rate
-dt = 3/60;
+dt = 1/60;
 
 %% Model definition
 model = @(x, u) dilution_reduced(0, x, u(:)', par);
