@@ -9,7 +9,7 @@ classdef NMPC_terminal < NMPC_abstract
         m = 6;                          % Control  horizon in steps
 
         Q   = diag([10 1 1])             % State tracking weights (nx x nx)
-        Ru  = diag([1 1 1]);             % Input weights (nu x nu)
+        Ru  = diag([2 2 1]);             % Input weights (nu x nu)
         Rdu = diag([100, 100 10]);       % Input increment weights (nu x nu)
 
         %% System parameters
@@ -31,8 +31,8 @@ classdef NMPC_terminal < NMPC_abstract
 
         %% Integrator and Optimizer
 
-        optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','sqp', ...
-                'MaxFunEvals',Inf, 'MaxIterations', 100, ...
+        optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','interior-point', ...
+                'MaxFunEvals',Inf, 'MaxIterations', 1000, ...
                 'StepTolerance', 1e-9 );
 
         latest_wopt
