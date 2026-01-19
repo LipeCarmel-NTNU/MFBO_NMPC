@@ -29,7 +29,7 @@ NMPC.optimizer_options.UseParallel = true;
 NMPC.Ts = dt;
 
 % Update optimisation horizons
-NMPC.p = 10;
+NMPC.p = 20;
 NMPC.m = 3;
 
 % Weights
@@ -53,14 +53,16 @@ V_0   = 1;
 X_0   = 10;
 S_0   = 0;
 x0_plant = [V_0, X_0, S_0];
+x0_plant = [0.9991   20.0004    0.0005];
 
 %% Setpoints
 V_sp   = 1;
 X_sp   = 20;
-S_sp   = 0;
-NMPC.xsp = [V_sp, X_sp, S_sp];
+[xss, uss] = find_ss(V_sp, X_sp, par, model, ode_opt);
+NMPC.xsp = xss;
+NMPC.usp = uss;
 
-lqr_tuning = [-2.8127  0.5583  2.5095  -0.4645  -0.9051];
+lqr_tuning = [-1.9980    0.0003    1.4849    0.5267   -0.9742    0.0425    0.1074   -0.1175];
 
 %% Terminal cost
 load('LQR_data.mat')
