@@ -22,12 +22,11 @@ R2_eval = diag([1 1 1e-1]);    % penalty on delta-u
 %   log10w = [ q(1:n-1), r1(1:m), r2(1:m) ]
 % where Q = diag([1, 10.^q]), R1 = diag(10.^r1), R2 = diag(10.^r2)
 %
-% For n=3, m=3 this must have length 8.
-% If you want to mimic your previous "only du-penalty" design, choose r1 very small (e.g. -6).
-lqr_tuning = [-2.8127  0.5583,  -6 -6 -6,   2.5095  -0.4645  -0.9051];
+% For nx=3, nu=3 this must have length 8.
+lqr_tuning = [-2.8127  0.5583,  -1 0 -1,   2.5095  -0.4645  -0.9051];
 
 % Terminal matrix for the fixed incremental feedback du = -K z
-[P, K, Ai, Bi, xss, uss] = terminal_P_xu_du( ...
+[P, K, Ai, Bi, xss, uss, LQR_data] = terminal_P_xu_du( ...
     Vsp, Xsp, par, model, ode_opt, Ts, lqr_tuning, Q_eval, R1_eval, R2_eval);
 
 %% Verification by direct simulation (linear incremental closed-loop)
@@ -71,30 +70,23 @@ fprintf('J_P (infinite-horizon) = %.12g\n', J_P);
 fprintf('abs error              = %.3g\n', abs(J_num - J_P));
 fprintf('rel error              = %.3g\n', abs(J_num - J_P)/max(1,abs(J_P)));
 
+save('LQR_data.mat', "LQR_data")
 %% ========================= FUNCTIONS =========================
 
-function [P, K, Ai, Bi, xss, uss] = terminal_P_xu_du( ...
+function [P, K, Ai, Bi, xss, uss, LQR_data] = terminal_P_xu_du( ...
         Vsp, Xsp, par, model, ode_opt, Ts, log10w, Q_eval, R1_eval, R2_eval)
 
     [xss, uss] = find_ss(Vsp, Xsp, par, model, ode_opt);
 
     [A, B] = linearize(xss, uss, model);
-    n = size(A,1);
-    m = size(B,2);
+    [Ai, Bi] = incremental(A,B,Ts);
 
-    sysc = ss(A,B,eye(n),zeros(n,m));
-    sysd = c2d(sysc, Ts, 'zoh');
-    Ad = sysd.A;  Bd = sysd.B;
-
-    % Augmentation with u_{k-1}
-    Ai = [Ad, Bd;
-          zeros(m,n), eye(m)];
-    Bi = [Bd;
-          eye(m)];
+    nx = size(A,1);
+    nu = size(B,2);
 
     % Design incremental LQR gain for stage cost:
     %   x'Qx + u'R1u + du'R2du with u = u_{k-1} + du
-    [K, Qz, R, N] = build_LQR_xu_du(log10w, Ai, Bi, n, m);
+    [K, Qz, R, N] = build_LQR_full(log10w, Ai, Bi, nx, nu);
 
     % Closed-loop for the fixed policy du = -K z
     Acl = Ai - Bi*K;
@@ -102,18 +94,49 @@ function [P, K, Ai, Bi, xss, uss] = terminal_P_xu_du( ...
     % Evaluation quadratic under du = -K z:
     %   x = Sx z
     %   u = (Su - K) z
-    Sx = [eye(n), zeros(n,m)];
-    Su = [zeros(m,n), eye(m)];
+    Sx = [eye(nx), zeros(nx,nu)];
+    Su = [zeros(nu,nx), eye(nu)];
 
-    Qbar = (Sx.'*Q_eval*Sx) ...
-         + (Su - K).'*R1_eval*(Su - K) ...
-         + K.'*R2_eval*K;
+    LQR_data.Sx = Sx;
+    LQR_data.K   = K;
+    LQR_data.Acl = Acl;
+    LQR_data.Su  = Su;
+    P = construct_P(LQR_data, Q_eval, R1_eval, R2_eval);
+end
+
+function [Ai, Bi] = incremental(A,B,Ts)
+    % Assumes C = I, D = 0;
+
+    nx = size(A,1);
+    nu = size(B,2);
+
+    sysc = ss(A,B,eye(nx),zeros(nx,nu));
+    sysd = c2d(sysc, Ts, 'zoh');
+    Ad = sysd.A;  Bd = sysd.B;
+
+    % Augmentation with u_{k-1}
+    Ai = [Ad, Bd;
+          zeros(nu,nx), eye(nu)];
+    Bi = [Bd;
+          eye(nu)];
+end
+
+function P = construct_P(LQR_data, Q, R1, R2)
+
+    Sx  = LQR_data.Sx;
+    Su  = LQR_data.Su;
+    K   = LQR_data.K;
+    Acl = LQR_data.Acl;
+
+    Qbar = (Sx.'*Q*Sx) ...
+         + (Su - K).'*R1*(Su - K) ...
+         + K.'*R2*K;
 
     % Infinite-horizon evaluation matrix
     P = dlyap(Acl', Qbar);
 end
 
-function [K, Qz, R, N] = build_LQR_xu_du(log10w, Ai, Bi, n, m)
+function [K, Qz, R, N] = build_LQR_full(log10w, Ai, Bi, n, m)
     % Stage cost in (z, du):
     %   x'Qx + u'R1u + du'R2du, with u = u_{k-1} + du
     %
@@ -142,5 +165,9 @@ function [K, Qz, R, N] = build_LQR_xu_du(log10w, Ai, Bi, n, m)
     N  = [zeros(n,m);
           R1];
 
-    K = dlqr(Ai, Bi, Qz, R, N);
+    try
+        K = dlqr(Ai, Bi, Qz, R, N);
+    catch ME
+        throw(ME)
+    end
 end

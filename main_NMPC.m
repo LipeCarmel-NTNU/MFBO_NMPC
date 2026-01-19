@@ -61,8 +61,12 @@ S_sp   = 0;
 NMPC.xsp = [V_sp, X_sp, S_sp];
 
 lqr_tuning = [-2.8127  0.5583  2.5095  -0.4645  -0.9051];
-[P, K, Ai, Bi, xss, uss] = terminal_P(V_sp, X_sp, par, model, ode_opt, dt, lqr_tuning, NMPC.Q, NMPC.Rdu);
+
+%% Terminal cost
+load('LQR_data.mat')
+P = construct_P(LQR_data, NMPC.Q, NMPC.Ru, NMPC.Rdu);
 NMPC.P = P;
+
 %% Initial input
 uk = [0, 0, 0];
 
@@ -154,3 +158,19 @@ plot(T, U, 'LineWidth',2)
 grid on; box on;
 xlabel('Time (h)');
 ylabel('Inputs');
+
+
+function P = construct_P(LQR_data, Q, R1, R2)
+
+    Sx  = LQR_data.Sx;
+    Su  = LQR_data.Su;
+    K   = LQR_data.K;
+    Acl = LQR_data.Acl;
+
+    Qbar = (Sx.'*Q*Sx) ...
+         + (Su - K).'*R1*(Su - K) ...
+         + K.'*R2*K;
+
+    % Infinite-horizon evaluation matrix
+    P = dlyap(Acl', Qbar);
+end
