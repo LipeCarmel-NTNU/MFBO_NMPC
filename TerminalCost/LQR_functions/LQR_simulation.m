@@ -48,7 +48,6 @@ function [Y, T, U] = LQR_simulation(system, Ts, Tf, y0, K, yss, uss, ode_opt)
 
         % Update state/time
         y_current = y_span(end,:).';
-        y_current(y_current < 0) = 0;  % keep your non-negativity safeguard
         t_current = t_span(end);
 
         % Store

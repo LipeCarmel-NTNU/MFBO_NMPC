@@ -7,7 +7,7 @@ model   = @(x, u) dilution_reduced(0, x, u, par);
 ode_opt = odeset('NonNegative', 2:3, 'RelTol', 1e-3, 'AbsTol', 1e-3);
 
 % optimal tuning (log10w = [q(1:nx-1), r1(1:nu), r2(1:nu)])
-lqr_tuning = [-1.9567    0.0003    1.3962    0.4969   -0.8722    0.0568    0.1182   -0.0894];
+lqr_tuning = [-1.9980    0.0003    1.4849    0.5267   -0.9742    0.0425    0.1074   -0.1175];
 
 % Simulation settings
 Ts = 1/60;
@@ -15,7 +15,7 @@ Tf = 40;
 
 % Monte Carlo settings
 N_lin = 100;      % number of random linearisation points (random steady states)
-N_ic  = 3;       % number of random initial conditions per linearisation
+N_ic  = 20;       % number of random initial conditions per linearisation
 dev_frac = 0.50;  % up to 50% deviation from steady-state (non-negative)
 
 % Nominal ranges for random operating points
@@ -153,7 +153,11 @@ fprintf('SSE: mean = %.4g, median = %.4g, min = %.4g, max = %.4g\n', ...
 
 % Count of runs where e2(1) > e2(end)
 dec_mask = not(E1_gt_End & valid);
-fprintf('Runs with e^2(1) <= e^2(end): %d / %d\n', nnz(dec_mask), n_valid);
+nonzero = nnz(dec_mask);
+fprintf('Runs with e^2(1) <= e^2(end): %d / %d\n', nonzero, n_valid);
+if nonzero > 0
+    warning('Found e^2(1) > e^2(end)')
+end
 
 %% ---- helper: sample initial condition with bounded deviation and non-negativity
 function x0 = sample_ic_nonneg(xss, frac)
@@ -167,42 +171,4 @@ function x0 = sample_ic_nonneg(xss, frac)
 
     x0 = lb + (ub - lb).*rand(size(xss));
     x0 = max(x0, 0);
-end
-
-function [Ai, Bi] = incremental(A,B,Ts)
-    nx = size(A,1);
-    nu = size(B,2);
-
-    sysc = ss(A,B,eye(nx),zeros(nx,nu));
-    sysd = c2d(sysc, Ts, 'zoh');
-    Ad = sysd.A;  Bd = sysd.B;
-
-    Ai = [Ad, Bd;
-          zeros(nu,nx), eye(nu)];
-    Bi = [Bd;
-          eye(nu)];
-end
-
-function K = build_LQR_full(log10w, Ai, Bi, nx, nu)
-    w = 10.^log10w(:);
-
-    nq = nx - 1;
-    if numel(w) ~= (nq + 2*nu)
-        error('log10w must have length (n-1)+2m = %d (got %d).', nq + 2*nu, numel(w));
-    end
-
-    q  = w(1:nq);
-    r1 = w(nq + (1:nu));
-    r2 = w(nq + nu + (1:nu));
-
-    Q  = diag([1; q(:)]);
-    R1 = diag(r1(:));
-    R2 = diag(r2(:));
-
-    Qz = blkdiag(Q, R1);
-    R  = R1 + R2;
-    N  = [zeros(nx,nu);
-          R1];
-
-    K = dlqr(Ai, Bi, Qz, R, N);
 end
