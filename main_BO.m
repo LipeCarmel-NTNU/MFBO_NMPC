@@ -95,7 +95,7 @@ function out = nmpc_eval_theta(base, theta)
 
         Y      = zeros(base.N, base.nx);
         Y_meas = zeros(base.N, base.nx);
-        Y_sp   = repmat(NMPC.xsp(1:base.nx), base.N, 1);
+        Ysp   = repmat(NMPC.xsp(1:base.nx), base.N, 1);
         U      = zeros(base.N, base.nu);
 
         timer = tic;
@@ -116,7 +116,8 @@ function out = nmpc_eval_theta(base, theta)
         end
         runtime_s = toc(timer);
 
-        E = Y - Y_sp;
+        E = Y - Ysp;
+        E = E.*[10 1 1];
         SSE = sum(E(:).^2);
 
         dU  = diff(U, 1, 1);
@@ -129,7 +130,7 @@ function out = nmpc_eval_theta(base, theta)
 
         out.case(case_id).Y          = Y;
         out.case(case_id).Y_meas     = Y_meas;
-        out.case(case_id).Y_sp       = Y_sp;
+        out.case(case_id).Ysp       = Ysp;
         out.case(case_id).U          = U;
 
         out.case(case_id).noise      = base.noise;
