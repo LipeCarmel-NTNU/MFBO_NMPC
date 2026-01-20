@@ -61,8 +61,6 @@ X_sp   = 20;
 NMPC.xsp = xss;
 NMPC.usp = uss;
 
-lqr_tuning = [-1.9980    0.0003    1.4849    0.5267   -0.9742    0.0425    0.1074   -0.1175];
-
 %% Terminal cost
 load('LQR_data.mat')
 P = construct_P(LQR_data, NMPC.Q, NMPC.Ru, NMPC.Rdu);
@@ -161,17 +159,3 @@ xlabel('Time (h)');
 ylabel('Inputs');
 
 
-function P = construct_P(LQR_data, Q, R1, R2)
-
-    Sx  = LQR_data.Sx;
-    Su  = LQR_data.Su;
-    K   = LQR_data.K;
-    Acl = LQR_data.Acl;
-
-    Qbar = (Sx.'*Q*Sx) ...
-         + (Su - K).'*R1*(Su - K) ...
-         + K.'*R2*K;
-
-    % Infinite-horizon evaluation matrix
-    P = dlyap(Acl', Qbar);
-end
