@@ -1,4 +1,4 @@
-classdef NMPC_terminal < NMPC_abstract
+classdef NMPC_terminal < NMPC_abstract_scaled
     properties
         %% Set-points
         xsp = [1 5 1 0]                 % Setpoint for states (1 x nx)
@@ -31,9 +31,11 @@ classdef NMPC_terminal < NMPC_abstract
 
         %% Integrator and Optimizer
 
-        optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','interior-point', ...
+        optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','sqp', ...
                 'MaxFunEvals',Inf, 'MaxIterations', 1000, ...
-                'StepTolerance', 1e-9 );
+                'StepTolerance', 1e-9, ...
+                'OptimalityTolerance',1e-6,...
+                'ScaleProblem', true);
 
         latest_wopt
 
