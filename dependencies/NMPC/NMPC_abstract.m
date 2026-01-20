@@ -122,7 +122,7 @@ classdef NMPC_abstract < handle
 
                 % Moving horizon
                 u = [u(2:end, :); u(end, :)]; % if m=1 u(2:end, :) return a 0 x nu empty vector
-
+                
                 % Ensure continuity
                 w0 = guess_from_initial(obj, x_init, u);
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
@@ -392,6 +392,7 @@ classdef NMPC_abstract < handle
             [x, u] = data_from_w(obj, w0);
 
             % Solve again with a built-in solver
+            opts = odeset('Nonnegative', 1:obj.nx);
             x_ode = x;
             for i = 1 : obj.p
                 % Current state is the initial condition
@@ -399,7 +400,7 @@ classdef NMPC_abstract < handle
                 if i <= obj.m
                     uk = u(i,:);
                 end
-                [~, y] = ode45(@(t,x) obj.model(x,uk), [0 obj.Ts], x0);
+                [~, y] = ode45(@(t,x) obj.model(x,uk), [0 obj.Ts], x0, opts);
                 % Save next state (next initial condition)
                 x_ode(i+1, :) = y(end,:);
             end

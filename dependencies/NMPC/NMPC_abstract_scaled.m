@@ -38,12 +38,12 @@ classdef NMPC_abstract_scaled < NMPC_abstract
                 @(ws) obj.confun_scaled(ws, x_init), ...
                 obj.optimizer_options);
 
+            wopt = obj.unscale_w(wopts);
             if exitflag >= 0
-                obj.latest_wopt = wopts;
+                obj.latest_wopt = wopt;
             end
             obj.latest_flag = exitflag;
 
-            wopt = obj.unscale_w(wopts);
             [x, u] = obj.data_from_w(wopt);
             obj.validate(false, x, u);
             uk = u(1, :);
