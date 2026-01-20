@@ -1,12 +1,336 @@
 clear all; close all; clc;
 
 rng(1)
-theta = [3 2 1 0 0.3 0.3 0.3 0 2 2 1];
-base = nmpc_init_base([0.001 0.1 0.1]);   % one-time
 
-out1 = nmpc_eval_theta(base, theta);
+p = gcp('nocreate');
+if isempty(p) || p.NumWorkers ~= 8
+    if ~isempty(p)
+        delete(p);
+    end
+    parpool('local', 8);
+end
+
+% =========================================================================
+% Runtime mode
+%   mode = "external"  -> theta is read from a txt file (polled)
+%   mode = "doe"       -> theta is taken from a predefined matrix
+% =========================================================================
+cfg_run = struct();
+cfg_run.mode              = "doe";                 % "external" | "doe"
+cfg_run.theta_txt         = fullfile("inbox","theta.txt");
+cfg_run.poll_s            = 2.0;                        % pause between polls if theta is stale
+cfg_run.results_txt       = fullfile("results","results.txt");
+cfg_run.out_dir           = fullfile("results");        % saves results/out_<timestamp>.mat
+cfg_run.sigma_y           = [0.001 0.1 0.1];
+
+% DOE matrix: each row is one theta (only used when cfg_run.mode == "doe")
+ThetaDOE = theta_doe_generator();
+cfg_run.ThetaDOE = ThetaDOE;
+
+% One-time initialisation (shared across all theta evaluations)
+base = nmpc_init_base(cfg_run.sigma_y);
+
+% Ensure output locations exist
+ensure_parent_dir(cfg_run.results_txt);
+ensure_dir(cfg_run.out_dir);
+
+% Initialise results header if missing
+init_results_txt(cfg_run.results_txt);
+
+switch cfg_run.mode
+    case "external"
+        run_external_theta_loop(cfg_run, base);
+
+    case "doe"
+        run_doe(cfg_run, base);
+
+    otherwise
+        error('Unknown mode "%s". Use "external" or "doe".', cfg_run.mode);
+end
+
+%% FUNCTIONS
+
+% Main run and save method
+function [] = run_and_log(base, theta)
+        ts = timestamp_utc_compact();
+
+        out = nmpc_eval_theta(base, theta);
+
+        [J_sum, runtime_sum] = summarise_out(out);
+
+        append_results_row(cfg_run.results_txt, ts, theta, J_sum, runtime_sum);
+
+        mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
+        save(mat_path, "out", "theta", "ts", "J_sum", "runtime_sum");
+end
+
+% =========================================================================
+% External theta mode
+% =========================================================================
+function run_external_theta_loop(cfg_run, base)
+%RUN_EXTERNAL_THETA_LOOP Poll for theta, evaluate when updated, log results.
+
+    last_signature = "";
+    while true
+        [theta, signature, ok] = read_theta_from_txt(cfg_run.theta_txt);
+
+        if ~ok || signature == last_signature
+            pause(cfg_run.poll_s);
+            continue
+        end
+
+        last_signature = signature;
+        run_and_log(base, theta)
+
+    end
+end
 
 
+% =========================================================================
+% DOE mode
+% =========================================================================
+function run_doe(cfg_run, base)
+%RUN_DOE Evaluate all rows in ThetaDOE and log results.
+
+    Theta = cfg_run.ThetaDOE;
+    if isempty(Theta)
+        error("ThetaDOE is empty.");
+    end
+
+    for i = 1:size(Theta,1)
+        theta = Theta(i,:);
+        run_and_log(base, theta)
+    end
+end
+function ThetaDOE = theta_doe_generator()
+%THETA_DOE_GENERATOR Generate a DOE matrix of theta vectors.
+%
+% theta layout:
+%   theta = [theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)]
+%
+% Horizons:
+%   m = theta_m + 1
+%   p = theta_p + m
+%
+% Inputs:
+%   nx, nu  - dimensions (expected nx=3, nu=3 for the presets below)
+%
+% Output:
+%   ThetaDOE - (Ntheta x (2 + nx + 2*nu)) matrix
+
+    nx = 3;
+    nu = 3;
+
+    % -----------------------------
+    % Baseline (known good) weights
+    % -----------------------------
+    q0   = [10 1 1];       % Q = diag(q0)
+    ru0  = [2 2 1];        % Ru = diag(ru0)
+    rdu0 = [100 100 10];   % Rdu = diag(rdu0)
+
+    % -----------------------------
+    % Variants (normal units)
+    % Q variants: baseline, Q2*2, Q3*2
+    %   Interpreted as doubling the 2nd or 3rd diagonal element only.
+    % -----------------------------
+    Qdiag_set = [
+        q0
+        q0 .* [1 2 1]
+        q0 .* [1 1 2]
+    ];
+
+    % Rdu variants: baseline, +1 decade, -1 decade (x10, /10)
+    Rdu_diag_set = [
+        rdu0
+        10*rdu0
+        0.1*rdu0
+    ];
+
+    % Horizons
+    m_set = [1 2 3 6 12];
+    p_set = [20 30];
+
+    % -----------------------------
+    % Enumerate all combinations
+    % -----------------------------
+    nQ   = size(Qdiag_set, 1);
+    nRdu = size(Rdu_diag_set, 1);
+    nm   = numel(m_set);
+    np   = numel(p_set);
+
+    Ntheta = nQ * nRdu * nm * np;
+    ThetaDOE = zeros(Ntheta, 2 + nx + 2*nu);
+
+    row = 0;
+    for iQ = 1:nQ
+        q = Qdiag_set(iQ,:);
+
+        for iRdu = 1:nRdu
+            rdu = Rdu_diag_set(iRdu,:);
+
+            for im = 1:nm
+                m = m_set(im);
+
+                for ip = 1:np
+                    p = p_set(ip);
+
+                    if p < m
+                        error("Invalid horizons: p (%d) < m (%d).", p, m);
+                    end
+
+                    theta_m = m - 1;
+                    theta_p = p - m;
+
+                    row = row + 1;
+                    ThetaDOE(row,:) = [
+                        theta_p, ...
+                        theta_m, ...
+                        log10(q), ...
+                        log10(ru0), ...
+                        log10(rdu)
+                    ];
+                end
+            end
+        end
+    end
+end
+
+
+
+
+
+% =========================================================================
+% Logging / IO helpers
+% =========================================================================
+function init_results_txt(results_txt)
+%INIT_RESULTS_TXT Create file with header if it does not exist.
+
+    if isfile(results_txt)
+        return
+    end
+
+    fid = fopen(results_txt, "w");
+    if fid < 0
+        error("Could not open results file for writing: %s", results_txt);
+    end
+
+    % CSV-like, robust for later parsing:
+    % timestamp, J_sum, runtime_sum, theta_1, ..., theta_n
+    fprintf(fid, "timestamp_utc,J_sum,runtime_sum_s,theta\n");
+    fclose(fid);
+end
+
+
+function append_results_row(results_txt, ts, theta, J_sum, runtime_sum)
+%APPEND_RESULTS_ROW Append one row: timestamp, aggregated cost/runtime, theta.
+
+    fid = fopen(results_txt, "a");
+    if fid < 0
+        error("Could not open results file for appending: %s", results_txt);
+    end
+
+    theta_str = sprintf("%.17g ", theta(:));
+    theta_str = strtrim(theta_str);
+
+    fprintf(fid, "%s,%.17g,%.17g,%s\n", ts, J_sum, runtime_sum, theta_str);
+    fclose(fid);
+end
+
+
+function [theta, signature, ok] = read_theta_from_txt(theta_txt)
+%READ_THETA_FROM_TXT Read theta from a text file.
+%
+% Expected format:
+%   - Either a single line with whitespace-separated numbers
+%   - Or multiple lines, where the last non-empty line contains theta
+
+    theta = [];
+    signature = "";
+    ok = false;
+
+    if ~isfile(theta_txt)
+        return
+    end
+
+    try
+        raw = fileread(theta_txt);
+    catch
+        return
+    end
+
+    lines = splitlines(string(raw));
+    lines = strip(lines);
+    lines = lines(lines ~= "");
+
+    if isempty(lines)
+        return
+    end
+
+    last_line = lines(end);
+    vals = sscanf(last_line, "%f").';
+    if isempty(vals)
+        return
+    end
+
+    theta = vals;
+    signature = compute_signature(theta_txt, last_line);
+    ok = true;
+end
+
+
+function sig = compute_signature(theta_txt, last_line)
+%COMPUTE_SIGNATURE Use last modified time + content to detect staleness.
+
+    d = dir(theta_txt);
+    if isempty(d)
+        sig = "missing";
+        return
+    end
+
+    % A stable signature: timestamp of file + the last line content
+    sig = string(d.datenum) + "|" + string(last_line);
+end
+
+
+function ts = timestamp_utc_compact()
+%TIMESTAMP_UTC_COMPACT Timestamp for filenames and logging.
+% Format: YYYYmmddTHHMMSSfffZ
+
+    t = datetime("now","TimeZone","UTC");
+    ts = char(datestr(t, "yyyymmdd'T'HHMMSSFFF'Z'"));
+end
+
+
+function [J_sum, runtime_sum] = summarise_out(out)
+%SUMMARISE_OUT Aggregate both cases.
+
+    J_sum = out.case(1).cost_total + out.case(2).cost_total;
+    runtime_sum = out.case(1).runtime_s + out.case(2).runtime_s;
+end
+
+
+function ensure_dir(p)
+%ENSURE_DIR Create directory if needed.
+
+    if ~isfolder(p)
+        mkdir(p);
+    end
+end
+
+
+function ensure_parent_dir(filepath)
+%ENSURE_PARENT_DIR Create parent directory if needed.
+
+    [parent,~,~] = fileparts(filepath);
+    if parent ~= "" && ~isfolder(parent)
+        mkdir(parent);
+    end
+end
+
+
+% =========================================================================
+% NMPC code (unchanged numerics, but now reusable from both modes)
+% =========================================================================
 function base = nmpc_init_base(sigma_y)
 %NMPC_INIT_BASE One-time initialisation shared across all theta evaluations.
 
@@ -14,7 +338,7 @@ function base = nmpc_init_base(sigma_y)
         sigma_y = [0.001 0.1 0.1];
     end
 
-    tf = 1;
+    tf = 10;
 
     current_dir = fileparts(mfilename('fullpath'));
     addpath(genpath(current_dir))
@@ -95,12 +419,12 @@ function out = nmpc_eval_theta(base, theta)
 
         Y      = zeros(base.N, base.nx);
         Y_meas = zeros(base.N, base.nx);
-        Ysp   = repmat(NMPC.xsp(1:base.nx), base.N, 1);
+        Ysp    = repmat(NMPC.xsp(1:base.nx), base.N, 1);
         U      = zeros(base.N, base.nu);
 
-        timer = tic;
         xk = x0;
 
+        timer = tic;
         for i = 1:base.N
             Y(i,:) = xk;
 
@@ -113,6 +437,16 @@ function out = nmpc_eval_theta(base, theta)
 
             [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
             xk = y(end,:);
+            
+            % Run time
+            elapsed_s = toc(timer);
+            elapsed_min = elapsed_s/60;
+            progress    = i/base.N;
+            total_min   = elapsed_min/max(progress, eps);
+            remaining_min = total_min - elapsed_min;
+            
+            fprintf('Case %d: %.1f %% | elapsed %.2f min | total %.2f min | left %.2f min\n', ...
+                    case_id, 100*progress, elapsed_min, total_min, remaining_min);
         end
         runtime_s = toc(timer);
 
@@ -130,7 +464,7 @@ function out = nmpc_eval_theta(base, theta)
 
         out.case(case_id).Y          = Y;
         out.case(case_id).Y_meas     = Y_meas;
-        out.case(case_id).Ysp       = Ysp;
+        out.case(case_id).Ysp        = Ysp;
         out.case(case_id).U          = U;
 
         out.case(case_id).noise      = base.noise;
@@ -172,18 +506,4 @@ function cfg = decode_theta(theta, nx, nu)
     cfg.Q   = diag(10.^q_exp);
     cfg.Ru  = diag(10.^ru_exp);
     cfg.Rdu = diag(10.^rdu_exp);
-end
-
-
-function P = construct_P(LQR_data, Q, R1, R2)
-    Sx  = LQR_data.Sx;
-    Su  = LQR_data.Su;
-    K   = LQR_data.K;
-    Acl = LQR_data.Acl;
-
-    Qbar = (Sx.'*Q*Sx) ...
-         + (Su - K).'*R1*(Su - K) ...
-         + K.'*R2*K;
-
-    P = dlyap(Acl', Qbar);
 end

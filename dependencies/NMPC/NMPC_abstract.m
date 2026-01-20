@@ -394,6 +394,7 @@ classdef NMPC_abstract < handle
             % Solve again with a built-in solver
             opts = odeset('Nonnegative', 1:obj.nx);
             x_ode = x;
+            x_ode(x_ode < 0) = 0;
             for i = 1 : obj.p
                 % Current state is the initial condition
                 x0 = x_ode(i, :);
