@@ -386,6 +386,7 @@ function out = nmpc_eval_theta(base, theta)
     cfg = decode_theta(theta, base.nx, base.nu);
 
     NMPC = NMPC_terminal(base.model, base.nx, base.nu);
+    NMPC.optimizer_options.MaxIterations = 1;    
     NMPC.optimizer_options.UseParallel = true;
 
     NMPC.Ts  = base.dt;
@@ -431,9 +432,14 @@ function out = nmpc_eval_theta(base, theta)
             yk_meas = xk + base.noise(i,:);
             yk_meas(yk_meas < 0) = 0;
             Y_meas(i,:) = yk_meas;
-
             uk = NMPC.solve(yk_meas(:)', uk(:)');
             U(i,:) = uk;
+
+            fprintf('\nMeasurement: \n')
+            disp(yk_meas)
+
+            fprintf('\nControl action: \n')
+            disp(uk)
 
             [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
             xk = y(end,:);

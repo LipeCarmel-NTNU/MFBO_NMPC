@@ -45,7 +45,9 @@ classdef NMPC_abstract_scaled < NMPC_abstract
             obj.latest_flag = exitflag;
 
             [x, u] = obj.data_from_w(wopt);
-            obj.validate(false, x, u);
+            if obj.real_time_validation
+                obj.validate(obj.quiet_validation, x, u);
+            end
             uk = u(1, :);
         end
 

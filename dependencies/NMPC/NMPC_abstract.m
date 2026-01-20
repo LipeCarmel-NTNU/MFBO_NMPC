@@ -42,6 +42,8 @@ classdef NMPC_abstract < handle
 
     properties
         latest_flag = NaN
+        real_time_validation = false
+        quiet_validation = false
     end
 
     properties (Dependent)
@@ -138,7 +140,9 @@ classdef NMPC_abstract < handle
                 % Retry
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
             end
-            if obj.latest_flag < 1
+            if obj.latest_flag < 0
+                % Note that max iter is ok for most pratical cases and
+                % better than the moving horizon control action
                 if failed_before
                     warning('MPC - FAILED TWICE')
                     uk = zeros(1, obj.nu);
@@ -177,7 +181,9 @@ classdef NMPC_abstract < handle
 
             % Extract states and controls
             [x, u] = obj.data_from_w(wopt);
-            obj.validate(false, x, u);
+            if obj.real_time_validation
+                obj.validate(obj.quiet_validation, x, u);
+            end
             uk = u(1, :);
         end
 
