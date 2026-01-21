@@ -70,7 +70,9 @@ end
 % External theta mode
 % =========================================================================
 function run_external_theta_loop(cfg_run, base)
+
     %RUN_EXTERNAL_THETA_LOOP Poll for theta, evaluate when updated, log results.
+    unlock = @() exist('.lock','file')==2 && delete('.lock');
 
     last_signature = "";
     while true
@@ -79,7 +81,9 @@ function run_external_theta_loop(cfg_run, base)
         if ~ok
             warning('Failed to read theta')
             pause(cfg_run.poll_s);
+            continue
         end
+
         if signature == last_signature
             disp('Stale theta signature')
             pause(cfg_run.poll_s);
@@ -87,10 +91,25 @@ function run_external_theta_loop(cfg_run, base)
         end
 
         last_signature = signature;
-        run_and_log(cfg_run, base, theta)
 
+        fid = fopen('.lock','w');
+        if fid < 0
+            warning('Failed to create .lock (pwd = %s)', pwd);
+            keyboard
+        end
+        fclose(fid);
+
+        try
+            run_and_log(cfg_run, base, theta);
+        catch ME
+            unlock();
+            rethrow(ME);
+        end
+
+        unlock();
     end
 end
+
 
 
 % =========================================================================
@@ -262,6 +281,12 @@ end
 % =========================================================================
 % Logging / IO helpers
 % =========================================================================
+function delete_if_exists(p)
+    if exist(p,'file') == 2
+        delete(p);
+    end
+end
+
 function init_results_txt(results_txt, theta_len)
     %INIT_RESULTS_TXT Create CSV file with header if it does not exist.
 
@@ -517,9 +542,9 @@ function out = nmpc_eval_theta(base, theta)
         SSE = sum(E(:).^2);
 
         dU  = diff(U, 1, 1);
-        SSR = sum(dU(:).^2);
+        SSdU = sum(dU(:).^2);
 
-        J = SSE + 1e4 * SSR;
+        J = SSE + 1e4 * SSdU;
 
         out.case(case_id).case_id    = case_id;
         out.case(case_id).x0         = x0;
@@ -533,11 +558,12 @@ function out = nmpc_eval_theta(base, theta)
         out.case(case_id).dt         = base.dt;
 
         out.case(case_id).cost_total = J;
-        out.case(case_id).cost_SSE   = SSE;
-        out.case(case_id).cost_SSR   = SSR;
+        out.case(case_id).SSE   = SSE;
+        out.case(case_id).SSdU   = SSdU;
 
         out.case(case_id).runtime_s  = runtime_s;
     end
+    
 end
 
 
