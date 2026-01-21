@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Iterable, Sequence
 import time
@@ -10,6 +11,7 @@ import time
 BASE_DIR = Path(__file__).resolve().parent
 LOCK_FILE = BASE_DIR / "matlab.lock"
 THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
+RESULTS_FILE = BASE_DIR / "results" / "results.csv"
 
 
 def _is_integer_value(value: object) -> bool:
@@ -97,3 +99,42 @@ def write_theta(theta: Sequence[float]) -> None:
     with THETA_FILE.open("w", encoding="ascii") as fh:
         fh.write(" ".join(str(value) for value in theta))
         fh.write("\n")
+
+
+def read_results() -> tuple[list[float], list[float], list[float], list[float], list[list[float]]]:
+    """Read optimization results ensuring lock coordination."""
+
+    while LOCK_FILE.exists():
+        time.sleep(5)
+
+    if not RESULTS_FILE.exists():
+        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
+
+    sse: list[float] = []
+    ssd_u: list[float] = []
+    cost: list[float] = []
+    runtime: list[float] = []
+    theta_matrix: list[list[float]] = []
+
+    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
+        reader = csv.DictReader(fh)
+        required_columns = [
+            "SSE",
+            "SSdU",
+            "J",
+            "runtime_s",
+            *[f"theta_{i}" for i in range(1, 13)],
+        ]
+        missing = [column for column in required_columns if column not in reader.fieldnames]
+        if missing:
+            raise ValueError(f"Results CSV missing columns: {', '.join(missing)}")
+
+        for row in reader:
+            sse.append(float(row["SSE"]))
+            ssd_u.append(float(row["SSdU"]))
+            cost.append(float(row["J"]))
+            runtime.append(float(row["runtime_s"]))
+            theta_row = [float(row[f"theta_{i}"]) for i in range(1, 13)]
+            theta_matrix.append(theta_row)
+
+    return sse, ssd_u, cost, runtime, theta_matrix

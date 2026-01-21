@@ -168,7 +168,8 @@ function ThetaDOE = theta_doe_generator_v2()
     nx = 3;
     nu = 3;
 
-    max_iter_set = [5 10 20 40 100 300];
+    %max_iter_set = [5 10 20 40 100 300];
+    max_iter_set = [20];
 
     q0   = [10 1 1];
     ru0  = [2 2 1];
@@ -181,7 +182,7 @@ function ThetaDOE = theta_doe_generator_v2()
     m_nom = 6;
 
     Qdiag_A = [
-        q0
+        % q0
         q0 .* [2 1 1]
         q0 .* [1 2 1]
         q0 .* [1 1 2]
@@ -189,7 +190,7 @@ function ThetaDOE = theta_doe_generator_v2()
 
     Rdu_A = [
         rdu0
-        10*rdu0
+        %10*rdu0
     ];
 
     nA = numel(max_iter_set) * size(Qdiag_A,1) * size(Rdu_A,1);
@@ -197,8 +198,11 @@ function ThetaDOE = theta_doe_generator_v2()
     % -----------------------------
     % Block B: horizon sweep with nominal weights only
     % -----------------------------
-    m_set = [1 2 3 6 12];
-    p_set = [5 10 20 30];
+
+    % m_set = [1 2 3 6 12];
+    % p_set = [5 10 20 30];
+    m_set = [1 2 3 4];
+    p_set = [5 10 20];
 
     n_valid = 0;
     for im = m_set
