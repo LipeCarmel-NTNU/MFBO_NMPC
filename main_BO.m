@@ -2,6 +2,7 @@ clear all; close all; clc;
 
 rng(1)
 
+% Do once at the start
 p = gcp('nocreate');
 if isempty(p) || p.NumWorkers ~= 8
     if ~isempty(p)
@@ -19,7 +20,7 @@ cfg_run = struct();
 cfg_run.mode              = "doe";                 % "external" | "doe"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
 cfg_run.poll_s            = 2.0;                        % pause between polls if theta is stale
-cfg_run.results_txt       = fullfile("results","results.txt");
+cfg_run.results_txt       = fullfile("results","results.csv");   % <- CSV
 cfg_run.out_dir           = fullfile("results");        % saves results/out_<timestamp>.mat
 cfg_run.sigma_y           = [0.001 0.1 0.1];
 
@@ -34,8 +35,9 @@ base = nmpc_init_base(cfg_run.sigma_y);
 ensure_parent_dir(cfg_run.results_txt);
 ensure_dir(cfg_run.out_dir);
 
-% Initialise results header if missing
-init_results_txt(cfg_run.results_txt);
+% Initialise results header if missing (true CSV header)
+theta_len = 1 + 2 + base.nx + 2*base.nu;
+init_results_txt(cfg_run.results_txt, theta_len);
 
 switch cfg_run.mode
     case "external"
@@ -277,20 +279,14 @@ function ThetaDOE = theta_doe_generator()
 
     % -----------------------------
     % Variants (normal units)
-    % Q variants: baseline, Q2*2, Q3*2
-    %   Interpreted as doubling the 2nd or 3rd diagonal element only.
     % -----------------------------
     Qdiag_set = [
         q0
-        % q0 .* [1 2 1]
-        % q0 .* [1 1 2]
         ];
 
-    % Rdu variants: baseline, +1 decade, -1 decade (x10, /10)
     Rdu_diag_set = [
         rdu0
         10*rdu0
-        % 0.1*rdu0
         ];
 
     % Horizons
@@ -317,11 +313,8 @@ function ThetaDOE = theta_doe_generator()
 
             for imax_iter = max_iter_set
                 for im = m_set
-
                     for ip = p_set
-
                         if ip > im
-
                             theta_m = im - 1;
                             theta_p = ip - im;
 
@@ -349,8 +342,8 @@ end
 % =========================================================================
 % Logging / IO helpers
 % =========================================================================
-function init_results_txt(results_txt)
-    %INIT_RESULTS_TXT Create file with header if it does not exist.
+function init_results_txt(results_txt, theta_len)
+    %INIT_RESULTS_TXT Create CSV file with header if it does not exist.
 
     if isfile(results_txt)
         return
@@ -361,35 +354,37 @@ function init_results_txt(results_txt)
         error("Could not open results file for writing: %s", results_txt);
     end
 
-    % CSV-like, robust for later parsing:
-    % timestamp, J_sum, runtime_sum, theta_1, ..., theta_n
-    fprintf(fid, "timestamp_utc,J_sum,runtime_sum_s,theta\n");
+    fprintf(fid, "timestamp_utc,J_sum,runtime_sum_s");
+    for k = 1:theta_len
+        fprintf(fid, ",theta_%d", k);
+    end
+    fprintf(fid, "\n");
     fclose(fid);
 end
 
 
 function append_results_row(results_txt, ts, theta, J_sum, runtime_sum)
-    %APPEND_RESULTS_ROW Append one row: timestamp, aggregated cost/runtime, theta.
+    %APPEND_RESULTS_ROW Append one row: timestamp, aggregated cost/runtime, theta_1..theta_n
 
     fid = fopen(results_txt, "a");
     if fid < 0
         error("Could not open results file for appending: %s", results_txt);
     end
 
-    theta_str = sprintf("%.17g ", theta(:));
-    theta_str = strtrim(theta_str);
+    fprintf(fid, "%s,%.17g,%.17g", ts, J_sum, runtime_sum);
 
-    fprintf(fid, "%s,%.17g,%.17g,%s\n", ts, J_sum, runtime_sum, theta_str);
+    theta = theta(:).';
+    for k = 1:numel(theta)
+        fprintf(fid, ",%.17g", theta(k));
+    end
+    fprintf(fid, "\n");
+
     fclose(fid);
 end
 
 
 function [theta, signature, ok] = read_theta_from_txt(theta_txt)
     %READ_THETA_FROM_TXT Read theta from a text file.
-    %
-    % Expected format:
-    %   - Either a single line with whitespace-separated numbers
-    %   - Or multiple lines, where the last non-empty line contains theta
 
     theta = [];
     signature = "";
@@ -434,7 +429,6 @@ function sig = compute_signature(theta_txt, last_line)
         return
     end
 
-    % A stable signature: timestamp of file + the last line content
     sig = string(d.datenum) + "|" + string(last_line);
 end
 
@@ -484,7 +478,7 @@ function base = nmpc_init_base(sigma_y)
         sigma_y = [0.001 0.1 0.1];
     end
 
-    tf = 0.5;
+    tf = 6/60;
 
     current_dir = fileparts(mfilename('fullpath'));
     addpath(genpath(current_dir))
@@ -525,9 +519,6 @@ end
 
 function out = nmpc_eval_theta(base, theta)
     %NMPC_EVAL_THETA Evaluate one theta using preinitialised base.
-    %
-    % Returns one struct with fields:
-    %   out.case(1) and out.case(2), each containing trajectories + costs.
 
     cfg = decode_theta(theta, base.nx, base.nu);
 
@@ -590,7 +581,6 @@ function out = nmpc_eval_theta(base, theta)
             [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
             xk = y(end,:);
 
-            % Run time
             elapsed_s = toc(timer);
             elapsed_min = elapsed_s/60;
             progress    = i/base.N;
@@ -633,10 +623,6 @@ end
 
 function cfg = decode_theta(theta, nx, nu)
     %DECODE_THETA theta = [max_iter, theta_p, theta_m, q(1:nx), ru(1:nu), rdu(1:nu)]
-    %
-    % Horizons:
-    %   m = theta_m + 1
-    %   p = theta_p + m
 
     theta = theta(:).';
     expected_len = 1 + 2 + nx + nu + nu;
@@ -667,27 +653,18 @@ end
 
 function plot_simulation(out, case_id)
     %PLOT_SIMULATION Plot states and inputs for a given simulation case.
-    %
-    % Inputs:
-    %   out      - output struct returned by nmpc_eval_theta
-    %   case_id  - case index (e.g. 1 or 2)
 
     Y   = out.case(case_id).Y;
     Ysp = out.case(case_id).Ysp;
     U   = out.case(case_id).U;
-    dt   = out.case(case_id).dt;
-
+    dt  = out.case(case_id).dt;
 
     N = size(Y,1);
     T = 0 : dt : (N - 1)*dt;
 
-    % -------------------------
-    % States
-    % -------------------------
     figure(1);
     clf
 
-    % --- State 1 ---
     subplot(3,1,1);
     plot(T(1:N), Y(1:N,1), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,1), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
@@ -697,7 +674,6 @@ function plot_simulation(out, case_id)
     legend('Location','best');
     hold off;
 
-    % --- State 2 ---
     subplot(3,1,2);
     plot(T(1:N), Y(1:N,2), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,2), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
@@ -707,7 +683,6 @@ function plot_simulation(out, case_id)
     legend('Location','best');
     hold off;
 
-    % --- State 3 ---
     subplot(3,1,3);
     plot(T(1:N), Y(1:N,3), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,3), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
@@ -724,9 +699,6 @@ function plot_simulation(out, case_id)
         ax(j).YLabel.FontSize = 15;
     end
 
-    % -------------------------
-    % Inputs
-    % -------------------------
     figure(2);
     clf
     plot(T(1:N), U(1:N,:), 'LineWidth', 2);
