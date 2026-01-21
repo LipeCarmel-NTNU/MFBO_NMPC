@@ -90,10 +90,8 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
 def write_theta(theta: Sequence[float]) -> None:
     """Write theta values to ``inbox/theta.txt`` after lock negotiation."""
 
-    if LOCK_FILE.exists():
+    while LOCK_FILE.exists():
         time.sleep(5)
-        write_theta(theta)
-        return
 
     THETA_FILE.parent.mkdir(parents=True, exist_ok=True)
     with THETA_FILE.open("w", encoding="ascii") as fh:
