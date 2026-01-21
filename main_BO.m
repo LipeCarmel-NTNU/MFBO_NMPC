@@ -17,10 +17,10 @@ end
 %   mode = "doe"       -> theta is taken from a predefined matrix
 % =========================================================================
 cfg_run = struct();
-cfg_run.mode              = "external";                 % "external" | "doe"
+cfg_run.mode              = "doe";                 % "external" | "doe"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
 cfg_run.poll_s            = 2.0;                        % pause between polls if theta is stale
-cfg_run.results_txt       = fullfile("results","results.csv");   % <- CSV
+cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV
 cfg_run.out_dir           = fullfile("results");        % saves results/out_<timestamp>.mat
 cfg_run.sigma_y           = [0.001 0.1 0.1];
 
@@ -32,12 +32,12 @@ cfg_run.ThetaDOE = ThetaDOE;
 base = nmpc_init_base(cfg_run.sigma_y);
 
 % Ensure output locations exist
-ensure_parent_dir(cfg_run.results_txt);
+ensure_parent_dir(cfg_run.results_csv);
 ensure_dir(cfg_run.out_dir);
 
 % Initialise results header if missing (true CSV header)
 theta_len = 1 + 2 + base.nx + 2*base.nu;
-init_results_txt(cfg_run.results_txt, theta_len);
+init_results_csv(cfg_run.results_csv, theta_len);
 
 switch cfg_run.mode
     case "external"
@@ -58,12 +58,14 @@ function [] = run_and_log(cfg_run, base, theta)
 
     out = nmpc_eval_theta(base, theta);
 
-    [J_sum, runtime_sum] = summarise_out(out);
+    SSE = out.SSE;
+    SSdU = out.SSdU;
+    runtime_s = out.runtime_s;
 
-    append_results_row(cfg_run.results_txt, ts, theta, J_sum, runtime_sum);
+    append_results_row(cfg_run.results_csv, ts, SSE, SSdU, runtime_s, theta);
 
     mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
-    save(mat_path, "out", "theta", "ts", "J_sum", "runtime_sum");
+    save(mat_path, "ts", "out", "cfg_run", "base");
 end
 
 % =========================================================================
@@ -72,7 +74,8 @@ end
 function run_external_theta_loop(cfg_run, base)
 
     %RUN_EXTERNAL_THETA_LOOP Poll for theta, evaluate when updated, log results.
-    unlock = @() exist('.lock','file')==2 && delete('.lock');
+    lock = 'matlab.lock';
+    unlock = @() exist(lock,'file')==2 && delete(lock);
 
     last_signature = "";
     while true
@@ -92,9 +95,9 @@ function run_external_theta_loop(cfg_run, base)
 
         last_signature = signature;
 
-        fid = fopen('.lock','w');
+        fid = fopen(lock,'w');
         if fid < 0
-            warning('Failed to create .lock (pwd = %s)', pwd);
+            warning('Failed to create lock (pwd = %s)', pwd);
             keyboard
         end
         fclose(fid);
@@ -287,19 +290,19 @@ function delete_if_exists(p)
     end
 end
 
-function init_results_txt(results_txt, theta_len)
+function init_results_csv(results_csv, theta_len)
     %INIT_RESULTS_TXT Create CSV file with header if it does not exist.
 
-    if isfile(results_txt)
+    if isfile(results_csv)
         return
     end
 
-    fid = fopen(results_txt, "w");
+    fid = fopen(results_csv, "w");
     if fid < 0
-        error("Could not open results file for writing: %s", results_txt);
+        error("Could not open results file for writing: %s", results_csv);
     end
 
-    fprintf(fid, "timestamp_utc,J_sum,runtime_sum_s");
+    fprintf(fid, "timestamp,J,runtime_sum_s");
     for k = 1:theta_len
         fprintf(fid, ",theta_%d", k);
     end
@@ -308,12 +311,12 @@ function init_results_txt(results_txt, theta_len)
 end
 
 
-function append_results_row(results_txt, ts, theta, J_sum, runtime_sum)
+function append_results_row(results_csv, ts, theta, J_sum, runtime_sum)
     %APPEND_RESULTS_ROW Append one row: timestamp, aggregated cost/runtime, theta_1..theta_n
 
-    fid = fopen(results_txt, "a");
+    fid = fopen(results_csv, "a");
     if fid < 0
-        error("Could not open results file for appending: %s", results_txt);
+        error("Could not open results file for appending: %s", results_csv);
     end
 
     fprintf(fid, "%s,%.17g,%.17g", ts, J_sum, runtime_sum);
@@ -386,14 +389,6 @@ function ts = timestamp_utc_compact()
 end
 
 
-function [J_sum, runtime_sum] = summarise_out(out)
-    %SUMMARISE_OUT Aggregate both cases.
-
-    J_sum = out.case(1).cost_total + out.case(2).cost_total;
-    runtime_sum = out.case(1).runtime_s + out.case(2).runtime_s;
-end
-
-
 function ensure_dir(p)
     %ENSURE_DIR Create directory if needed.
 
@@ -423,7 +418,7 @@ function base = nmpc_init_base(sigma_y)
         sigma_y = [0.001 0.1 0.1];
     end
 
-    tf = 6/60;
+    tf = 3/60;
 
     current_dir = fileparts(mfilename('fullpath'));
     addpath(genpath(current_dir))
@@ -490,7 +485,9 @@ function out = nmpc_eval_theta(base, theta)
     out.theta = theta(:).';
     out.cfg   = cfg;
     out.T     = base.T;
-
+    out.SSE = 0;
+    out.SSdU = 0;
+    out.runtime_s = 0;
     for case_id = 1:2
         if case_id == 1
             x0 = [1.0, 10, 0];
@@ -562,8 +559,12 @@ function out = nmpc_eval_theta(base, theta)
         out.case(case_id).SSdU   = SSdU;
 
         out.case(case_id).runtime_s  = runtime_s;
+
+        out.SSE = out.SSE + SSE;
+        out.SSdU = out.SSdU + SSdU;
+        out.runtime_s = out.runtime_s + runtime_s;
     end
-    
+
 end
 
 
