@@ -2,42 +2,43 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \begin{document}
-
-\section*{Definition of the tuning vector $\theta$}
-
-The NMPC configuration is parametrized by the column vector
-\[
-\theta^\top =
-\big[
-\mathrm{Iter}_{\max},\;
-\theta_p,\;
-\theta_m,\;
-q,\;
-r^{(u)},\;
-r^{(\Delta u)}
-\big].
-\]
-
-The components satisfy:
-\begin{align*}
-\mathrm{Iter}_{\max} &\in \{1,2,\ldots,300\}, \\
-\theta_m \leq 30 &\in \mathbb{Z}_{\ge 0}, \\
-\theta_p \leq 60 &\in \mathbb{Z}_{\ge 0}, \\
-q &\in \mathbb{R}^3_{>0}, \\
-r^{(u)} &\in \mathbb{R}^3_{>0}, \\
-r^{(\Delta u)} &\in \mathbb{R}^3_{>0}.
-\end{align*}
-
-The weighting matrices are given by
-\[
-Q = \mathrm{diag}(10^{q}), \quad
-R_u = \mathrm{diag}(10^{r^{(u)}}), \quad
-R_{\Delta u} = \mathrm{diag}(10^{r^{(\Delta u)}}).
-\]
-Horizons are
-\begin{align*}
-m &= \theta_m + 1 \\
-p &= \theta_p + m
-\end{align*}
-
+	
+	\section*{Definition of the tuning vector $\theta$}
+	
+	The NMPC configuration is parametrized by the column vector
+	\[
+	\theta^\top =
+	\big[
+	\mathrm{Iter}_{\max},\;
+	\theta_p,\;
+	\theta_m,\;
+	q,\;
+	r^{(u)},\;
+	r^{(\Delta u)}
+	\big].
+	\]
+	
+	The components satisfy:
+	\begin{align*}
+		\mathrm{Iter}_{\max} &\in \{1,2,\ldots,300\}, \\
+		\theta_m &\in \mathbb{Z}_{\ge 0}, \qquad \theta_m \leq 30, \\
+		\theta_p &\in \mathbb{Z}_{\ge 0}, \qquad \theta_p \leq 60, \\
+		q &\in [-3,3]^3, \\
+		r^{(u)} &\in [-3,3]^3, \\
+		r^{(\Delta u)} &\in [-3,3]^3.
+	\end{align*}
+	
+	The weighting matrices are given by
+	\[
+	Q = \mathrm{diag}(10^{q}), \quad
+	R_u = \mathrm{diag}(10^{r^{(u)}}), \quad
+	R_{\Delta u} = \mathrm{diag}(10^{r^{(\Delta u)}}).
+	\]
+	
+	The horizons are
+	\begin{align*}
+		m &= \theta_m + 1, \\
+		p &= \theta_p + m.
+	\end{align*}
+	
 \end{document}
