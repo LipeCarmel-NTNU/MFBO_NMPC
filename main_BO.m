@@ -58,11 +58,14 @@ function [] = run_and_log(cfg_run, base, theta)
 
     out = nmpc_eval_theta(base, theta);
 
-    SSE = out.SSE;
-    SSdU = out.SSdU;
+    SSE       = out.SSE;
+    SSdU      = out.SSdU;
     runtime_s = out.runtime_s;
 
-    append_results_row(cfg_run.results_csv, ts, SSE, SSdU, runtime_s, theta);
+    % Keep this consistent with nmpc_eval_theta() where J = SSE + 1e4*SSdU per case
+    J = SSE + 1e4 * SSdU;
+
+    append_results_row(cfg_run.results_csv, ts, SSE, SSdU, J, runtime_s, theta);
 
     mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
     save(mat_path, "ts", "out", "cfg_run", "base");
@@ -291,7 +294,7 @@ function delete_if_exists(p)
 end
 
 function init_results_csv(results_csv, theta_len)
-    %INIT_RESULTS_TXT Create CSV file with header if it does not exist.
+    %INIT_RESULTS_CSV Create CSV file with header if it does not exist.
 
     if isfile(results_csv)
         return
@@ -302,7 +305,8 @@ function init_results_csv(results_csv, theta_len)
         error("Could not open results file for writing: %s", results_csv);
     end
 
-    fprintf(fid, "timestamp,J,runtime_sum_s");
+    % Explicit, stable schema
+    fprintf(fid, "timestamp,SSE,SSdU,J,runtime_s");
     for k = 1:theta_len
         fprintf(fid, ",theta_%d", k);
     end
@@ -311,25 +315,23 @@ function init_results_csv(results_csv, theta_len)
 end
 
 
-function append_results_row(results_csv, ts, theta, J_sum, runtime_sum)
-    %APPEND_RESULTS_ROW Append one row: timestamp, aggregated cost/runtime, theta_1..theta_n
+function append_results_row(results_csv, ts, SSE, SSdU, J, runtime_s, theta)
+    %APPEND_RESULTS_ROW Append one row with the schema from init_results_csv().
 
     fid = fopen(results_csv, "a");
     if fid < 0
         error("Could not open results file for appending: %s", results_csv);
     end
 
-    fprintf(fid, "%s,%.17g,%.17g", ts, J_sum, runtime_sum);
+    fprintf(fid, "%s,%.17g,%.17g,%.17g,%.17g", ts, SSE, SSdU, J, runtime_s);
 
     theta = theta(:).';
     for k = 1:numel(theta)
         fprintf(fid, ",%.17g", theta(k));
     end
     fprintf(fid, "\n");
-
     fclose(fid);
 end
-
 
 function [theta, signature, ok] = read_theta_from_txt(theta_txt)
     %READ_THETA_FROM_TXT Read theta from a text file.
