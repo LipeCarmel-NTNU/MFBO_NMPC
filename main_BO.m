@@ -76,7 +76,12 @@ function run_external_theta_loop(cfg_run, base)
     while true
         [theta, signature, ok] = read_theta_from_txt(cfg_run.theta_txt);
 
-        if ~ok || signature == last_signature
+        if ~ok
+            warning('Failed to read theta')
+            pause(cfg_run.poll_s);
+        end
+        if signature == last_signature
+            disp('Stale theta signature')
             pause(cfg_run.poll_s);
             continue
         end
@@ -250,91 +255,6 @@ function ThetaDOE = theta_doe_generator_v2()
         ThetaDOE = ThetaDOE(1:row,:);
     end
 end
-
-
-function ThetaDOE = theta_doe_generator()
-    %THETA_DOE_GENERATOR Generate a DOE matrix of theta vectors.
-    %
-    % theta layout:
-    %   theta = [max_iter, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)]
-    %
-    % Horizons:
-    %   m = theta_m + 1
-    %   p = theta_p + m
-    %
-    % Output:
-    %   ThetaDOE - (Ntheta x (1 + 2 + nx + 2*nu)) matrix
-
-    nx = 3;
-    nu = 3;
-
-    max_iter_set = [5 10 20 40 100];
-
-    % -----------------------------
-    % Baseline (known good) weights
-    % -----------------------------
-    q0   = [10 1 1];       % Q = diag(q0)
-    ru0  = [2 2 1];        % Ru = diag(ru0)
-    rdu0 = [100 100 10];   % Rdu = diag(rdu0)
-
-    % -----------------------------
-    % Variants (normal units)
-    % -----------------------------
-    Qdiag_set = [
-        q0
-        ];
-
-    Rdu_diag_set = [
-        rdu0
-        10*rdu0
-        ];
-
-    % Horizons
-    m_set = [1 2 3 6 12];
-    p_set = [5 10 20 30];
-
-    % -----------------------------
-    % Enumerate all combinations
-    % -----------------------------
-    nQ   = size(Qdiag_set, 1);
-    nRdu = size(Rdu_diag_set, 1);
-    nm   = numel(m_set);
-    np   = numel(p_set);
-
-    Ntheta = nQ * nRdu * nm * np;
-    ThetaDOE = zeros(Ntheta, 1 + 2 + nx + 2*nu);
-
-    row = 0;
-    for iQ = 1:nQ
-        q = Qdiag_set(iQ,:);
-
-        for iRdu = 1:nRdu
-            rdu = Rdu_diag_set(iRdu,:);
-
-            for imax_iter = max_iter_set
-                for im = m_set
-                    for ip = p_set
-                        if ip > im
-                            theta_m = im - 1;
-                            theta_p = ip - im;
-
-                            row = row + 1;
-                            ThetaDOE(row,:) = [
-                                imax_iter, ...
-                                theta_p, ...
-                                theta_m, ...
-                                log10(q), ...
-                                log10(ru0), ...
-                                log10(rdu)
-                                ];
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
 
 
 
