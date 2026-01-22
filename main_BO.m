@@ -8,14 +8,20 @@ addpath(genpath(current_dir))
 rng(1)
 
 % Do once at the start
-delete(gcp('nocreate'))
-NumWorkers = 8;
+USE_PARALLEL = true;
+
 p = gcp('nocreate');
-if isempty(p) || p.NumWorkers ~= NumWorkers
-    if ~isempty(p)
-        delete(p);
+if USE_PARALLEL
+    NumWorkers = 8;
+    if isempty(p) || p.NumWorkers ~= NumWorkers
+        if ~isempty(p)
+            delete(p);
+        end
+        parpool('Processes', NumWorkers);
     end
-    parpool('Processes', NumWorkers);
+else
+    delete(p)  %#ok<UNRCH>
+    NumWorkers = 1;
 end
 
 % =========================================================================
