@@ -4,6 +4,8 @@ clear all; close all; clc;
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir))
 
+delete_if_exists('.lock')
+delete_if_exists('matlab.lock')
 %%
 rng(1)
 
