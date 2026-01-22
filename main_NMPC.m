@@ -4,6 +4,22 @@ clear all; close all; clc
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir))
 
+USE_PARALLEL = true;
+p = gcp('nocreate');
+if USE_PARALLEL
+    NumWorkers = 8;
+    if isempty(p) || p.NumWorkers ~= NumWorkers
+        if ~isempty(p)
+            delete(p);
+        end
+        parpool('Processes', NumWorkers);
+    end
+else
+    NumWorkers = 1;
+    delete(p)
+end
+
+
 %% Settings
 ode_opt = odeset('NonNegative', [2 3]);
 
@@ -23,7 +39,7 @@ plant = model;
 nx = 3;
 nu = 3;
 NMPC = NMPC_terminal(model, nx, nu);
-NMPC.optimizer_options.UseParallel = true;
+NMPC.optimizer_options.UseParallel = USE_PARALLEL;
 
 % Sampling time in hours
 NMPC.Ts = dt;
@@ -47,10 +63,10 @@ NMPC.constraints();
 help NMPC.solve
 
 %% Initial conditions
-tf = 10;                % h
+tf = 5/60;                % h
 
 V_0   = 1;
-X_0   = 10;
+X_0   = 15;
 S_0   = 0;
 x0_plant = [V_0, X_0, S_0];
 
@@ -84,10 +100,12 @@ Y_sp = zeros(N, nx);
 
 U(1, :) = uk;
 
+RUNTIME = zeros(N, 1);
 
-%% Simulation
-timer = tic;
+%% Simulationx
 for i = 1 : N
+    timer = tic;
+
     fprintf('Simulated: %.1f %% \n', i/N*100)
     fprintf('Time elapsed: %.1f minutes \n', toc(timer)/60)
 
@@ -106,7 +124,16 @@ for i = 1 : N
     %% Plant propagation
     [~, y] = ode45(@(t,x) plant(x, uk), tspan, x0_plant, ode_opt);
     x0_plant = y(end, :);
+
+    RUNTIME(i) = toc(timer);
+
 end
+E = Y - Y_sp;
+E = E.*[10 1 1];
+SSE = sum(E.^2, 2);
+
+dU  = diff(U, 1, 1);
+SSdU = sum(dU.^2, 2);
 
 %% Results
 i = length(Y);

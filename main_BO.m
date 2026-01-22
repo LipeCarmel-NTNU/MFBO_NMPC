@@ -72,13 +72,13 @@ end
 function [] = run_and_log(cfg_run, base, theta)
     ts = timestamp_utc_compact();
 
-    out = nmpc_eval_theta(base, theta);
+    out = simulate_nmpc(base, theta);
 
     SSE       = out.SSE;
     SSdU      = out.SSdU;
     runtime_s = out.runtime_s;
 
-    % Keep this consistent with nmpc_eval_theta() where J = SSE + 1e4*SSdU per case
+    % Keep this consistent with simulate_nmpc() where J = SSE + 1e4*SSdU per case
     J = SSE + 1e4 * SSdU;
 
     append_results_row(cfg_run.results_csv, ts, SSE, SSdU, J, runtime_s, theta);
@@ -185,7 +185,7 @@ function ThetaDOE = theta_doe_generator_v2()
     nx = 3;
     nu = 3;
 
-    max_iter_set = [5 10 50 100];
+    max_iter_set = [1:5 10 20 50];
 
     q0   = [10 1 1];
     ru0  = [2 2 1];
@@ -217,8 +217,8 @@ function ThetaDOE = theta_doe_generator_v2()
 
     % m_set = [1 2 3 6 12];
     % p_set = [5 10 20 30];
-    m_set = [1 2 3 4];
-    p_set = [5 10 20];
+    m_set = [3 6 12];
+    p_set = [20 40 60];
 
     n_valid = 0;
     for im = m_set
@@ -244,36 +244,60 @@ function ThetaDOE = theta_doe_generator_v2()
     % -----------------------------
     % Fill Block A
     % -----------------------------
-    theta_m_nom = m_nom - 1;
-    theta_p_nom = p_nom - m_nom;
-
-    for iQ = 1:size(Qdiag_A,1)
-        q = Qdiag_A(iQ,:);
-        log_q = log10(q);
-
-        for iRdu = 1:size(Rdu_A,1)
-            rdu = Rdu_A(iRdu,:);
-            log_rdu = log10(rdu);
-
-            for imax = max_iter_set
-                row = row + 1;
-                ThetaDOE(row,:) = [
-                    imax, ...
-                    theta_p_nom, ...
-                    theta_m_nom, ...
-                    log_q, ...
-                    log_ru0, ...
-                    log_rdu
-                ];
-            end
-        end
-    end
+    % theta_m_nom = m_nom - 1;
+    % theta_p_nom = p_nom - m_nom;
+    % 
+    % for iQ = 1:size(Qdiag_A,1)
+    %     q = Qdiag_A(iQ,:);
+    %     log_q = log10(q);
+    % 
+    %     for iRdu = 1:size(Rdu_A,1)
+    %         rdu = Rdu_A(iRdu,:);
+    %         log_rdu = log10(rdu);
+    % 
+    %         for imax = max_iter_set
+    %             row = row + 1;
+    %             ThetaDOE(row,:) = [
+    %                 imax, ...
+    %                 theta_p_nom, ...
+    %                 theta_m_nom, ...
+    %                 log_q, ...
+    %                 log_ru0, ...
+    %                 log_rdu
+    %             ];
+    %         end
+    %     end
+    % end
 
     % -----------------------------
     % Fill Block B
     % -----------------------------
-    log_q0   = log10(q0);
-    log_rdu0 = log10(rdu0);
+    % log_q0   = log10(q0);
+    % log_rdu0 = log10(rdu0);
+    % 
+    % for im = m_set
+    %     for ip = p_set
+    %         if ip > im
+    %             theta_m = im - 1;
+    %             theta_p = ip - im;
+    % 
+    %             for imax = max_iter_set
+    %                 row = row + 1;
+    %                 ThetaDOE(row,:) = [
+    %                     imax, ...
+    %                     theta_p, ...
+    %                     theta_m, ...
+    %                     log_q0, ...
+    %                     log_ru0, ...
+    %                     log_rdu0
+    %                 ];
+    %             end
+    %         end
+    %     end
+    % end
+    % -----------------------------
+    % Fill Block C
+    % -----------------------------
 
     for im = m_set
         for ip = p_set
@@ -281,16 +305,26 @@ function ThetaDOE = theta_doe_generator_v2()
                 theta_m = im - 1;
                 theta_p = ip - im;
 
-                for imax = max_iter_set
-                    row = row + 1;
-                    ThetaDOE(row,:) = [
-                        imax, ...
-                        theta_p, ...
-                        theta_m, ...
-                        log_q0, ...
-                        log_ru0, ...
-                        log_rdu0
-                    ];
+                for iQ = 1:size(Qdiag_A,1)
+                    q = Qdiag_A(iQ,:);
+                    log_q = log10(q);
+
+                    for iRdu = 1:size(Rdu_A,1)
+                        rdu = Rdu_A(iRdu,:);
+                        log_rdu = log10(rdu);
+
+                        for imax = max_iter_set
+                            row = row + 1;
+                            ThetaDOE(row,:) = [
+                                imax, ...
+                                theta_p, ...
+                                theta_m, ...
+                                log_q, ...
+                                log_ru0, ...
+                                log_rdu
+                                ];
+                        end
+                    end
                 end
             end
         end
@@ -301,6 +335,7 @@ function ThetaDOE = theta_doe_generator_v2()
     end
     [~, I] = sort(rand(size(ThetaDOE, 1), 1));
     ThetaDOE = ThetaDOE(I, :);
+    ThetaDOE = [[50,20,9,1,0,0,0.3010299956639812,0.3010299956639812,0,2,2,1];ThetaDOE];
 end
 
 
@@ -481,7 +516,7 @@ function base = nmpc_init_base(sigma_y)
 end
 
 
-function out = nmpc_eval_theta(base, theta)
+function out = simulate_nmpc(base, theta)
     %NMPC_EVAL_THETA Evaluate one theta using preinitialised base.
 
     cfg = decode_theta(theta, base.nx, base.nu);
@@ -527,11 +562,14 @@ function out = nmpc_eval_theta(base, theta)
         Y_meas = zeros(base.N, base.nx);
         Ysp    = repmat(NMPC.xsp(1:base.nx), base.N, 1);
         U      = zeros(base.N, base.nu);
+        RUNTIME      = zeros(base.N, 1);
 
         xk = x0;
 
         timer = tic;
+        
         for i = 1:base.N
+            iter_timer = tic;
             Y(i,:) = xk;
 
             yk_meas = xk + base.noise(i,:);
@@ -549,6 +587,8 @@ function out = nmpc_eval_theta(base, theta)
             [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
             xk = y(end,:);
 
+            RUNTIME(i) = toc(iter_timer);
+
             elapsed_s = toc(timer);
             elapsed_min = elapsed_s/60;
             progress    = i/base.N;
@@ -562,12 +602,12 @@ function out = nmpc_eval_theta(base, theta)
 
         E = Y - Ysp;
         E = E.*[10 1 1];
-        SSE = sum(E(:).^2);
+        SSE = sum(E.^2, 2);
 
         dU  = diff(U, 1, 1);
-        SSdU = sum(dU(:).^2);
+        SSdU = sum(dU.^2, 2);
 
-        J = SSE + 1e4 * SSdU;
+        J = sum(SSE) + 1e4 * sum(SSdU);
 
         out.case(case_id).case_id    = case_id;
         out.case(case_id).x0         = x0;
@@ -581,13 +621,16 @@ function out = nmpc_eval_theta(base, theta)
         out.case(case_id).dt         = base.dt;
 
         out.case(case_id).cost_total = J;
-        out.case(case_id).SSE   = SSE;
-        out.case(case_id).SSdU   = SSdU;
+
+        out.case(case_id).SSE       = SSE;
+        out.case(case_id).SSdU      = SSdU;
+        out.case(case_id).RUNTIME   = RUNTIME;
 
         out.case(case_id).runtime_s  = runtime_s;
 
-        out.SSE = out.SSE + SSE;
-        out.SSdU = out.SSdU + SSdU;
+        out.SSE  = out.SSE  + sum(SSE );
+        out.SSdU = out.SSdU + sum(SSdU);
+
         out.runtime_s = out.runtime_s + runtime_s;
     end
 
