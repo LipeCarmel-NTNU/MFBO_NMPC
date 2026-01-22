@@ -1,14 +1,21 @@
 clear all; close all; clc;
 
+% Add folders and subfolders to path
+current_dir = fileparts(mfilename('fullpath'));
+addpath(genpath(current_dir))
+
+%%
 rng(1)
 
 % Do once at the start
+delete(gcp('nocreate'))
+NumWorkers = 8;
 p = gcp('nocreate');
-if isempty(p) || p.NumWorkers ~= 8
+if isempty(p) || p.NumWorkers ~= NumWorkers
     if ~isempty(p)
         delete(p);
     end
-    parpool('local', 8);
+    parpool('Processes', NumWorkers);
 end
 
 % =========================================================================
@@ -23,6 +30,7 @@ cfg_run.poll_s            = 2.0;                        % pause between polls if
 cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV
 cfg_run.out_dir           = fullfile("results");        % saves results/out_<timestamp>.mat
 cfg_run.sigma_y           = [0.001 0.1 0.1];
+cfg_run.NumWorkers = NumWorkers;
 
 % DOE matrix: each row is one theta (only used when cfg_run.mode == "doe")
 ThetaDOE = theta_doe_generator_v2();
@@ -78,7 +86,7 @@ function run_external_theta_loop(cfg_run, base)
 
     %RUN_EXTERNAL_THETA_LOOP Poll for theta, evaluate when updated, log results.
     lock = 'matlab.lock';
-    unlock = @() exist(lock,'file')==2 && delete(lock);
+    unlock = @() delete_if_exists(lock);
 
     last_signature = "";
     while true
@@ -130,6 +138,7 @@ function run_doe(cfg_run, base)
     end
 
     for i = 1:size(Theta,1)
+        clc
         theta = Theta(i,:);
         run_and_log(cfg_run, base, theta)
     end
@@ -282,6 +291,8 @@ function ThetaDOE = theta_doe_generator_v2()
     if row ~= nTheta
         ThetaDOE = ThetaDOE(1:row,:);
     end
+    [~, I] = sort(rand(size(ThetaDOE, 1), 1));
+    ThetaDOE = ThetaDOE(I, :);
 end
 
 
@@ -423,7 +434,7 @@ function base = nmpc_init_base(sigma_y)
         sigma_y = [0.001 0.1 0.1];
     end
 
-    tf = 3/60;
+    tf = 10;
 
     current_dir = fileparts(mfilename('fullpath'));
     addpath(genpath(current_dir))
@@ -466,10 +477,12 @@ function out = nmpc_eval_theta(base, theta)
     %NMPC_EVAL_THETA Evaluate one theta using preinitialised base.
 
     cfg = decode_theta(theta, base.nx, base.nu);
+    pool_empty = isempty(gcp('nocreate'));
 
     NMPC = NMPC_terminal(base.model, base.nx, base.nu);
     NMPC.optimizer_options.MaxIterations = cfg.max_iter;
-    NMPC.optimizer_options.UseParallel = true;
+    NMPC.optimizer_options.UseParallel = not(pool_empty);
+    NMPC.optimizer_options.Display = 'final-detailed';
 
     NMPC.Ts  = base.dt;
     NMPC.p   = cfg.p;
