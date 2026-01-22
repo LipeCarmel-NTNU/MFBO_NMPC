@@ -22,8 +22,8 @@ if USE_PARALLEL
         parpool('Processes', NumWorkers);
     end
 else
-    delete(p)  %#ok<UNRCH>
     NumWorkers = 1;
+    delete(p)
 end
 
 % =========================================================================
