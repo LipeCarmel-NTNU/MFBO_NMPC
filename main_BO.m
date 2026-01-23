@@ -23,7 +23,9 @@ if USE_PARALLEL
     end
 else
     NumWorkers = 1;
-    delete(p)
+    if ~isempty(p)
+        delete(p)
+    end
 end
 
 % =========================================================================
@@ -34,11 +36,11 @@ end
 cfg_run = struct();
 cfg_run.mode              = "doe";                 % "external" | "doe"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
-cfg_run.poll_s            = 2.0;                        % pause between polls if theta is stale
+cfg_run.poll_s            = 2.0;                   % pause between polls if theta is stale
 cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV
-cfg_run.out_dir           = fullfile("results");        % saves results/out_<timestamp>.mat
+cfg_run.out_dir           = fullfile("results");   % saves results/out_<timestamp>.mat
 cfg_run.sigma_y           = [0.001 0.1 0.1];
-cfg_run.NumWorkers = NumWorkers;
+cfg_run.NumWorkers        = NumWorkers;
 
 % DOE matrix: each row is one theta (only used when cfg_run.mode == "doe")
 ThetaDOE = theta_doe_generator_v2();
@@ -78,7 +80,7 @@ function [] = run_and_log(cfg_run, base, theta)
     SSdU      = out.SSdU;
     runtime_s = out.runtime_s;
 
-    % Keep this consistent with simulate_nmpc() where J = SSE + 1e4*SSdU per case
+    % Consistent with simulate_nmpc() where J = SSE + 1e4*SSdU per case
     J = SSE + 1e4 * SSdU;
 
     append_results_row(cfg_run.results_csv, ts, SSE, SSdU, J, runtime_s, theta);
@@ -92,7 +94,6 @@ end
 % =========================================================================
 function run_external_theta_loop(cfg_run, base)
 
-    %RUN_EXTERNAL_THETA_LOOP Poll for theta, evaluate when updated, log results.
     lock = 'matlab.lock';
     unlock = @() delete_if_exists(lock);
 
@@ -132,13 +133,10 @@ function run_external_theta_loop(cfg_run, base)
     end
 end
 
-
-
 % =========================================================================
 % DOE mode
 % =========================================================================
 function run_doe(cfg_run, base)
-    %RUN_DOE Evaluate all rows in ThetaDOE and log results.
 
     Theta = cfg_run.ThetaDOE;
     if isempty(Theta)
@@ -152,50 +150,39 @@ function run_doe(cfg_run, base)
     end
 end
 
-
 function ThetaDOE = theta_doe_generator_v2()
-%THETA_DOE_GENERATOR_V2 DOE for theta with nominal, targeted weight variants, and horizon sweep.
+%THETA_DOE_GENERATOR_V2 DOE for theta with targeted weight variants and horizon sweep.
 %
 % theta layout:
-%   theta = [max_iter, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)]
+%   theta = [f, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)]
+%
+% f in [0,1], and simulation runs with tf = 10*f (hours).
 %
 % Horizons:
 %   m = theta_m + 1
 %   p = theta_p + m
 %
 % Nominal:
-%   p = 60, m = 6
 %   Q  = diag([10 1 1])
 %   Ru = diag([2 2 1])
 %   Rdu = diag([100 100 10])
 %
-% Variants (nominal horizons):
-%   - Nominal
-%   - Nominal + each q_i doubled (3 cases)
-%   - Nominal + Rdu*10
+% Horizon set:
+%   m_set = [3 6 12]
+%   p_set = [20 40 60]
+%   only ip > im
 %
-% Horizon sweep (nominal weights only):
-%   m_set = [1 2 3 6 12]
-%   p_set = [5 10 20 30]
-%   includes only ip > im
-%
-% Max iterations:
-%   max_iter_set = [5 10 20 40 100 300]
+% f set:
+%   f_set = [0.1 0.2 0.4 0.6 0.8 1.0]
 
     nx = 3;
     nu = 3;
 
-    max_iter_set = [1:5 10 20 50];
+    f_set = (1 : 10)./100;
 
     q0   = [10 1 1];
     ru0  = [2 2 1];
     rdu0 = [100 100 10];
-
-    % -----------------------------
-    % Block A: nominal horizons + targeted weight variants
-    % -----------------------------
-    p_nom = 60;
-    m_nom = 6;
 
     Qdiag_A = [
         q0
@@ -209,14 +196,6 @@ function ThetaDOE = theta_doe_generator_v2()
         10*rdu0
     ];
 
-    nA = numel(max_iter_set) * size(Qdiag_A,1) * size(Rdu_A,1);
-
-    % -----------------------------
-    % Block B: horizon sweep with nominal weights only
-    % -----------------------------
-
-    % m_set = [1 2 3 6 12];
-    % p_set = [5 10 20 30];
     m_set = [3 6 12];
     p_set = [20 40 60];
 
@@ -228,76 +207,13 @@ function ThetaDOE = theta_doe_generator_v2()
             end
         end
     end
-    nB = numel(max_iter_set) * n_valid;
 
-    % -----------------------------
-    % Allocate
-    % -----------------------------
-    nTheta = nA + nB;
+    nTheta = numel(f_set) * n_valid * size(Qdiag_A,1) * size(Rdu_A,1);
     ThetaDOE = zeros(nTheta, 1 + 2 + nx + 2*nu);
 
-    % Precompute constant log terms
     log_ru0 = log10(ru0);
 
     row = 0;
-
-    % -----------------------------
-    % Fill Block A
-    % -----------------------------
-    % theta_m_nom = m_nom - 1;
-    % theta_p_nom = p_nom - m_nom;
-    % 
-    % for iQ = 1:size(Qdiag_A,1)
-    %     q = Qdiag_A(iQ,:);
-    %     log_q = log10(q);
-    % 
-    %     for iRdu = 1:size(Rdu_A,1)
-    %         rdu = Rdu_A(iRdu,:);
-    %         log_rdu = log10(rdu);
-    % 
-    %         for imax = max_iter_set
-    %             row = row + 1;
-    %             ThetaDOE(row,:) = [
-    %                 imax, ...
-    %                 theta_p_nom, ...
-    %                 theta_m_nom, ...
-    %                 log_q, ...
-    %                 log_ru0, ...
-    %                 log_rdu
-    %             ];
-    %         end
-    %     end
-    % end
-
-    % -----------------------------
-    % Fill Block B
-    % -----------------------------
-    % log_q0   = log10(q0);
-    % log_rdu0 = log10(rdu0);
-    % 
-    % for im = m_set
-    %     for ip = p_set
-    %         if ip > im
-    %             theta_m = im - 1;
-    %             theta_p = ip - im;
-    % 
-    %             for imax = max_iter_set
-    %                 row = row + 1;
-    %                 ThetaDOE(row,:) = [
-    %                     imax, ...
-    %                     theta_p, ...
-    %                     theta_m, ...
-    %                     log_q0, ...
-    %                     log_ru0, ...
-    %                     log_rdu0
-    %                 ];
-    %             end
-    %         end
-    %     end
-    % end
-    % -----------------------------
-    % Fill Block C
-    % -----------------------------
 
     for im = m_set
         for ip = p_set
@@ -313,16 +229,16 @@ function ThetaDOE = theta_doe_generator_v2()
                         rdu = Rdu_A(iRdu,:);
                         log_rdu = log10(rdu);
 
-                        for imax = max_iter_set
+                        for f = f_set
                             row = row + 1;
                             ThetaDOE(row,:) = [
-                                imax, ...
+                                f, ...
                                 theta_p, ...
                                 theta_m, ...
                                 log_q, ...
                                 log_ru0, ...
                                 log_rdu
-                                ];
+                            ];
                         end
                     end
                 end
@@ -333,13 +249,10 @@ function ThetaDOE = theta_doe_generator_v2()
     if row ~= nTheta
         ThetaDOE = ThetaDOE(1:row,:);
     end
+
     [~, I] = sort(rand(size(ThetaDOE, 1), 1));
     ThetaDOE = ThetaDOE(I, :);
-    ThetaDOE = [[50,20,9,1,0,0,0.3010299956639812,0.3010299956639812,0,2,2,1];ThetaDOE];
 end
-
-
-
 
 % =========================================================================
 % Logging / IO helpers
@@ -351,7 +264,6 @@ function delete_if_exists(p)
 end
 
 function init_results_csv(results_csv, theta_len)
-    %INIT_RESULTS_CSV Create CSV file with header if it does not exist.
 
     if isfile(results_csv)
         return
@@ -362,7 +274,6 @@ function init_results_csv(results_csv, theta_len)
         error("Could not open results file for writing: %s", results_csv);
     end
 
-    % Explicit, stable schema
     fprintf(fid, "timestamp,SSE,SSdU,J,runtime_s");
     for k = 1:theta_len
         fprintf(fid, ",theta_%d", k);
@@ -371,9 +282,7 @@ function init_results_csv(results_csv, theta_len)
     fclose(fid);
 end
 
-
 function append_results_row(results_csv, ts, SSE, SSdU, J, runtime_s, theta)
-    %APPEND_RESULTS_ROW Append one row with the schema from init_results_csv().
 
     fid = fopen(results_csv, "a");
     if fid < 0
@@ -391,7 +300,6 @@ function append_results_row(results_csv, ts, SSE, SSdU, J, runtime_s, theta)
 end
 
 function [theta, signature, ok] = read_theta_from_txt(theta_txt)
-    %READ_THETA_FROM_TXT Read theta from a text file.
 
     theta = [];
     signature = "";
@@ -426,9 +334,7 @@ function [theta, signature, ok] = read_theta_from_txt(theta_txt)
     ok = true;
 end
 
-
 function sig = compute_signature(theta_txt, last_line)
-    %COMPUTE_SIGNATURE Use last modified time + content to detect staleness.
 
     d = dir(theta_txt);
     if isempty(d)
@@ -439,36 +345,27 @@ function sig = compute_signature(theta_txt, last_line)
     sig = string(d.datenum) + "|" + string(last_line);
 end
 
-
 function ts = timestamp_utc_compact()
-    %TIMESTAMP_UTC_COMPACT Timestamp for filenames and logging.
 
     t = datetime("now","TimeZone",'Europe/Oslo');
     ts = char(datestr(t, "yyyymmdd_HHMMSS"));
 end
 
-
 function ensure_dir(p)
-    %ENSURE_DIR Create directory if needed.
-
     if ~isfolder(p)
         mkdir(p);
     end
 end
 
-
 function ensure_parent_dir(filepath)
-    %ENSURE_PARENT_DIR Create parent directory if needed.
-
     [parent,~,~] = fileparts(filepath);
     if parent ~= "" && ~isfolder(parent)
         mkdir(parent);
     end
 end
 
-
 % =========================================================================
-% NMPC code (unchanged numerics, but now reusable from both modes)
+% NMPC code
 % =========================================================================
 function base = nmpc_init_base(sigma_y)
     %NMPC_INIT_BASE One-time initialisation shared across all theta evaluations.
@@ -476,8 +373,6 @@ function base = nmpc_init_base(sigma_y)
     if nargin < 1 || isempty(sigma_y)
         sigma_y = [0.001 0.1 0.1];
     end
-
-    tf = 10;
 
     current_dir = fileparts(mfilename('fullpath'));
     addpath(genpath(current_dir))
@@ -488,7 +383,11 @@ function base = nmpc_init_base(sigma_y)
     base.par = par;
 
     base.dt = 1/60;
-    base.tf = tf;
+
+    base.tf_max = 10;                          % hours (f=1)
+    base.N_max  = ceil(base.tf_max/base.dt) + 1;
+    base.T_max  = (0:base.N_max-1) * base.dt;
+    base.tspan  = [0 base.dt];
 
     base.model = @(x, u) dilution_reduced(0, x, u(:)', base.par);
     base.plant = base.model;
@@ -506,25 +405,29 @@ function base = nmpc_init_base(sigma_y)
     S = load('LQR_data.mat', 'LQR_data');
     base.LQR_data = S.LQR_data;
 
-    base.N = ceil(base.tf/base.dt) + 1;
-    base.T = (0:base.N-1) * base.dt;
-    base.tspan = [0 base.dt];
-
     base.sigma_y = sigma_y;
 
-    base.noise = randn(base.N, base.nx) .* base.sigma_y;
+    base.noise = randn(base.N_max, base.nx) .* base.sigma_y;
+
+    base.optimizer_max_iter = 100;
 end
 
-
 function out = simulate_nmpc(base, theta)
-    %NMPC_EVAL_THETA Evaluate one theta using preinitialised base.
+    %SIMULATE_NMPC Evaluate one theta using preinitialised base.
+    % Uses per-run tf = 10*f, where f is theta(1).
 
     cfg = decode_theta(theta, base.nx, base.nu);
     pool_empty = isempty(gcp('nocreate'));
 
+    tf = 10 * cfg.f;                      % hours
+    N = ceil(tf/base.dt) + 1;
+
+    T     = base.T_max(1:N);
+    noise = base.noise(1:N, :);
+
     NMPC = NMPC_terminal(base.model, base.nx, base.nu);
-    NMPC.optimizer_options.MaxIterations = cfg.max_iter;
-    NMPC.optimizer_options.UseParallel = not(pool_empty);
+    NMPC.optimizer_options.MaxIterations = base.optimizer_max_iter;
+    NMPC.optimizer_options.UseParallel = ~pool_empty;
     NMPC.optimizer_options.Display = 'final-detailed';
 
     NMPC.Ts  = base.dt;
@@ -545,10 +448,14 @@ function out = simulate_nmpc(base, theta)
     out = struct();
     out.theta = theta(:).';
     out.cfg   = cfg;
-    out.T     = base.T;
+    out.tf    = tf;
+    out.N     = N;
+    out.T     = T;
+
     out.SSE = 0;
     out.SSdU = 0;
     out.runtime_s = 0;
+
     for case_id = 1:2
         if case_id == 1
             x0 = [1.0, 10, 0];
@@ -558,23 +465,25 @@ function out = simulate_nmpc(base, theta)
 
         uk = zeros(1, base.nu);
 
-        Y      = zeros(base.N, base.nx);
-        Y_meas = zeros(base.N, base.nx);
-        Ysp    = repmat(NMPC.xsp(1:base.nx), base.N, 1);
-        U      = zeros(base.N, base.nu);
-        RUNTIME      = zeros(base.N, 1);
+        Y       = zeros(N, base.nx);
+        Y_meas  = zeros(N, base.nx);
+        Ysp     = repmat(NMPC.xsp(1:base.nx), N, 1);
+        U       = zeros(N, base.nu);
+        RUNTIME = zeros(N, 1);
 
         xk = x0;
 
         timer = tic;
-        
-        for i = 1:base.N
+
+        for i = 1:N
             iter_timer = tic;
+
             Y(i,:) = xk;
 
-            yk_meas = xk + base.noise(i,:);
+            yk_meas = xk + noise(i,:);
             yk_meas(yk_meas < 0) = 0;
             Y_meas(i,:) = yk_meas;
+
             uk = NMPC.solve(yk_meas(:)', uk(:)');
             U(i,:) = uk;
 
@@ -584,27 +493,30 @@ function out = simulate_nmpc(base, theta)
             fprintf('\nControl action: \n')
             disp(uk)
 
-            [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
-            xk = y(end,:);
+            if N > 1 && i < N
+                [~, y] = ode45(@(t,x) base.plant(x, uk), base.tspan, xk, base.ode_opt);
+                xk = y(end,:);
+            end
 
             RUNTIME(i) = toc(iter_timer);
 
             elapsed_s = toc(timer);
             elapsed_min = elapsed_s/60;
-            progress    = i/base.N;
-            total_min   = elapsed_min/max(progress, eps);
+            progress = i/max(N,1);
+            total_min = elapsed_min/max(progress, eps);
             remaining_min = total_min - elapsed_min;
 
             fprintf('Case %d: %.1f %% | elapsed %.2f min | total %.2f min | left %.2f min\n', ...
                 case_id, 100*progress, elapsed_min, total_min, remaining_min);
         end
+
         runtime_s = toc(timer);
 
         E = Y - Ysp;
         E = E.*[10 1 1];
         SSE = sum(E.^2, 2);
 
-        dU  = diff(U, 1, 1);
+        dU   = diff(U, 1, 1);
         SSdU = sum(dU.^2, 2);
 
         J = sum(SSE) + 1e4 * sum(SSdU);
@@ -617,28 +529,27 @@ function out = simulate_nmpc(base, theta)
         out.case(case_id).Ysp        = Ysp;
         out.case(case_id).U          = U;
 
-        out.case(case_id).noise      = base.noise;
+        out.case(case_id).noise      = noise;
         out.case(case_id).dt         = base.dt;
+        out.case(case_id).tf         = tf;
 
         out.case(case_id).cost_total = J;
 
-        out.case(case_id).SSE       = SSE;
-        out.case(case_id).SSdU      = SSdU;
-        out.case(case_id).RUNTIME   = RUNTIME;
+        out.case(case_id).SSE        = SSE;
+        out.case(case_id).SSdU       = SSdU;
+        out.case(case_id).RUNTIME    = RUNTIME;
 
         out.case(case_id).runtime_s  = runtime_s;
 
-        out.SSE  = out.SSE  + sum(SSE );
-        out.SSdU = out.SSdU + sum(SSdU);
-
+        out.SSE       = out.SSE  + sum(SSE);
+        out.SSdU      = out.SSdU + sum(SSdU);
         out.runtime_s = out.runtime_s + runtime_s;
     end
-
 end
 
-
 function cfg = decode_theta(theta, nx, nu)
-    %DECODE_THETA theta = [max_iter, theta_p, theta_m, q(1:nx), ru(1:nu), rdu(1:nu)]
+    %DECODE_THETA theta = [f, theta_p, theta_m, q(1:nx), ru(1:nu), rdu(1:nu)]
+    % f in [0,1], and tf = 10*f (hours)
 
     theta = theta(:).';
     expected_len = 1 + 2 + nx + nu + nu;
@@ -649,7 +560,7 @@ function cfg = decode_theta(theta, nx, nu)
     k = 1;
     cfg = struct();
 
-    cfg.max_iter = theta(k); k = k + 1;
+    cfg.f = theta(k); k = k + 1;
 
     theta_p = theta(k); k = k + 1;
     theta_m = theta(k); k = k + 1;
@@ -664,8 +575,9 @@ function cfg = decode_theta(theta, nx, nu)
     cfg.Q   = diag(10.^q_exp);
     cfg.Ru  = diag(10.^ru_exp);
     cfg.Rdu = diag(10.^rdu_exp);
-end
 
+    cfg.f = max(0, min(1, cfg.f));
+end
 
 function plot_simulation(out, case_id)
     %PLOT_SIMULATION Plot states and inputs for a given simulation case.
