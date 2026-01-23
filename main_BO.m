@@ -102,7 +102,11 @@ function run_external_theta_loop(cfg_run, base)
         [theta, signature, ok] = read_theta_from_txt(cfg_run.theta_txt);
 
         if ~ok
-            warning('Failed to read theta')
+            % Display current time in Oslo timezone
+            osloTimeZone = 'Europe/Oslo';
+            currentTimeOslo = datetime('now', 'TimeZone', osloTimeZone);
+            w = ['Failed to read theta. Time: ', datestr(currentTimeOslo)];
+            warning(w)
             pause(cfg_run.poll_s);
             continue
         end

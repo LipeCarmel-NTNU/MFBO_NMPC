@@ -34,6 +34,16 @@ def _is_positive_real(value: object) -> bool:
     return False
 
 
+def _is_in_range(value: object, min_val: float, max_val: float) -> bool:
+    """Return True when value is a numeric type in [min_val, max_val]."""
+
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return min_val <= value <= max_val
+    return False
+
+
 def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
     """Validate and normalize theta parameters."""
 
@@ -46,7 +56,7 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
 
     # Validate f: must be in [0, 1]
     f = values[0]
-    if not _is_positive_real(f) or not (0 <= f <= 1):
+    if not _is_in_range(f, 0, 1):
         raise ValueError(
             f"theta[0]: f must be a real number in [0, 1], got {f}"
         )
@@ -68,28 +78,28 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
         )
     values[2] = int(round(float(theta_m)))
 
-    # Validate q values: positive reals
+    # Validate q values: in [-3, 3]
     for i in range(3):
         q_value = values[3 + i]
-        if not _is_positive_real(q_value):
+        if not _is_in_range(q_value, -3, 3):
             raise ValueError(
-                f"theta[{3 + i}]: q[{i}] must be a positive real number, got {q_value}"
+                f"theta[{3 + i}]: q[{i}] must be in [-3, 3], got {q_value}"
             )
 
-    # Validate r^(u) values: positive reals
+    # Validate r^(u) values: in [-3, 3]
     for i in range(3):
         r_u_value = values[6 + i]
-        if not _is_positive_real(r_u_value):
+        if not _is_in_range(r_u_value, -3, 3):
             raise ValueError(
-                f"theta[{6 + i}]: r^(u)[{i}] must be a positive real number, got {r_u_value}"
+                f"theta[{6 + i}]: r^(u)[{i}] must be in [-3, 3], got {r_u_value}"
             )
 
-    # Validate r^(Delta u) values: positive reals
+    # Validate r^(Delta u) values: in [-3, 3]
     for i in range(3):
         r_du_value = values[9 + i]
-        if not _is_positive_real(r_du_value):
+        if not _is_in_range(r_du_value, -3, 3):
             raise ValueError(
-                f"theta[{9 + i}]: r^(Delta u)[{i}] must be a positive real number, got {r_du_value}"
+                f"theta[{9 + i}]: r^(Delta u)[{i}] must be in [-3, 3], got {r_du_value}"
             )
 
     return values
@@ -154,5 +164,26 @@ def read_results() -> tuple[list[str], list[float], list[float], list[float], li
             theta_matrix.append(theta_row)
 
     return timestamp, sse, ssd_u, cost, runtime, theta_matrix
+
+
+if __name__ == "__main__":
+    # Tuning vector theta components
+    f = 0.01        # Fraction/Fidelity parameter in (0, 1)
+    theta_p = 17    # Prediction horizon offset, integer in [0, 60]
+    theta_m = 2     # Control horizon offset, integer in [0, 30]
+
+    # State cost weights (in log10 scale, maps to Q = diag(10^q))
+    q = [1.3010299956639813, 0, 0]
+    
+    # Input cost weights (in log10 scale, maps to R_u = diag(10^r^(u)))
+    r_u = [0.3010299956639812, 0.3010299956639812, 0]
+    
+    # Input rate cost weights (in log10 scale, maps to R_Delta_u = diag(10^r^(Delta u)))
+    r_delta_u = [2, 2, 1]
+    
+    # Assemble theta vector
+    dummy_theta = [f, theta_p, theta_m] + q + r_u + r_delta_u
+    
+    send_theta(dummy_theta)
 
 
