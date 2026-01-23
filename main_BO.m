@@ -34,7 +34,7 @@ end
 %   mode = "doe"       -> theta is taken from a predefined matrix
 % =========================================================================
 cfg_run = struct();
-cfg_run.mode              = "doe";                 % "external" | "doe"
+cfg_run.mode              = "external";                 % "external" | "doe"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
 cfg_run.poll_s            = 2.0;                   % pause between polls if theta is stale
 cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV
