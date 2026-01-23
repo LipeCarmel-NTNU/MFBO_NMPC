@@ -43,7 +43,7 @@ cfg_run.sigma_y           = [0.001 0.1 0.1];
 cfg_run.NumWorkers        = NumWorkers;
 
 % DOE matrix: each row is one theta (only used when cfg_run.mode == "doe")
-ThetaDOE = theta_doe_generator_v2();
+ThetaDOE = theta_doe_generator();
 cfg_run.ThetaDOE = ThetaDOE;
 
 % One-time initialisation (shared across all theta evaluations)
@@ -150,35 +150,18 @@ function run_doe(cfg_run, base)
     end
 end
 
-function ThetaDOE = theta_doe_generator_v2()
+function ThetaDOE = theta_doe_generator()
 %THETA_DOE_GENERATOR_V2 DOE for theta with targeted weight variants and horizon sweep.
 %
 % theta layout:
 %   theta = [f, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)]
 %
 % f in [0,1], and simulation runs with tf = 10*f (hours).
-%
-% Horizons:
-%   m = theta_m + 1
-%   p = theta_p + m
-%
-% Nominal:
-%   Q  = diag([10 1 1])
-%   Ru = diag([2 2 1])
-%   Rdu = diag([100 100 10])
-%
-% Horizon set:
-%   m_set = [3 6 12]
-%   p_set = [20 40 60]
-%   only ip > im
-%
-% f set:
-%   f_set = [0.1 0.2 0.4 0.6 0.8 1.0]
 
     nx = 3;
     nu = 3;
 
-    f_set = (1 : 10)./100;
+    f_set = (1 : 1)./100;
 
     q0   = [10 1 1];
     ru0  = [2 2 1];
@@ -410,11 +393,35 @@ function base = nmpc_init_base(sigma_y)
     base.noise = randn(base.N_max, base.nx) .* base.sigma_y;
 
     base.optimizer_max_iter = 100;
+
+    % Chebyshev fraction models (c0..c5)
+    base.cheb_c_SSdU = [ ...
+         6.442657e-01 ...
+         4.682368e-01 ...
+        -1.455242e-01 ...
+         2.457724e-02 ...
+         2.198219e-02 ...
+        -1.598959e-02 ...
+    ].';
+
+    base.cheb_c_SSE = [ ...
+         7.827330e-01 ...
+         3.771709e-01 ...
+        -2.433549e-01 ...
+         1.091471e-01 ...
+        -2.846259e-02 ...
+         1.358572e-03 ...
+    ].';
 end
 
 function out = simulate_nmpc(base, theta)
     %SIMULATE_NMPC Evaluate one theta using preinitialised base.
     % Uses per-run tf = 10*f, where f is theta(1).
+    %
+    % Approximated totals:
+    %   SSE_total_est  = SSE_partial / frac_SSE(f)
+    %   SSdU_total_est = SSdU_partial / frac_SSdU(f)
+    % where frac_* is Cheb5(2*f-1, c_*) clamped to <= 1.
 
     cfg = decode_theta(theta, base.nx, base.nu);
     pool_empty = isempty(gcp('nocreate'));
@@ -424,6 +431,12 @@ function out = simulate_nmpc(base, theta)
 
     T     = base.T_max(1:N);
     noise = base.noise(1:N, :);
+
+    frac_SSE  = min(Cheb5(2*cfg.f - 1, base.cheb_c_SSE),  1);
+    frac_SSdU = min(Cheb5(2*cfg.f - 1, base.cheb_c_SSdU), 1);
+
+    frac_SSE  = max(frac_SSE,  0.01);
+    frac_SSdU = max(frac_SSdU, 0.01);
 
     NMPC = NMPC_terminal(base.model, base.nx, base.nu);
     NMPC.optimizer_options.MaxIterations = base.optimizer_max_iter;
@@ -452,8 +465,8 @@ function out = simulate_nmpc(base, theta)
     out.N     = N;
     out.T     = T;
 
-    out.SSE = 0;
-    out.SSdU = 0;
+    out.SSE = 0;          % approximated total over full horizon
+    out.SSdU = 0;         % approximated total over full horizon
     out.runtime_s = 0;
 
     for case_id = 1:2
@@ -514,12 +527,20 @@ function out = simulate_nmpc(base, theta)
 
         E = Y - Ysp;
         E = E.*[10 1 1];
-        SSE = sum(E.^2, 2);
 
-        dU   = diff(U, 1, 1);
-        SSdU = sum(dU.^2, 2);
+        SSE_partial_vec = sum(E.^2, 2);
 
-        J = sum(SSE) + 1e4 * sum(SSdU);
+        dU = diff(U, 1, 1);
+        SSdU_partial_vec = sum(dU.^2, 2);
+
+        SSE_partial  = sum(SSE_partial_vec);
+        SSdU_partial = sum(SSdU_partial_vec);
+
+        SSE_est  = SSE_partial  / frac_SSE;
+        SSdU_est = SSdU_partial / frac_SSdU;
+
+        J_partial = SSE_partial + 1e4 * SSdU_partial;
+        J_est     = SSE_est     + 1e4 * SSdU_est;
 
         out.case(case_id).case_id    = case_id;
         out.case(case_id).x0         = x0;
@@ -533,16 +554,24 @@ function out = simulate_nmpc(base, theta)
         out.case(case_id).dt         = base.dt;
         out.case(case_id).tf         = tf;
 
-        out.case(case_id).cost_total = J;
+        % Existing fields hold the approximated (full-horizon) totals
+        out.case(case_id).SSE        = SSE_est;
+        out.case(case_id).SSdU       = SSdU_est;
+        out.case(case_id).cost_total = J_est;
 
-        out.case(case_id).SSE        = SSE;
-        out.case(case_id).SSdU       = SSdU;
+        % Partial values from the truncated simulation
+        out.case(case_id).partial_SSE        = SSE_partial_vec;
+        out.case(case_id).partial_SSdU       = SSdU_partial_vec;
+        out.case(case_id).partial_cost_total = J_partial;
+
         out.case(case_id).RUNTIME    = RUNTIME;
-
         out.case(case_id).runtime_s  = runtime_s;
 
-        out.SSE       = out.SSE  + sum(SSE);
-        out.SSdU      = out.SSdU + sum(SSdU);
+        out.case(case_id).frac_SSE   = frac_SSE;
+        out.case(case_id).frac_SSdU  = frac_SSdU;
+
+        out.SSE       = out.SSE  + SSE_est;
+        out.SSdU      = out.SSdU + SSdU_est;
         out.runtime_s = out.runtime_s + runtime_s;
     end
 end
@@ -577,6 +606,21 @@ function cfg = decode_theta(theta, nx, nu)
     cfg.Rdu = diag(10.^rdu_exp);
 
     cfg.f = max(0, min(1, cfg.f));
+end
+
+function y = Cheb5(x, c)
+    c = c(:);
+    if numel(c) ~= 6
+        error('Cheb5 expects 6 coefficients (c0..c5).');
+    end
+    T0 = ones(size(x));
+    T1 = x;
+    T2 = 2*x.^2 - 1;
+    T3 = 4*x.^3 - 3*x;
+    T4 = 8*x.^4 - 8*x.^2 + 1;
+    T5 = 16*x.^5 - 20*x.^3 + 5*x;
+
+    y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3 + c(5)*T4 + c(6)*T5;
 end
 
 function plot_simulation(out, case_id)

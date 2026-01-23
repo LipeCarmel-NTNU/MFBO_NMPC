@@ -97,14 +97,18 @@ alfa = theta_time(1);
 beta = theta_time(2);
 cT   = theta_time(3:6);
 
-% -----------------------------
+%% -----------------------------
 % Print coefficients
 % -----------------------------
 fprintf('Cheb5 coeffs SSdU (c0..c5):\n');
 fprintf('% .6e  ', c_SSdU); fprintf('\n\n');
+disp('SSdU(f = 0)')
+disp(Cheb5(-1, c_SSdU))
 
 fprintf('Cheb5 coeffs SSE  (c0..c5):\n');
 fprintf('% .6e  ', c_SSE); fprintf('\n\n');
+disp('SSE(f = 0)')
+disp(Cheb5(-1, c_SSE))
 
 fprintf('Time params:\n');
 fprintf('alfa = %.6g, beta = %.6g\n', alfa, beta);
