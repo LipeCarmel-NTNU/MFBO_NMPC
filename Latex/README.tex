@@ -1,6 +1,16 @@
 \documentclass[a4paper,11pt]{article}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{listings}
+
+\lstset{
+	basicstyle=\ttfamily\small,
+	frame=single,
+	breaklines=true,
+	numbers=left,
+	numberstyle=\tiny
+}
+
 \begin{document}
 	
 	\section*{Definition of the tuning vector $\theta$}
@@ -9,7 +19,7 @@
 	\[
 	\theta^\top =
 	\big[
-	\mathrm{Iter}_{\max},\;
+	f,\;
 	\theta_p,\;
 	\theta_m,\;
 	q,\;
@@ -20,7 +30,7 @@
 	
 	The components satisfy:
 	\begin{align*}
-		\mathrm{Iter}_{\max} &\in \{1,2,\ldots,300\}, \\
+		f &\in (0, 1), \\
 		\theta_m &\in \mathbb{Z}_{\ge 0}, \qquad \theta_m \leq 30, \\
 		\theta_p &\in \mathbb{Z}_{\ge 0}, \qquad \theta_p \leq 60, \\
 		q &\in [-3,3]^3, \\
@@ -40,5 +50,89 @@
 		m &= \theta_m + 1, \\
 		p &= \theta_p + m.
 	\end{align*}
+	
+	\section*{Surrogate for time}
+	
+	\subsection*{Implementation}
+	
+	\begin{lstlisting}[language=Matlab]
+		function t_hat = time_model(x, m, p, alfa, beta, cT)
+		k = 20;
+		softplus = @(z) log1p(exp(k*z)) / k;
+		
+		y = Cheb3(x, cT);
+		t_base = y + softplus(-y);
+		
+		scale = (m/10).^alfa .* (p/30).^beta;
+		t_hat = scale .* t_base;
+		end
+		
+		function y = Cheb3(x, c)
+		c = c(:);
+		if numel(c) ~= 4
+		error('Cheb3 expects 4 coefficients (c0..c3).');
+		end
+		T0 = ones(size(x));
+		T1 = x;
+		T2 = 2*x.^2 - 1;
+		T3 = 4*x.^3 - 3*x;
+		
+		y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3;
+		end
+		
+	\end{lstlisting}
+	
+	\subsection*{Mathematical form}
+	
+	Let $y = \mathrm{Cheb3}(2\cdot f - 1; c_T)$, where \(\mathrm{Cheb3}\) is a third order Chebyshev polynomial.  
+	Define:
+	\[
+	\operatorname{softplus}_k(z) = \frac{1}{k}\log\!\left(1 + e^{k z}\right),
+	\quad k > 0.
+	\]
+	
+	The base time surrogate is
+	\[
+	t_{\mathrm{base}}(x)
+	=
+	y + \operatorname{softplus}_{k=20}(-y),
+	\]
+	which enforces non-negativity while remaining differentiable.
+	
+	The full surrogate for the time \textbf{in hours} is then
+	\[
+	\hat{t}(x,m,p)
+	=
+	\left(\frac{m}{10}\right)^{\alpha}
+	\left(\frac{p}{30}\right)^{\beta}
+	\, t_{\mathrm{base}}(x).
+	\]
+	It is \textbf{extremely important} to fit using hours to prevent \textbf{numerical blowup}.
+	
+	
+	\subsection*{Fitted parameters}
+	
+	\begin{table}[h]
+		\centering
+		\caption{Estimated parameters of the surrogate time model.}
+		\begin{tabular}{lll}
+			\hline
+			Category & Parameter & Value \\
+			\hline
+			Scaling exponents 
+			& $\alpha$ & $1.80346$ \\
+			& $\beta$  & $-0.136052$ \\
+			\hline
+			Chebyshev coefficients 
+			& $c_0$ & $1.003973$ \\
+			& $c_1$ & $1.187784$ \\
+			& $c_2$ & $1.389282 \times 10^{-1}$ \\
+			& $c_3$ & $9.068274 \times 10^{-3}$ \\
+			\hline
+			Softplus parameter 
+			& $k$ & $20$ \\
+			\hline
+		\end{tabular}
+	\end{table}
 	
 \end{document}
