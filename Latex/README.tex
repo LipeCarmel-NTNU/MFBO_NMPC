@@ -31,8 +31,8 @@
 	The components satisfy:
 	\begin{align*}
 		f &\in (0, 1), \\
-		\theta_m &\in \mathbb{Z}_{\ge 0}, \qquad \theta_m \leq 30, \\
-		\theta_p &\in \mathbb{Z}_{\ge 0}, \qquad \theta_p \leq 60, \\
+		\theta_m &\in \mathbb{Z}_{\ge 0}, \qquad 0 \leq \theta_m \leq 30, \\
+		\theta_p &\in \mathbb{Z}_{\ge 0}, \qquad 0 \leq \theta_p \leq 60, \\
 		q &\in [-3,3]^3, \\
 		r^{(u)} &\in [-3,3]^3, \\
 		r^{(\Delta u)} &\in [-3,3]^3.
@@ -84,8 +84,31 @@
 	
 	\subsection*{Mathematical form}
 	
-	Let $y = \mathrm{Cheb3}(2\cdot f - 1; c_T)$, where \(\mathrm{Cheb3}\) is a third order Chebyshev polynomial.  
-	Define:
+	Let the scalar input be normalised to the Chebyshev domain as
+	\[
+	x = 2f - 1 \in [-1,1].
+	\]
+	
+	The third-order Chebyshev polynomials of the first kind are
+	\begin{align*}
+		T_0(x) &= 1, \\
+		T_1(x) &= x, \\
+		T_2(x) &= 2x^2 - 1, \\
+		T_3(x) &= 4x^3 - 3x.
+	\end{align*}
+	
+	The Chebyshev surrogate is then
+	\[
+	y(x)
+	=
+	c_0 T_0(x)
+	+ c_1 T_1(x)
+	+ c_2 T_2(x)
+	+ c_3 T_3(x).
+	\]
+	
+	Define the smooth rectifier
+	 
 	\[
 	\operatorname{softplus}_k(z) = \frac{1}{k}\log\!\left(1 + e^{k z}\right),
 	\quad k > 0.
