@@ -14,54 +14,6 @@ THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 RESULTS_FILE = BASE_DIR / "results" / "results.csv"
 
 
-def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
-    """Read optimization results ensuring lock coordination."""
-
-    while LOCK_FILE.exists():
-        time.sleep(5)
-
-    if not RESULTS_FILE.exists():
-        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
-
-    timestamp: list[str] = []
-    sse: list[float] = []
-    ssd_u: list[float] = []
-    cost: list[float] = []
-    runtime: list[float] = []
-    theta_matrix: list[list[float]] = []
-
-    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
-        reader = csv.DictReader(fh)
-        required_columns = [
-            "timestamp",
-            "SSE",
-            "SSdU",
-            "J",
-            "runtime_s",
-            *[f"theta_{i}" for i in range(1, 13)],
-        ]
-        missing = [column for column in required_columns if column not in reader.fieldnames]
-        if missing:
-            raise ValueError(f"Results CSV missing columns: {', '.join(missing)}")
-
-        for row in reader:
-            timestamp.append(row["timestamp"])
-            sse.append(float(row["SSE"]))
-            ssd_u.append(float(row["SSdU"]))
-            cost.append(float(row["J"]))
-            runtime.append(float(row["runtime_s"]))
-            theta_row = [float(row[f"theta_{i}"]) for i in range(1, 13)]
-            theta_matrix.append(theta_row)
-
-    return timestamp, sse, ssd_u, cost, runtime, theta_matrix
-
-def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
-    """Validate theta and forward it to MATLAB via ``write_theta``."""
-
-    values = _validate_theta(theta)
-    write_theta(values)
-
-
 def _is_integer_value(value: object) -> bool:
     """Return True when value behaves like a non-boolean integer."""
 
@@ -143,6 +95,12 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
     return values
 
 
+def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
+    """Validate theta and forward it to MATLAB via ``write_theta``."""
+
+    values = _validate_theta(theta)
+    write_theta(values)
+
 
 def write_theta(theta: Sequence[float]) -> None:
     """Write theta values to ``inbox/theta.txt`` after lock negotiation."""
@@ -154,5 +112,47 @@ def write_theta(theta: Sequence[float]) -> None:
     with THETA_FILE.open("w", encoding="ascii") as fh:
         fh.write(" ".join(str(value) for value in theta))
         fh.write("\n")
+
+
+def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
+    """Read optimization results ensuring lock coordination."""
+
+    while LOCK_FILE.exists():
+        time.sleep(5)
+
+    if not RESULTS_FILE.exists():
+        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
+
+    timestamp: list[str] = []
+    sse: list[float] = []
+    ssd_u: list[float] = []
+    cost: list[float] = []
+    runtime: list[float] = []
+    theta_matrix: list[list[float]] = []
+
+    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
+        reader = csv.DictReader(fh)
+        required_columns = [
+            "timestamp",
+            "SSE",
+            "SSdU",
+            "J",
+            "runtime_s",
+            *[f"theta_{i}" for i in range(1, 13)],
+        ]
+        missing = [column for column in required_columns if column not in reader.fieldnames]
+        if missing:
+            raise ValueError(f"Results CSV missing columns: {', '.join(missing)}")
+
+        for row in reader:
+            timestamp.append(row["timestamp"])
+            sse.append(float(row["SSE"]))
+            ssd_u.append(float(row["SSdU"]))
+            cost.append(float(row["J"]))
+            runtime.append(float(row["runtime_s"]))
+            theta_row = [float(row[f"theta_{i}"]) for i in range(1, 13)]
+            theta_matrix.append(theta_row)
+
+    return timestamp, sse, ssd_u, cost, runtime, theta_matrix
 
 
