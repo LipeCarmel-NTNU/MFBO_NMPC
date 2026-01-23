@@ -14,6 +14,54 @@ THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 RESULTS_FILE = BASE_DIR / "results" / "results.csv"
 
 
+def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
+    """Read optimization results ensuring lock coordination."""
+
+    while LOCK_FILE.exists():
+        time.sleep(5)
+
+    if not RESULTS_FILE.exists():
+        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
+
+    timestamp: list[str] = []
+    sse: list[float] = []
+    ssd_u: list[float] = []
+    cost: list[float] = []
+    runtime: list[float] = []
+    theta_matrix: list[list[float]] = []
+
+    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
+        reader = csv.DictReader(fh)
+        required_columns = [
+            "timestamp",
+            "SSE",
+            "SSdU",
+            "J",
+            "runtime_s",
+            *[f"theta_{i}" for i in range(1, 13)],
+        ]
+        missing = [column for column in required_columns if column not in reader.fieldnames]
+        if missing:
+            raise ValueError(f"Results CSV missing columns: {', '.join(missing)}")
+
+        for row in reader:
+            timestamp.append(row["timestamp"])
+            sse.append(float(row["SSE"]))
+            ssd_u.append(float(row["SSdU"]))
+            cost.append(float(row["J"]))
+            runtime.append(float(row["runtime_s"]))
+            theta_row = [float(row[f"theta_{i}"]) for i in range(1, 13)]
+            theta_matrix.append(theta_row)
+
+    return timestamp, sse, ssd_u, cost, runtime, theta_matrix
+
+def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
+    """Validate theta and forward it to MATLAB via ``write_theta``."""
+
+    values = _validate_theta(theta)
+    write_theta(values)
+
+
 def _is_integer_value(value: object) -> bool:
     """Return True when value behaves like a non-boolean integer."""
 
@@ -34,8 +82,8 @@ def _is_positive_real(value: object) -> bool:
     return False
 
 
-def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
-    """Validate theta and forward it to MATLAB via ``write_theta``."""
+def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
+    """Validate and normalize theta parameters."""
 
     values = list(theta)
     expected_length = 12
@@ -44,13 +92,15 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
             f"theta must contain {expected_length} elements, received {len(values)}"
         )
 
-    iter_max = values[0]
-    if not _is_integer_value(iter_max) or not (1 <= int(iter_max) <= 300):
+    # Validate f: must be in [0, 1]
+    f = values[0]
+    if not _is_positive_real(f) or not (0 <= f <= 1):
         raise ValueError(
-            f"theta[0]: Iter_max must be an integer in [1, 300], got {iter_max}"
+            f"theta[0]: f must be a real number in [0, 1], got {f}"
         )
-    values[0] = int(round(float(iter_max)))
+    values[0] = float(f)
 
+    # Validate theta_p: non-negative integer
     theta_p = values[1]
     if not _is_integer_value(theta_p) or int(theta_p) < 0:
         raise ValueError(
@@ -58,6 +108,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
         )
     values[1] = int(round(float(theta_p)))
 
+    # Validate theta_m: non-negative integer
     theta_m = values[2]
     if not _is_integer_value(theta_m) or int(theta_m) < 0:
         raise ValueError(
@@ -65,6 +116,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
         )
     values[2] = int(round(float(theta_m)))
 
+    # Validate q values: positive reals
     for i in range(3):
         q_value = values[3 + i]
         if not _is_positive_real(q_value):
@@ -72,6 +124,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
                 f"theta[{3 + i}]: q[{i}] must be a positive real number, got {q_value}"
             )
 
+    # Validate r^(u) values: positive reals
     for i in range(3):
         r_u_value = values[6 + i]
         if not _is_positive_real(r_u_value):
@@ -79,6 +132,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
                 f"theta[{6 + i}]: r^(u)[{i}] must be a positive real number, got {r_u_value}"
             )
 
+    # Validate r^(Delta u) values: positive reals
     for i in range(3):
         r_du_value = values[9 + i]
         if not _is_positive_real(r_du_value):
@@ -86,7 +140,8 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
                 f"theta[{9 + i}]: r^(Delta u)[{i}] must be a positive real number, got {r_du_value}"
             )
 
-    write_theta(values)
+    return values
+
 
 
 def write_theta(theta: Sequence[float]) -> None:
@@ -101,40 +156,3 @@ def write_theta(theta: Sequence[float]) -> None:
         fh.write("\n")
 
 
-def read_results() -> tuple[list[float], list[float], list[float], list[float], list[list[float]]]:
-    """Read optimization results ensuring lock coordination."""
-
-    while LOCK_FILE.exists():
-        time.sleep(5)
-
-    if not RESULTS_FILE.exists():
-        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
-
-    sse: list[float] = []
-    ssd_u: list[float] = []
-    cost: list[float] = []
-    runtime: list[float] = []
-    theta_matrix: list[list[float]] = []
-
-    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
-        reader = csv.DictReader(fh)
-        required_columns = [
-            "SSE",
-            "SSdU",
-            "J",
-            "runtime_s",
-            *[f"theta_{i}" for i in range(1, 13)],
-        ]
-        missing = [column for column in required_columns if column not in reader.fieldnames]
-        if missing:
-            raise ValueError(f"Results CSV missing columns: {', '.join(missing)}")
-
-        for row in reader:
-            sse.append(float(row["SSE"]))
-            ssd_u.append(float(row["SSdU"]))
-            cost.append(float(row["J"]))
-            runtime.append(float(row["runtime_s"]))
-            theta_row = [float(row[f"theta_{i}"]) for i in range(1, 13)]
-            theta_matrix.append(theta_row)
-
-    return sse, ssd_u, cost, runtime, theta_matrix
