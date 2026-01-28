@@ -102,7 +102,7 @@ classdef NMPC_abstract < handle
             % increasing MaxIter)
 
 
-            failed_before = (obj.latest_flag < 0);
+            failed_before = (obj.latest_flag < 0); % on startup flag is NaN
 
             % Use the previous solution as a guess if it is available
             if isempty(obj.latest_wopt)
