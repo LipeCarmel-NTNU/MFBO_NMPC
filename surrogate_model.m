@@ -1,212 +1,163 @@
-% fit_surrogates_all.m
-% Fit on all surrogate_data_<i>.mat files:
-%   SSdU: Cheb5 in x on grid f = (1:N)/N  (length N)
-%   SSE : Cheb5 in x on grid f = (1:N)/N  (length N)
-%   time: t = (m/10)^alfa*(p/30)^beta*softmax(cheb3(x,c)), on grid f (length N)
+% fit_runtime_from_results_csv.m
+% Fit runtime_s as a function of f (=theta_1), p and m from results.csv
+%
+% Model:
+%   t = (m/10)^alfa * (p/30)^beta * g( a0 + a1*x )
+%   x = 2*f - 1
+%   g(y) = y + softplus_k(-y)   (smooth positivity mapping)
+%
+% Notes:
+% - Reads results/results.csv
+% - Skips the first data row after loading
+% - Uses fminunc (quasi-newton)
+% - Converts runtime_s (seconds) to hours once
 
 clear; close all; clc
 rng(1)
 
-files = dir("surrogate_data_*.mat");
-if isempty(files)
-    error('No files matching surrogate_data_*.mat in the current folder.');
+%% --- Load and parse ---
+results_csv = fullfile("results","results.csv");
+T = readtable(results_csv, 'TextType','string');
+
+if height(T) < 3
+    error('Not enough rows in results.csv after skipping first row.');
 end
 
-% -----------------------------
-% Aggregate all data
-% -----------------------------
-x_all     = [];
-SSdU_all  = [];
-SSE_all   = [];
-t_all     = [];
-m_all     = [];
-p_all     = [];
-file_id   = [];
+% Skip first data row
+T = T(2:end, :);
 
-for kf = 1:numel(files)
-    S = load(fullfile(files(kf).folder, files(kf).name));
-    if ~isfield(S, "out")
-        error("File %s does not contain variable 'out'.", files(kf).name);
-    end
-    out = S.out;
+% Response: runtime in hours (convert once)
+t = double(T.runtime_s) / 3600;
 
-    % Grid
-    N  = length(out.case(1).SSE);
-    f  = (1:N).'/N;
-    x  = 2*f - 1;
+% Predictors
+f       = double(T.theta_1);   % fraction (0,1)
+theta_p = double(T.theta_2);
+theta_m = double(T.theta_3);
 
-    % Decode m,p
-    m = out.theta(3) + 1;
-    p = out.theta(2) + m;
+% Decode m,p (same convention as surrogate scripts)
+m = theta_m + 1;
+p = theta_p + m;
 
-    % Signals
-    time = cumsum(out.case(1).RUNTIME) + cumsum(out.case(2).RUNTIME);
-    time = time/3600; % h
+% Affine coordinate in [-1, 1]
+x = 2*f - 1;
 
-    SSdU = [0; cumsum(out.case(1).SSdU)] + [0; cumsum(out.case(2).SSdU)];
-    SSdU = SSdU / SSdU(end);
-
-    SSE  = cumsum(out.case(1).SSE) + cumsum(out.case(2).SSE);
-    SSE  = SSE / SSE(end);
-
-    % Sanity checks (your intended construction)
-    if numel(SSdU) ~= N
-        error("File %s: expected SSdU length N, got %d (N=%d).", files(kf).name, numel(SSdU), N);
-    end
-    if numel(SSE) ~= N || numel(time) ~= N
-        error("File %s: expected SSE and time length N, got SSE=%d, time=%d (N=%d).", ...
-            files(kf).name, numel(SSE), numel(time), N);
-    end
-
-    % Append
-    x_all    = [x_all;    x];
-    SSdU_all = [SSdU_all; SSdU];
-    SSE_all  = [SSE_all;  SSE];
-    t_all    = [t_all;    time];
-    m_all    = [m_all;    repmat(m, N, 1)];
-    p_all    = [p_all;    repmat(p, N, 1)];
-    file_id  = [file_id;  repmat(kf, N, 1)];
-end
-
-% -----------------------------
-% Optimisation options
-% -----------------------------
+%% --- Optimisation options ---
 opts = optimoptions('fminunc', ...
     'Algorithm','quasi-newton', ...
     'MaxIterations', 2000, ...
-    'OptimalityTolerance', 1e-10, ...
-    'StepTolerance', 1e-12);
+    'OptimalityTolerance', 1e-12, ...
+    'StepTolerance', 1e-12, ...
+    'Display','iter');
 
-% -----------------------------
-% Fit SSdU and SSE with Cheb5
-% -----------------------------
-c5_0   = zeros(6,1);
-c_SSdU = fminunc(@(c) obj_Cheb5(c, x_all, SSdU_all), c5_0, opts);
-c_SSE  = fminunc(@(c) obj_Cheb5(c, x_all, SSE_all ), c5_0, opts);
+%% --- Fit time model ---
+% th = [alfa; beta; a0; a1]
+theta0 = [ ...
+    0.1; ...   % alfa
+    0.1; ...   % beta
+    1.0; ...   % a0
+    1.0  ...   % a1
+];
 
-% -----------------------------
-% Fit time model
-%   t = (m/10)^alfa * (p/30)^beta * softmax(cheb3(x,c))
-% theta = [alfa; beta; c0; c1; c2; c3]
-% -----------------------------
-theta0_time = [0; 1.7; 1; 1; 1e-1; 1e-2];
+[theta_hat, fval] = fminunc(@(th) obj_time(th, x, m, p, t), theta0, opts);
 
-[theta_time, fval] = fminunc(@(th) obj_time(th, x_all, m_all, p_all, t_all), theta0_time, opts);
+alfa = theta_hat(1);
+beta = theta_hat(2);
+a    = theta_hat(3:4);
 
-alfa = theta_time(1);
-beta = theta_time(2);
-cT   = theta_time(3:6);
+%% --- Predictions and diagnostics ---
+t_hat = time_model(x, m, p, alfa, beta, a);
+
+SS_res = sum((t - t_hat).^2);
+SS_tot = sum((t - mean(t)).^2);
+R2 = 1 - SS_res/SS_tot;
+
+fprintf('\n===== Runtime model fit (skip first row) =====\n');
+fprintf('alfa = %.8g\n', alfa);
+fprintf('beta = %.8g\n', beta);
+fprintf('a_time (a0,a1):\n');
+fprintf('% .6e  % .6e\n', a(1), a(2));
+fprintf('R^2 = %.6f\n', R2);
+
+figure;
+plot(f, t, 'o'); hold on
+plot(f, t_hat, 'x');
+grid on
+xlabel('f = theta_1');
+ylabel('runtime (h)');
+legend('data','model','Location','best');
+
+figure;
+plot(t, t_hat, 'o', 'MarkerSize',10); grid on
+hold on
+mx = max([t; t_hat]);
+plot([0 mx], [0 mx], 'k-')
+xlabel('runtime (h)');
+ylabel('runtime\_hat (h)');
+title(sprintf('Parity plot, R^2 = %.4f', R2));
 
 %% -----------------------------
-% Print coefficients
+% Shape term as a function of f
 % -----------------------------
-fprintf('Cheb5 coeffs SSdU (c0..c5):\n');
-fprintf('% .6e  ', c_SSdU); fprintf('\n\n');
-disp('SSdU(f = 0)')
-disp(Cheb5(-1, c_SSdU))
+f_plot = linspace(0, 1, 200).';
+x_plot = 2*f_plot - 1;
 
-fprintf('Cheb5 coeffs SSE  (c0..c5):\n');
-fprintf('% .6e  ', c_SSE); fprintf('\n\n');
-disp('SSE(f = 0)')
-disp(Cheb5(-1, c_SSE))
+% Raw affine term in x
+y_aff = affine_in_x(x_plot, a);
 
-fprintf('Time params:\n');
-fprintf('alfa = %.6g, beta = %.6g\n', alfa, beta);
-fprintf('c_time (c0..c3):\n');
-fprintf('% .6e  ', cT); fprintf('\n');
+% Positivity mapping used in the time model
+k = 20;
+softplus_k = @(z) log1p(exp(k*z)) / k;
+shape_pos = y_aff + softplus_k(-y_aff);
 
-%% -----------------------------
-% Quick diagnostics plots (optional)
-% -----------------------------
+figure;
+plot(f_plot, shape_pos, 'LineWidth', 1.5); hold on
+plot(f_plot, y_aff, '--', 'LineWidth', 1.2);
+grid on
+xlabel('f');
+ylabel('Value');
+legend('Positive-mapped shape term', 'Raw affine term', 'Location','best');
+title('Shape contribution to runtime as a function of f');
 
-SSdU_hat = clamp01(Cheb5(x, c_SSdU));
-SSE_hat  = clamp01(Cheb5(x, c_SSE));
-t_hat    = time_model(x, m, p, alfa, beta, cT);
-
-figure; plot(f, SSdU, 'LineWidth', 1.5); hold on
-plot(f, SSdU_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('SSdU'); grid on
-legend('Data','Cheb5 fit','Location','southeast')
-
-figure; plot(f, SSE, 'LineWidth', 1.5); hold on
-plot(f, SSE_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('SSE'); grid on
-legend('Data','Cheb5 fit','Location','southeast')
-
-figure; plot(f, time, 'LineWidth', 1.5); hold on
-plot(f, t_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('Time'); grid on
-legend('Data','Time model','Location','best')
-
-figure; plot(f, time./t_hat); grid on
-xlabel('f'); ylabel('time / time_hat')
-
+%% =============================
+% Objective
 % =============================
-% Objectives
-% =============================
-function J = obj_Cheb5(c, x, y)
-    r = y - Cheb5(x, c);
-    J = r.'*r;
-    if ~isfinite(J); J = realmax; end
-end
-
 function J = obj_time(th, x, m, p, t)
     alfa = th(1);
     beta = th(2);
-    cT   = th(3:6);
+    a    = th(3:end);
 
-    t_hat = time_model(x, m, p, alfa, beta, cT);
-
+    t_hat = time_model(x, m, p, alfa, beta, a);
     r = t - t_hat;
-    J = r.'*r + 1e-3 * (alfa^2 + beta^2);
-    if ~isfinite(J);
-        J = realmax
+
+    lambda = 1e-1;  % regularisation weight
+
+    fit_cost = r.'*r;
+    reg_cost = lambda*(alfa^2 + beta^2 + sumsqr(a(2:end)));  % do not penalise offset
+    J = fit_cost + reg_cost;
+
+    if ~isfinite(J)
+        J = realmax;
     end
 end
 
-% =============================
+%% =============================
 % Models
 % =============================
-function y = Cheb5(x, c)
-    c = c(:);
-    if numel(c) ~= 6
-        error('Cheb5 expects 6 coefficients (c0..c5).');
+function y = affine_in_x(x, a)
+    a = a(:);
+    if numel(a) ~= 2
+        error('affine_in_x expects 2 coefficients [a0; a1].');
     end
-    T0 = ones(size(x));
-    T1 = x;
-    T2 = 2*x.^2 - 1;
-    T3 = 4*x.^3 - 3*x;
-    T4 = 8*x.^4 - 8*x.^2 + 1;
-    T5 = 16*x.^5 - 20*x.^3 + 5*x;
-
-    y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3 + c(5)*T4 + c(6)*T5;
+    y = a(1) + a(2)*x;
 end
 
-function y = Cheb3(x, c)
-    c = c(:);
-    if numel(c) ~= 4
-        error('Cheb3 expects 4 coefficients (c0..c3).');
-    end
-    T0 = ones(size(x));
-    T1 = x;
-    T2 = 2*x.^2 - 1;
-    T3 = 4*x.^3 - 3*x;
-
-    y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3;
-end
-
-function t_hat = time_model(x, m, p, alfa, beta, cT)
+function t_hat = time_model(x, m, p, alfa, beta, a)
     k = 20;
-    softplus = @(z) log1p(exp(k*z)) / k;
+    softplus_k = @(z) log1p(exp(k*z)) / k;
 
-    y = Cheb3(x, cT);
-    t_base = y + softplus(-y);
-    
+    y = affine_in_x(x, a);
+    shape_pos = y + softplus_k(-y);  % smooth positivity mapping
 
     scale = (m/10).^alfa .* (p/30).^beta;
-    t_hat = scale .* t_base;
-end
-
-function y = clamp01(y)
-    y = min(max(y, 0), 1);
+    t_hat = scale .* shape_pos;
 end
