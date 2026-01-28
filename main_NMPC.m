@@ -65,7 +65,7 @@ help NMPC.solve
 %% Initial conditions
 tf = 5/60;                % h
 
-V_0   = 1;
+V_0   = 100;
 X_0   = 15;
 S_0   = 0;
 x0_plant = [V_0, X_0, S_0];
@@ -110,10 +110,10 @@ for i = 1 : N
     fprintf('Time elapsed: %.1f minutes \n', toc(timer)/60)
 
     Y(i, :) = x0_plant;
+    % if i > 1
+    %     x0_plant(1) = 100;
+    % end
     if i > 1
-        x0_plant(1) = 100;
-    end
-    if i > 3
         x0_plant(1) = 1;
     end
     %% Calculate control action

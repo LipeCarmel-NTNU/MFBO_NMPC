@@ -152,13 +152,16 @@ classdef NMPC_abstract < handle
                 else
                     warning('MPC - Failed to solve. Using the u(k+1|k-1)')
                     % u = u_init;
-                    [~, u] = data_from_w(obj, obj.latest_wopt);
-                    if obj.m > 1
-                        uk = u(2, :);
+                    if isempty(obj.latest_wopt) % first iteration
+                        uk = zeros(1, obj.nu);
                     else
-                        uk = u(1, :);
+                        [~, u] = data_from_w(obj, obj.latest_wopt);
+                        if obj.m > 1
+                            uk = u(2, :);
+                        else
+                            uk = u(1, :);
+                        end
                     end
-
                 end
             end
 
