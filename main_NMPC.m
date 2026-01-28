@@ -45,7 +45,7 @@ NMPC.optimizer_options.UseParallel = USE_PARALLEL;
 NMPC.Ts = dt;
 
 % Update optimisation horizons
-NMPC.p = 20;
+NMPC.p = 5;
 NMPC.m = 3;
 
 % Weights
@@ -110,7 +110,12 @@ for i = 1 : N
     fprintf('Time elapsed: %.1f minutes \n', toc(timer)/60)
 
     Y(i, :) = x0_plant;
-
+    if i > 1
+        x0_plant(1) = 100;
+    end
+    if i > 3
+        x0_plant(1) = 1;
+    end
     %% Calculate control action
 
     Y_sp(i,:) = NMPC.xsp(1:3);

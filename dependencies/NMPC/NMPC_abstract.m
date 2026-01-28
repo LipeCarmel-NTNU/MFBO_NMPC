@@ -102,17 +102,16 @@ classdef NMPC_abstract < handle
             % increasing MaxIter)
 
 
-            failed_before = false; % to be checked
-            
+            failed_before = (obj.latest_flag < 0);
+
             % Use the previous solution as a guess if it is available
             if isempty(obj.latest_wopt)
                 % Solve the first iteration with no information
                 [uk, x, u] = solve_first_iter(obj, x_init, u_init);
 
-            elseif obj.latest_flag <= 0
+            elseif failed_before
                 % If there is no previous solution, solve withuot
                 % information
-                failed_before = true;
                 [uk, x, u] = solve_first_iter(obj, x_init, u_init);
 
             else
@@ -124,7 +123,7 @@ classdef NMPC_abstract < handle
 
                 % Moving horizon
                 u = [u(2:end, :); u(end, :)]; % if m=1 u(2:end, :) return a 0 x nu empty vector
-                
+
                 % Ensure continuity
                 w0 = guess_from_initial(obj, x_init, u);
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
@@ -134,17 +133,21 @@ classdef NMPC_abstract < handle
             % current solution thus ensuring satisfaction of the continuity
             % constraints. This tends to guide the optimizer to a feasible
             % solution
+
+            % Attempt to recover
             if obj.latest_flag == -2 % < 1
                 % Ensure continuity
                 w0 = guess_from_initial(obj, x_init, u);
                 % Retry
                 [uk, x, u, fval] = solve_optimization(obj, w0, x_init, u_init);
             end
+
+            % Failed to recover: Use fallback strategy
             if obj.latest_flag < 0
                 % Note that max iter is ok for most pratical cases and
                 % better than the moving horizon control action
                 if failed_before
-                    warning('MPC - FAILED TWICE')
+                    warning('MPC - FAILED AGAIN')
                     uk = zeros(1, obj.nu);
                 else
                     warning('MPC - Failed to solve. Using the u(k+1|k-1)')
@@ -155,6 +158,7 @@ classdef NMPC_abstract < handle
                     else
                         uk = u(1, :);
                     end
+
                 end
             end
 
