@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (MiKTeX 24.4) (preloaded format=pdflatex 2025.2.28)  23 JAN 2026 15:43
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (MiKTeX 24.4) (preloaded format=pdflatex 2025.2.28)  28 JAN 2026 09:41
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -179,33 +179,21 @@ LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <10> not available
 [1
 
 {C:/Users/lipec/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]
-Overfull \hbox (6.18509pt too wide) in paragraph at lines 132--134
-\OT1/cmr/m/n/10.95 It is \OT1/cmr/bx/n/10.95 ex-tremely im-por-tant \OT1/cmr/m/
-n/10.95 to fit us-ing hours to pre-vent \OT1/cmr/bx/n/10.95 nu-mer-i-cal blowup
-\OT1/cmr/m/n/10.95 . 
- []
 
-
-LaTeX Warning: `h' float specifier changed to `ht'.
-
-
-
-[2]
-
-[3] (README.aux)
+[2] (README.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 3995 strings out of 473529
- 54335 string characters out of 5714773
- 748232 words of memory out of 5000000
- 27238 multiletter control sequences out of 15000+600000
+ 3986 strings out of 473529
+ 54253 string characters out of 5714773
+ 702232 words of memory out of 5000000
+ 27229 multiletter control sequences out of 15000+600000
  567640 words of font info for 71 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 56i,10n,65p,224b,2232s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 56i,10n,65p,224b,1724s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/lipec/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/
 cmbx10.pfb><C:/Users/lipec/AppData/Local/Programs/MiKTeX/fonts/type1/public/ams
 fonts/cm/cmbx12.pfb><C:/Users/lipec/AppData/Local/Programs/MiKTeX/fonts/type1/p
@@ -222,9 +210,9 @@ C:/Users/lipec/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmr
 /amsfonts/cm/cmsy8.pfb><C:/Users/lipec/AppData/Local/Programs/MiKTeX/fonts/type
 1/public/amsfonts/cm/cmtt10.pfb><C:/Users/lipec/AppData/Local/Programs/MiKTeX/f
 onts/type1/public/amsfonts/symbols/msbm10.pfb>
-Output written on README.pdf (3 pages, 165785 bytes).
+Output written on README.pdf (2 pages, 160924 bytes).
 PDF statistics:
- 82 PDF objects out of 1000 (max. 8388607)
+ 79 PDF objects out of 1000 (max. 8388607)
  0 named destinations out of 1000 (max. 500000)
  1 words of extra memory for PDF output out of 10000 (max. 10000000)
 

@@ -56,61 +56,35 @@
 	\subsection*{Implementation}
 	
 	\begin{lstlisting}[language=Matlab]
-		function t_hat = time_model(x, m, p, alfa, beta, cT)
+		function t_hat = time_model(x, m, p, alfa, beta, a)
 		k = 20;
 		softplus = @(z) log1p(exp(k*z)) / k;
 		
-		y = Cheb3(x, cT);
+		y = a(1) + a(2)*x;
 		t_base = y + softplus(-y);
 		
 		scale = (m/10).^alfa .* (p/30).^beta;
 		t_hat = scale .* t_base;
 		end
-		
-		function y = Cheb3(x, c)
-		c = c(:);
-		if numel(c) ~= 4
-		error('Cheb3 expects 4 coefficients (c0..c3).');
-		end
-		T0 = ones(size(x));
-		T1 = x;
-		T2 = 2*x.^2 - 1;
-		T3 = 4*x.^3 - 3*x;
-		
-		y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3;
-		end
-		
 	\end{lstlisting}
 	
 	\subsection*{Mathematical form}
 	
-	Let the scalar input be normalised to the Chebyshev domain as
+	Let the scalar input be normalised to the interval $[-1,1]$ as
 	\[
-	x = 2f - 1 \in [-1,1].
+	x = 2f - 1.
 	\]
 	
-	The third-order Chebyshev polynomials of the first kind are
-	\begin{align*}
-		T_0(x) &= 1, \\
-		T_1(x) &= x, \\
-		T_2(x) &= 2x^2 - 1, \\
-		T_3(x) &= 4x^3 - 3x.
-	\end{align*}
-	
-	The Chebyshev surrogate is then
+	The shape term is modelled as an affine function of $x$,
 	\[
-	y(x)
-	=
-	c_0 T_0(x)
-	+ c_1 T_1(x)
-	+ c_2 T_2(x)
-	+ c_3 T_3(x).
+	y(x) = a_0 + a_1 x.
 	\]
 	
 	Define the smooth rectifier
-	 
 	\[
-	\operatorname{softplus}_k(z) = \frac{1}{k}\log\!\left(1 + e^{k z}\right),
+	\operatorname{softplus}_k(z)
+	=
+	\frac{1}{k}\log\!\left(1 + e^{k z}\right),
 	\quad k > 0.
 	\]
 	
@@ -118,11 +92,11 @@
 	\[
 	t_{\mathrm{base}}(x)
 	=
-	y + \operatorname{softplus}_{k=20}(-y),
+	y(x) + \operatorname{softplus}_{k=20}\!\left(-y(x)\right),
 	\]
-	which enforces non-negativity while remaining differentiable.
+	which enforces non-negativity while remaining continuously differentiable.
 	
-	The full surrogate for the time \textbf{in hours} is then
+	The full surrogate for the computation time \textbf{in hours} is
 	\[
 	\hat{t}(x,m,p)
 	=
@@ -130,8 +104,8 @@
 	\left(\frac{p}{30}\right)^{\beta}
 	\, t_{\mathrm{base}}(x).
 	\]
-	It is \textbf{extremely important} to fit using hours to prevent \textbf{numerical blowup}.
 	
+	Fitting is performed in hours to avoid numerical scaling issues during optimisation.
 	
 	\subsection*{Fitted parameters}
 	
@@ -142,18 +116,19 @@
 			\hline
 			Category & Parameter & Value \\
 			\hline
-			Scaling exponents 
-			& $\alpha$ & $1.80346$ \\
-			& $\beta$  & $-0.136052$ \\
+			Scaling exponents
+			& $\alpha$ & $0.33233435$ \\
+			& $\beta$  & $2.3029582$ \\
 			\hline
-			Chebyshev coefficients 
-			& $c_0$ & $1.003973$ \\
-			& $c_1$ & $1.187784$ \\
-			& $c_2$ & $1.389282 \times 10^{-1}$ \\
-			& $c_3$ & $9.068274 \times 10^{-3}$ \\
+			Affine shape coefficients
+			& $a_0$ & $8.843454 \times 10^{-1}$ \\
+			& $a_1$ & $1.079230$ \\
 			\hline
-			Softplus parameter 
+			Softplus parameter
 			& $k$ & $20$ \\
+			\hline
+			Fit quality
+			& $R^2$ & $0.999417$ \\
 			\hline
 		\end{tabular}
 	\end{table}
