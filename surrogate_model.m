@@ -19,13 +19,6 @@ rng(1)
 results_csv = fullfile("results","results.csv");
 T = readtable(results_csv, 'TextType','string');
 
-if height(T) < 3
-    error('Not enough rows in results.csv after skipping first row.');
-end
-
-% Skip first data row
-T = T(2:end, :);
-
 % Response: runtime in hours (convert once)
 t = double(T.runtime_s) / 3600;
 
