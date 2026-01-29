@@ -151,6 +151,6 @@ function t_hat = time_model(x, m, p, alfa, beta, a)
     y = affine_in_x(x, a);
     shape_pos = y + softplus_k(-y);  % smooth positivity mapping
 
-    scale = (m/10).^alfa .* (p/30).^beta;
+    scale = (m/10).^(alfa^2) .* (p/30).^(beta^2);
     t_hat = scale .* shape_pos;
 end

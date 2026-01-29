@@ -62,12 +62,11 @@ USE_PARALLEL = true;
 % Configure a parallel pool. If USE_PARALLEL==false, the script ensures no pool.
 p = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 8;   % Choose based on machine capacity (cores/RAM).
+    NumWorkers = 2;   % Choose based on machine capacity (cores/RAM).
     if isempty(p) || p.NumWorkers ~= NumWorkers
         if ~isempty(p)
             delete(p);
         end
-        % Process-based pool isolates workers (higher overhead, but robust).
         parpool('Processes', NumWorkers);
     end
 else
