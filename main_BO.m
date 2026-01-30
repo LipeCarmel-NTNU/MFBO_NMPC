@@ -57,7 +57,7 @@ delete_if_exists('matlab.lock')
 rng(1)
 
 % Do once at the start
-USE_PARALLEL = true;
+USE_PARALLEL = false;
 
 % Configure a parallel pool. If USE_PARALLEL==false, the script ensures no pool.
 p = gcp('nocreate');
@@ -67,7 +67,7 @@ if USE_PARALLEL
         if ~isempty(p)
             delete(p);
         end
-        parpool('Processes', NumWorkers);
+        parpool('Threads', NumWorkers);
     end
 else
     NumWorkers = 1;
