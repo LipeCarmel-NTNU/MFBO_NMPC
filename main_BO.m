@@ -62,7 +62,7 @@ USE_PARALLEL = true;
 % Configure a parallel pool. If USE_PARALLEL==false, the script ensures no pool.
 p = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 31;   % Choose based on machine capacity (cores/RAM).
+    NumWorkers = 2;   % Choose based on machine capacity (cores/RAM).
     if isempty(p) || p.NumWorkers ~= NumWorkers
         if ~isempty(p)
             delete(p);
@@ -82,7 +82,7 @@ end
 %   mode = "doe"       -> theta is taken from a predefined matrix
 % =========================================================================
 cfg_run = struct();
-cfg_run.mode              = "external";                 % "external" | "doe"
+cfg_run.mode              = "single";                 % "external" | "doe" | "single"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
 cfg_run.poll_s            = 2.0;                   % pause between polls if theta is stale/unreadable
 cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV summary per theta
@@ -115,9 +115,22 @@ switch cfg_run.mode
     case "doe"
         run_doe(cfg_run, base);
 
+    case "single"
+        %theta = [1 6 2 log10([10 2 1]) [-3 1 -3] log10([100 100 10])];
+        theta = [1 0 0 -3 0.7545 2.1698 3 3 0.1612 3 -0.0848 3];
+        out = simulate_nmpc(base, theta);
+
     otherwise
         error('Unknown mode "%s". Use "external" or "doe".', cfg_run.mode);
 end
+
+%%
+
+
+plot_simulation(out, 1)
+
+plot_simulation(out, 2)
+
 
 %% FUNCTIONS
 
@@ -142,6 +155,7 @@ function [] = run_and_log(cfg_run, base, theta)
     mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
     save(mat_path, "ts", "out", "cfg_run", "base");
 end
+
 
 % =========================================================================
 % External theta mode
@@ -781,11 +795,12 @@ function plot_simulation(out, case_id)
     Ysp = out.case(case_id).Ysp;
     U   = out.case(case_id).U;
     dt  = out.case(case_id).dt;
-
+ 
     N = size(Y,1);
     T = 0 : dt : (N - 1)*dt;
+    TF = 10;
 
-    figure(1);
+    figure(10*case_id + 1);
     clf
 
     subplot(3,1,1);
@@ -795,6 +810,7 @@ function plot_simulation(out, case_id)
     xlabel('Time (h)');
     ylabel('State 1');
     legend('Location','best');
+    xlim([0 TF])
     hold off;
 
     subplot(3,1,2);
@@ -804,6 +820,7 @@ function plot_simulation(out, case_id)
     xlabel('Time (h)');
     ylabel('State 2');
     legend('Location','best');
+    xlim([0 TF])
     hold off;
 
     subplot(3,1,3);
@@ -813,6 +830,7 @@ function plot_simulation(out, case_id)
     xlabel('Time (h)');
     ylabel('State 3');
     legend('Location','best');
+    xlim([0 TF])
     hold off;
 
     ax = findall(gcf, 'type', 'axes');
@@ -822,10 +840,11 @@ function plot_simulation(out, case_id)
         ax(j).YLabel.FontSize = 15;
     end
 
-    figure(2);
+    figure(10*case_id + 2);
     clf
     plot(T(1:N), U(1:N,:), 'LineWidth', 2);
     grid on; box on;
     xlabel('Time (h)');
     ylabel('Inputs');
+    xlim([0 TF])
 end
