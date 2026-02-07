@@ -1,3 +1,4 @@
 *.asv
 /gptips2
 /__pycache__
+*.txt

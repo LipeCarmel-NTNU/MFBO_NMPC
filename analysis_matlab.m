@@ -146,6 +146,56 @@ set(ax2, "FontSize", 12);
 
 exportgraphics(fig2, outRuntimePath, "Resolution", 300);
 
+%% --- Correlation check: Ru_i vs Rdu_i (i = 1..3) ---
+Ru_log = [T.r_u1_log10,  T.r_u2_log10,  T.r_u3_log10];
+Rdu_log = [T.r_du1_log10, T.r_du2_log10, T.r_du3_log10];
+Ru_lin = [T.R_u_x1, T.R_u_x2, T.R_u_x3];
+Rdu_lin = [T.R_du_x1, T.R_du_x2, T.R_du_x3];
+
+pairLabel = ["(1)","(2)","(3)"];
+pearson_r = NaN(3,1);
+pearson_p = NaN(3,1);
+spearman_rho = NaN(3,1);
+spearman_p = NaN(3,1);
+pearson_r_lin = NaN(3,1);
+pearson_p_lin = NaN(3,1);
+spearman_rho_lin = NaN(3,1);
+spearman_p_lin = NaN(3,1);
+
+for i = 1:3
+    [pearson_r(i), pearson_p(i)] = corr(Ru_log(:,i), Rdu_log(:,i), ...
+        "Type","Pearson", "Rows","complete");
+    [spearman_rho(i), spearman_p(i)] = corr(Ru_log(:,i), Rdu_log(:,i), ...
+        "Type","Spearman", "Rows","complete");
+    [pearson_r_lin(i), pearson_p_lin(i)] = corr(Ru_lin(:,i), Rdu_lin(:,i), ...
+        "Type","Pearson", "Rows","complete");
+    [spearman_rho_lin(i), spearman_p_lin(i)] = corr(Ru_lin(:,i), Rdu_lin(:,i), ...
+        "Type","Spearman", "Rows","complete");
+end
+
+RuRduCorrTable = table(pairLabel(:), pearson_r, pearson_p, spearman_rho, spearman_p, ...
+    VariableNames=["pair","pearson_r","pearson_p","spearman_rho","spearman_p"]);
+RuRduCorrTableLinear = table(pairLabel(:), pearson_r_lin, pearson_p_lin, spearman_rho_lin, spearman_p_lin, ...
+    VariableNames=["pair","pearson_r","pearson_p","spearman_rho","spearman_p"]);
+
+disp("Correlation check between Ru_i and Rdu_i (log10-space):");
+disp(RuRduCorrTable);
+disp("Correlation check between Ru_i and Rdu_i (linear-space):");
+disp(RuRduCorrTableLinear);
+
+fig3 = figure("Color","w");
+tiledlayout(fig3, 1, 3, "Padding","compact", "TileSpacing","compact");
+for i = 1:3
+    ax = nexttile; hold(ax, "on"); grid(ax, "on"); box(ax, "on");
+    scatter(ax, Ru_log(:,i), Rdu_log(:,i), 40, double(T.J), "filled", ...
+        "MarkerEdgeColor","k", "LineWidth",0.5);
+    xlabel(ax, sprintf("$\\log_{10}(R_{u,%d})$", i));
+    ylabel(ax, sprintf("$\\log_{10}(R_{\\Delta u,%d})$", i));
+    title(ax, sprintf("$r=%.3f,\\ \\rho=%.3f$", pearson_r(i), spearman_rho(i)));
+    ax.GridLineStyle = "--";
+    ax.GridAlpha = 0.35;
+end
+
 %% --- Display Pareto table including tuning weights (Q, R, Rdu) ---
 Tp = T(isPareto, :);
 [~, ord_tune] = sort(double(Tp.SSE), "descend");
