@@ -86,13 +86,14 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
                 f"theta[{3 + i}]: q[{i}] must be in [-3, 3], got {q_value}"
             )
 
-    # Validate r^(u) values: in [-3, 3]
-    for i in range(3):
-        r_u_value = values[6 + i]
-        if not _is_in_range(r_u_value, -3, 3):
-            raise ValueError(
-                f"theta[{6 + i}]: r^(u)[{i}] must be in [-3, 3], got {r_u_value}"
-            )
+    # Validate r^(u) values: intentionally disabled.
+    # We allow very negative exponents (e.g., -1000) so 10^r_u is effectively zero in MATLAB.
+    # for i in range(3):
+    #     r_u_value = values[6 + i]
+    #     if not _is_in_range(r_u_value, -3, 3):
+    #         raise ValueError(
+    #             f"theta[{6 + i}]: r^(u)[{i}] must be in [-3, 3], got {r_u_value}"
+    #         )
 
     # Validate r^(Delta u) values: in [-3, 3]
     for i in range(3):

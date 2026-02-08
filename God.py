@@ -43,8 +43,15 @@ WT = 1.0             # peso do termo tempo no log
 
 # Bounds (teu theta)
 # theta = [f, theta_p, theta_m, q1..q3, r_u1..r_u3, r_du1..r_du3]
-LB = torch.tensor([0.01, 0.0, 0.0] + [-3.0]*9, dtype=DTYPE, device=DEVICE)
-UB = torch.tensor([1.00, 15.0, 7.0] + [ 3.0]*9, dtype=DTYPE, device=DEVICE)
+LB = torch.tensor([0.01, 0.0, 0.0] + [-3.0] * 9, dtype=DTYPE, device=DEVICE)
+UB = torch.tensor([1.00, 15.0, 7.0] + [3.0] * 9, dtype=DTYPE, device=DEVICE)
+FIXED_THETA: Dict[int, float] = {3: 0.0, 6: -1000.0, 7: -1000.0, 8: -1000.0}
+for _idx in (6, 7, 8):
+    LB[_idx] = -1000.0
+THETA_D = int(LB.numel())
+OPT_IDXS = [i for i in range(THETA_D) if i not in FIXED_THETA]
+LB_OPT = LB[OPT_IDXS]
+UB_OPT = UB[OPT_IDXS]
 
 # Se quiser tentar iniciar MATLAB automaticamente (Windows):
 START_MATLAB = False
@@ -66,7 +73,24 @@ def snap_theta(X: torch.Tensor) -> torch.Tensor:
     X[..., 1] = torch.round(torch.clamp(X[..., 1], LB[1], UB[1]))  # theta_p int
     X[..., 2] = torch.round(torch.clamp(X[..., 2], LB[2], UB[2]))  # theta_m int
     X[..., 3:] = torch.clamp(X[..., 3:], LB[3:], UB[3:])
+    for idx, val in FIXED_THETA.items():
+        X[..., idx] = val
     return X
+
+
+def opt_to_theta(X_opt: torch.Tensor) -> torch.Tensor:
+    """Map optimization-space points to full 12D theta."""
+    shp = X_opt.shape[:-1] + (THETA_D,)
+    X_theta = torch.empty(shp, dtype=DTYPE, device=DEVICE)
+    X_theta[..., OPT_IDXS] = X_opt
+    for idx, val in FIXED_THETA.items():
+        X_theta[..., idx] = val
+    return snap_theta(X_theta)
+
+
+def theta_to_opt(X_theta: torch.Tensor) -> torch.Tensor:
+    """Project full 12D theta to optimization dimensions."""
+    return snap_theta(X_theta)[..., OPT_IDXS]
 
 
 def wait_for_matlab_ready():
@@ -131,7 +155,7 @@ def load_history_from_results() -> Tuple[torch.Tensor, torch.Tensor, torch.Tenso
     ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
     n = len(ts)
     if n == 0:
-        d = int(LB.numel())
+        d = THETA_D
         X = torch.empty((0, d), dtype=DTYPE, device=DEVICE)
         Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
         Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
@@ -162,7 +186,7 @@ def ensure_trace_header():
             "ELL_Z", "GAMMA_TIME", "WZ", "WT",
             "t_floor",
             "SSE", "SSdU", "J", "runtime_s",
-            *[f"theta_{i+1}" for i in range(int(LB.numel()))],
+            *[f"theta_{i+1}" for i in range(THETA_D)],
         ])
 
 
@@ -232,22 +256,22 @@ def sync_trace_with_existing_results(X: torch.Tensor, Y_obj: torch.Tensor, Y_tim
 # ============================================================
 # Model + Acq (corrigidos para tempo)
 # ============================================================
-def build_models(X: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor):
+def build_models(X_opt: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor):
     """
     2 GPs:
       - model_obj: Y_obj = -[SSE, SSdU] (standardized)
       - model_time_log: log(runtime) (standardized)  -> garante positividade via lognormal
     """
-    bounds = torch.stack([LB, UB]).to(device=DEVICE, dtype=DTYPE)
-    input_tf = Normalize(d=X.shape[-1], bounds=bounds)
+    bounds = torch.stack([LB_OPT, UB_OPT]).to(device=DEVICE, dtype=DTYPE)
+    input_tf = Normalize(d=X_opt.shape[-1], bounds=bounds)
     obj_tf = Standardize(m=2)
     time_tf = Standardize(m=1)
 
     # runtime positivo -> log
     Y_time_log = torch.log(Y_time.clamp_min(EPS))
 
-    model_obj = SingleTaskGP(X, Y_obj, input_transform=input_tf, outcome_transform=obj_tf)
-    model_time_log = SingleTaskGP(X, Y_time_log, input_transform=input_tf, outcome_transform=time_tf)
+    model_obj = SingleTaskGP(X_opt, Y_obj, input_transform=input_tf, outcome_transform=obj_tf)
+    model_time_log = SingleTaskGP(X_opt, Y_time_log, input_transform=input_tf, outcome_transform=time_tf)
 
     mll_obj = ExactMarginalLogLikelihood(model_obj.likelihood, model_obj)
     mll_time = ExactMarginalLogLikelihood(model_time_log.likelihood, model_time_log)
@@ -328,12 +352,13 @@ def propose_candidate(
 ) -> Tuple[torch.Tensor, float, float, List[float]]:
     """
     Retorna:
-      cand: (q, d) snapped
+      cand_opt: (q, d_opt) snapped
       acq_value: float (já avaliado no snapped)
       t_floor: float usado
       ref_point: list[float] usado no NEHVI
     """
-    model_obj, model_time_log = build_models(X, Y_obj, Y_time)
+    X_opt = theta_to_opt(X)
+    model_obj, model_time_log = build_models(X_opt, Y_obj, Y_time)
 
     # ref_point para maximização: deve ser "pior" que os pontos observados (mais baixo)
     y_min = Y_obj.min(dim=0).values
@@ -350,7 +375,7 @@ def propose_candidate(
     qlognehvi = qLogNoisyExpectedHypervolumeImprovement(
         model=model_obj,
         ref_point=ref_point,
-        X_baseline=X,
+        X_baseline=X_opt,
         sampler=sampler,
         prune_baseline=True,
         cache_pending=True,
@@ -371,8 +396,8 @@ def propose_candidate(
         t_floor=t_floor,
     )
 
-    bounds = torch.stack([LB, UB]).to(device=DEVICE, dtype=DTYPE)
-    cand, _ = optimize_acqf(
+    bounds = torch.stack([LB_OPT, UB_OPT]).to(device=DEVICE, dtype=DTYPE)
+    cand_opt, _ = optimize_acqf(
         acq_function=acq,
         bounds=bounds,
         q=q,
@@ -381,13 +406,13 @@ def propose_candidate(
         options={"batch_limit": 5, "maxiter": 250},
     )
 
-    cand = snap_theta(cand)
+    cand_opt = theta_to_opt(opt_to_theta(cand_opt))
 
     # avalia acq no snapped (pra log)
     with torch.no_grad():
-        av = acq(cand).detach().cpu().view(-1)[0].item()
+        av = acq(cand_opt).detach().cpu().view(-1)[0].item()
 
-    return cand, float(av), t_floor, ref_point
+    return cand_opt, float(av), t_floor, ref_point
 
 
 # ============================================================
@@ -397,7 +422,7 @@ def sobol_unique_points(n_new: int, existing_X: torch.Tensor, seed: int = 1234) 
     """
     Gera pontos Sobol e evita duplicar os já existentes.
     """
-    d = int(LB.numel())
+    d = len(OPT_IDXS)
     sobol = torch.quasirandom.SobolEngine(dimension=d, scramble=True, seed=seed)
 
     pts = []
@@ -405,8 +430,8 @@ def sobol_unique_points(n_new: int, existing_X: torch.Tensor, seed: int = 1234) 
     max_tries = 20000
     while len(pts) < n_new and tries < max_tries:
         tries += 1
-        x = LB + (UB - LB) * sobol.draw(1).to(device=DEVICE, dtype=DTYPE)
-        x = snap_theta(x).view(1, -1)
+        x_opt = LB_OPT + (UB_OPT - LB_OPT) * sobol.draw(1).to(device=DEVICE, dtype=DTYPE)
+        x = theta_to_opt(opt_to_theta(x_opt)).view(1, -1)
 
         duplicate = False
         if existing_X.numel() > 0:
@@ -473,9 +498,10 @@ def main():
         n_missing = N_INIT - n_rows
         print(f"[doe] faltam {n_missing} pontos para completar DOE (N_INIT={N_INIT}) ...")
 
-        X_new = sobol_unique_points(n_missing, existing_X=X, seed=1234)
+        X_new_opt = sobol_unique_points(n_missing, existing_X=theta_to_opt(X), seed=1234)
         for i in range(n_missing):
-            theta = X_new[i]
+            theta_opt = X_new_opt[i]
+            theta = opt_to_theta(theta_opt)
             sse, ssd, jval, rt = evaluate_theta(theta)
             X = torch.cat([X, theta.view(1, -1)], dim=0)
             Y_obj = torch.cat([Y_obj, torch.tensor([[-sse, -ssd]], dtype=DTYPE, device=DEVICE)], dim=0)
@@ -515,8 +541,9 @@ def main():
 
     for k in range(remaining):
         bo_idx = n_opt_done + k + 1  # 1-based dentro do BO
-        cand, acq_val, t_floor, ref_point = propose_candidate(X, Y_obj, Y_time, q=Q_BATCH)
-        cand = cand.squeeze(0)  # (d,)
+        cand_opt, acq_val, t_floor, ref_point = propose_candidate(X, Y_obj, Y_time, q=Q_BATCH)
+        cand_opt = cand_opt.squeeze(0)  # (d_opt,)
+        cand = opt_to_theta(cand_opt.view(1, -1)).squeeze(0)  # (d_full,)
 
         sse, ssd, jval, rt = evaluate_theta(cand)
 
