@@ -1,9 +1,10 @@
 clear; close all; clc
 
 %% --- Paths / options ---
-csvPath         = fullfile("results", "results.csv");
-outScatterPath  = fullfile("results", "sse_vs_ssdu.png");
-outRuntimePath  = fullfile("results", "runtime_vs_iteration.png");
+folder = fullfile("results", "run1");
+csvPath         = fullfile(folder, "results.csv");
+outScatterPath  = fullfile(folder, "sse_vs_ssdu.png");
+outRuntimePath  = fullfile(folder, "runtime_vs_iteration.png");
 
 if ~isfile(csvPath)
     error("CSV not found: %s", csvPath);

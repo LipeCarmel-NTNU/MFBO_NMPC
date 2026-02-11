@@ -126,7 +126,7 @@ end
 
 %%
 
-
+close all
 plot_simulation(out, 1)
 
 plot_simulation(out, 2)
@@ -809,9 +809,9 @@ function plot_simulation(out, case_id)
     plot(T(1:N), Y(1:N,1), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,1), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
     grid on; box on;
-    xlabel('Time (h)');
-    ylabel('State 1');
-    legend('Location','best');
+    xlabel('Time (h)', 'Interpreter','latex');
+    ylabel('State 1', 'Interpreter','latex');
+    legend('Location','best', 'Interpreter','latex');
     xlim([0 TF])
     hold off;
 
@@ -819,9 +819,9 @@ function plot_simulation(out, case_id)
     plot(T(1:N), Y(1:N,2), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,2), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
     grid on; box on;
-    xlabel('Time (h)');
-    ylabel('State 2');
-    legend('Location','best');
+    xlabel('Time (h)', 'Interpreter','latex');
+    ylabel('State 2', 'Interpreter','latex');
+    legend('Location','best', 'Interpreter','latex');
     xlim([0 TF])
     hold off;
 
@@ -829,9 +829,9 @@ function plot_simulation(out, case_id)
     plot(T(1:N), Y(1:N,3), 'b-', 'LineWidth', 3, 'DisplayName', 'Plant'); hold on;
     plot(T(1:N), Ysp(1:N,3), 'r--', 'LineWidth', 3, 'DisplayName', 'Setpoint');
     grid on; box on;
-    xlabel('Time (h)');
-    ylabel('State 3');
-    legend('Location','best');
+    xlabel('Time (h)', 'Interpreter','latex');
+    ylabel('State 3', 'Interpreter','latex');
+    legend('Location','best', 'Interpreter','latex');
     xlim([0 TF])
     hold off;
 
@@ -846,7 +846,7 @@ function plot_simulation(out, case_id)
     clf
     plot(T(1:N), U(1:N,:), 'LineWidth', 2);
     grid on; box on;
-    xlabel('Time (h)');
-    ylabel('Inputs');
+    xlabel('Time (h)', 'Interpreter','latex');
+    ylabel('Inputs', 'Interpreter','latex');
     xlim([0 TF])
 end
