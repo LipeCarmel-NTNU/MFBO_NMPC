@@ -116,6 +116,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
 def write_theta(theta: Sequence[float]) -> None:
     """Write theta values to ``inbox/theta.txt`` after lock negotiation."""
 
+    wait_start = time.time()
     while LOCK_FILE.exists():
         time.sleep(5)
 
@@ -128,6 +129,7 @@ def write_theta(theta: Sequence[float]) -> None:
 def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
     """Read optimization results ensuring lock coordination."""
 
+    wait_start = time.time()
     while LOCK_FILE.exists():
         time.sleep(5)
 
@@ -186,5 +188,7 @@ if __name__ == "__main__":
     dummy_theta = [f, theta_p, theta_m] + q + r_u + r_delta_u
     
     send_theta(dummy_theta)
+
+
 
 

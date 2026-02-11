@@ -20,6 +20,8 @@ from botorch.acquisition.acquisition import AcquisitionFunction
 # Usa tua interface existente
 from matlab_interface import send_theta, read_results, RESULTS_FILE
 
+print("[debug] God.py module loaded", flush=True)
+
 
 # ============================================================
 # CONFIG (ajuste aqui)
@@ -33,6 +35,7 @@ Q_BATCH = 1          # q candidates por iteração (1 = sequencial)
 
 POLL_S = 1.0         # polling do results.csv
 WAIT_MATLAB_S = 2.0  # espera caso results.csv ainda não exista
+MAX_WAIT_MATLAB_S = 120.0  # tempo máx. aguardando results.csv (None para infinito)
 
 # Aquisição: log-space
 ELL_Z = 0.25         # kernel Z (largura)
@@ -95,8 +98,14 @@ def theta_to_opt(X_theta: torch.Tensor) -> torch.Tensor:
 
 def wait_for_matlab_ready():
     """Espera o results/results.csv existir (MATLAB cria no início)."""
+    print(f"[debug] Checking if MATLAB already created {RESULTS_FILE} ...")
+    t0 = time.time()
     while True:
         if Path(RESULTS_FILE).exists():
+            print(f"[debug] Found {RESULTS_FILE}, continuing.")
+            return
+        if MAX_WAIT_MATLAB_S is not None and (time.time() - t0) > MAX_WAIT_MATLAB_S:
+            print(f"[warn] Timeout waiting for {RESULTS_FILE}. Continuing without it.")
             return
         print(f"[wait] esperando MATLAB criar {RESULTS_FILE} ...")
         time.sleep(WAIT_MATLAB_S)
@@ -117,21 +126,30 @@ def wait_for_new_row(prev_rows: int, target_theta: torch.Tensor, timeout_s: floa
     Retorna (SSE, SSdU, J, runtime_s) da linha que bate com o theta enviado.
     """
     t0 = time.time()
+    print(f"[debug] Waiting for new MATLAB rows beyond index {prev_rows} ...")
     while True:
         if time.time() - t0 > timeout_s:
             raise TimeoutError("Timeout esperando results.csv atualizar.")
 
-        ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+        try:
+            ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+        except FileNotFoundError:
+            print(f"[debug] results.csv still missing: {RESULTS_FILE}")
+            time.sleep(POLL_S)
+            continue
+
         if len(ts) <= prev_rows:
             time.sleep(POLL_S)
             continue
 
+        print(f"[debug] Detected {len(ts) - prev_rows} new row(s); matching theta ...")
         # pode ter mais de 1 linha nova; procura a que bate com o theta
         for k in range(prev_rows, len(ts)):
             th = torch.tensor(theta_mat[k], dtype=DTYPE, device=DEVICE)
             if _theta_close(th, target_theta):
                 return float(sse[k]), float(ssd_u[k]), float(cost[k]), float(runtime[k])
 
+        print("[debug] New rows did not match target theta yet; sleeping ...")
         time.sleep(POLL_S)
 
 
@@ -139,8 +157,10 @@ def evaluate_theta(theta: torch.Tensor) -> Tuple[float, float, float, float]:
     """Envia theta -> MATLAB e espera SSE/SSdU/J/runtime."""
     theta = snap_theta(theta).view(-1)
     prev = last_nrows()
+    print(f"[debug] Evaluating theta {theta.detach().cpu().tolist()} (prev_rows={prev})")
     send_theta(theta.detach().cpu().tolist())
     sse, ssd, jval, rt = wait_for_new_row(prev, theta)
+    print(f"[debug] MATLAB returned SSE={sse:.4g}, SSdU={ssd:.4g}, J={jval:.4g}, runtime={rt:.2f}s")
     return sse, ssd, jval, rt
 
 
@@ -152,7 +172,16 @@ def load_history_from_results() -> Tuple[torch.Tensor, torch.Tensor, torch.Tenso
       Y_time  : (n, 1)   = runtime_s (positivo)
     Retorna também n (número de linhas).
     """
-    ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+    print(f"[debug] Reading history from {RESULTS_FILE}")
+    try:
+        ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+    except FileNotFoundError:
+        print(f"[debug] results.csv not found yet: {RESULTS_FILE}")
+        d = THETA_D
+        X = torch.empty((0, d), dtype=DTYPE, device=DEVICE)
+        Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
+        Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
+        return X, Y_obj, Y_time, 0
     n = len(ts)
     if n == 0:
         d = THETA_D
@@ -171,6 +200,7 @@ def load_history_from_results() -> Tuple[torch.Tensor, torch.Tensor, torch.Tenso
     )
     rt = torch.tensor(runtime, dtype=DTYPE, device=DEVICE).clamp_min(EPS)
     Y_time = rt.view(-1, 1)
+    print(f"[debug] Loaded history com n={n}, X={tuple(X.shape)}, Y_obj={tuple(Y_obj.shape)}, Y_time={tuple(Y_time.shape)}")
     return X, Y_obj, Y_time, n
 
 
@@ -357,6 +387,7 @@ def propose_candidate(
       t_floor: float usado
       ref_point: list[float] usado no NEHVI
     """
+    print(f"[debug] Proposing candidate with dataset size {X.shape[0]}")
     X_opt = theta_to_opt(X)
     model_obj, model_time_log = build_models(X_opt, Y_obj, Y_time)
 
@@ -415,9 +446,6 @@ def propose_candidate(
     return cand_opt, float(av), t_floor, ref_point
 
 
-# ============================================================
-# DOE helper (para completar DOE se CSV tiver < N_INIT)
-# ============================================================
 def sobol_unique_points(n_new: int, existing_X: torch.Tensor, seed: int = 1234) -> torch.Tensor:
     """
     Gera pontos Sobol e evita duplicar os já existentes.
@@ -477,9 +505,8 @@ def maybe_start_matlab():
 # Main
 # ============================================================
 def main():
+    print("[debug] Entered main()", flush=True)
     torch.set_default_dtype(DTYPE)
-    maybe_start_matlab()
-    wait_for_matlab_ready()
 
     # 1) carrega histórico (DOE + OPT) do results.csv
     X, Y_obj, Y_time, n_rows = load_history_from_results()
@@ -593,3 +620,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+

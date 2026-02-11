@@ -62,7 +62,7 @@ USE_PARALLEL = true;
 % Configure a parallel pool. If USE_PARALLEL==false, the script ensures no pool.
 p = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 2;   % Choose based on machine capacity (cores/RAM).
+    NumWorkers = 31;   % Choose based on machine capacity (cores/RAM).
     if isempty(p) || p.NumWorkers ~= NumWorkers
         if ~isempty(p)
             delete(p);
@@ -82,7 +82,7 @@ end
 %   mode = "doe"       -> theta is taken from a predefined matrix
 % =========================================================================
 cfg_run = struct();
-cfg_run.mode              = "single";                 % "external" | "doe" | "single"
+cfg_run.mode              = "external";                 % "external" | "doe" | "single"
 cfg_run.theta_txt         = fullfile("inbox","theta.txt");
 cfg_run.poll_s            = 2.0;                   % pause between polls if theta is stale/unreadable
 cfg_run.results_csv       = fullfile("results","results.csv");   % <- CSV summary per theta
@@ -552,7 +552,9 @@ function out = simulate_nmpc(base, theta)
     % where frac_* is Cheb5(2*f-1, c_*) clamped and lower-bounded (>=0.01).
 
     cfg = decode_theta(theta, base.nx, base.nu);
-
+    disp('Run cfg:')
+    disp(cfg)
+    
     % Determine whether a parallel pool exists. If no pool, disable UseParallel in optimizer.
     pool_empty = isempty(gcp('nocreate'));
 
