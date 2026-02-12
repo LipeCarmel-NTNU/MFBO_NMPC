@@ -104,19 +104,24 @@ fontSize = 14;
 
 allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
+allTout = cell(numel(datasets), 1);
 
 for k = 1:numel(datasets)
     [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
+    T = enrich_with_out_data(T, datasets(k).outDir);
     allT{k} = T;
     allTp{k} = Tp;
+    allTout{k} = T;
 
     create_analysis_plots(T, isPareto, datasets(k).outDir, fontSize);
     display_pareto_table(Tp);
     display_runtime_phase_summary(T, datasets(k).name, 20);
+    plot_out_runtime_vs_tuning(T, datasets(k).outDir, datasets(k).name, fontSize);
 end
 
 plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
 plot_available_paper_results(allT, allTp, datasets, rootFolder, 20, fontSize);
+plot_out_runtime_vs_tuning_combined(allTout, datasets, rootFolder, fontSize);
 
 
 function [T, Tp, isPareto] = load_results_table(csvPath)
@@ -188,6 +193,61 @@ if ismember("runtime_s", string(Tp.Properties.VariableNames)) && ismember("f", s
     Tp.runtime_per_f = double(Tp.runtime_s) ./ max(double(Tp.f), eps);
 elseif ismember("runtime_min", string(Tp.Properties.VariableNames)) && ismember("f", string(Tp.Properties.VariableNames))
     Tp.runtime_per_f = double(Tp.runtime_min) ./ max(double(Tp.f), eps);
+end
+end
+
+
+function T = enrich_with_out_data(T, runFolder)
+% Load simulation-level outputs (`out_*.mat`) linked by timestamp and
+% append runtime metrics that are not present in CSV-only summaries.
+n = height(T);
+T.out_found = false(n,1);
+T.out_runtime_s = NaN(n,1);
+T.out_mean_case_runtime_s = NaN(n,1);
+T.out_mean_step_runtime_ms = NaN(n,1);
+T.out_total_steps = NaN(n,1);
+T.out_case_count = NaN(n,1);
+
+for i = 1:n
+    ts = string(T.timestamp(i));
+    outPath = fullfile(runFolder, "out_" + ts + ".mat");
+    if ~isfile(outPath)
+        continue;
+    end
+
+    S = load(outPath, "out");
+    if ~isfield(S, "out")
+        continue;
+    end
+    out = S.out;
+
+    T.out_found(i) = true;
+    if isfield(out, "runtime_s")
+        T.out_runtime_s(i) = double(out.runtime_s);
+    end
+
+    if isfield(out, "case") && ~isempty(out.case)
+        nCase = numel(out.case);
+        caseRuntime = NaN(nCase,1);
+        caseSteps = NaN(nCase,1);
+        caseMeanStep = NaN(nCase,1);
+        for c = 1:nCase
+            ci = out.case(c);
+            if isfield(ci, "runtime_s")
+                caseRuntime(c) = double(ci.runtime_s);
+            end
+            if isfield(ci, "RUNTIME") && ~isempty(ci.RUNTIME)
+                r = double(ci.RUNTIME(:));
+                caseSteps(c) = numel(r);
+                caseMeanStep(c) = mean(r, "omitnan");
+            end
+        end
+
+        T.out_case_count(i) = nCase;
+        T.out_mean_case_runtime_s(i) = mean(caseRuntime, "omitnan");
+        T.out_total_steps(i) = sum(caseSteps, "omitnan");
+        T.out_mean_step_runtime_ms(i) = 1000 * mean(caseMeanStep, "omitnan");
+    end
 end
 end
 
@@ -473,4 +533,76 @@ for v = 1:numel(keyVars)
     box(ax, "off");
 end
 exportgraphics(figPar, fullfile(outDir, "pareto_tuning_distributions.png"), "Resolution", 300);
+end
+
+
+function plot_out_runtime_vs_tuning(T, outDir, runName, fontSize)
+hasOut = T.out_found & ~isnan(T.out_mean_step_runtime_ms);
+if ~any(hasOut)
+    return;
+end
+
+Tout = T(hasOut, :);
+
+% What: mean NMPC step time per evaluated point versus key tuning
+% parameters. Why: links computational burden directly to tuning decisions.
+fig = figure("Color","w");
+tiledlayout(fig, 2, 3, "Padding","compact", "TileSpacing","compact");
+
+paramList = ["f","p","m","Q_x1","R_u_x1","R_du_x1"];
+for i = 1:numel(paramList)
+    ax = nexttile; hold(ax, "on");
+    xv = double(Tout.(paramList(i)));
+    yv = double(Tout.out_mean_step_runtime_ms);
+    scatter(ax, xv, yv, 32, "filled", "MarkerFaceColor", [0.1 0.1 0.1], "MarkerFaceAlpha", 0.75);
+    xlabel(ax, "$" + strrep(paramList(i), "_", "\_") + "$");
+    ylabel(ax, "$\bar{t}_{\mathrm{step}}$ (ms)");
+    if startsWith(paramList(i), "Q_") || startsWith(paramList(i), "R_")
+        set(ax, "XScale", "log");
+    end
+    set(ax, "FontSize", fontSize);
+    grid(ax, "off");
+    box(ax, "off");
+end
+
+exportgraphics(fig, fullfile(outDir, "out_mean_step_runtime_vs_tuning_" + string(runName) + ".png"), "Resolution", 300);
+end
+
+
+function plot_out_runtime_vs_tuning_combined(allTout, datasets, outDir, fontSize)
+Tall = table();
+for i = 1:numel(allTout)
+    Ti = allTout{i};
+    Ti.run_id = repmat(string(datasets(i).name), height(Ti), 1);
+    Tall = [Tall; Ti]; %#ok<AGROW>
+end
+
+hasOut = Tall.out_found & ~isnan(Tall.out_mean_step_runtime_ms);
+if ~any(hasOut)
+    return;
+end
+Tall = Tall(hasOut, :);
+
+% What: aggregated simulation-step runtime against objective outcomes.
+% Why: shows whether computationally expensive settings buy better trade-off.
+fig = figure("Color","w");
+tiledlayout(fig, 1, 2, "Padding","compact", "TileSpacing","compact");
+
+ax1 = nexttile; hold(ax1, "on");
+scatter(ax1, double(Tall.out_mean_step_runtime_ms), double(Tall.SSE), 26, "filled", ...
+    "MarkerFaceColor", [0.2 0.2 0.2], "MarkerFaceAlpha", 0.7);
+xlabel(ax1, "$\bar{t}_{\mathrm{step}}$ (ms)");
+ylabel(ax1, "$J_{\mathrm{track}}$");
+set(ax1, "YScale", "log", "FontSize", fontSize);
+grid(ax1, "off"); box(ax1, "off");
+
+ax2 = nexttile; hold(ax2, "on");
+scatter(ax2, double(Tall.out_mean_step_runtime_ms), double(Tall.SSdU), 26, "filled", ...
+    "MarkerFaceColor", [0.2 0.2 0.2], "MarkerFaceAlpha", 0.7);
+xlabel(ax2, "$\bar{t}_{\mathrm{step}}$ (ms)");
+ylabel(ax2, "$J_{\mathrm{TV}}$");
+set(ax2, "YScale", "log", "FontSize", fontSize);
+grid(ax2, "off"); box(ax2, "off");
+
+exportgraphics(fig, fullfile(outDir, "out_mean_step_runtime_vs_objectives.png"), "Resolution", 300);
 end
