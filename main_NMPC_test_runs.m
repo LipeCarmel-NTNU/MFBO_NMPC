@@ -37,7 +37,8 @@ end
 % =========================================================================
 cfg_run = struct();
 cfg_run.mode              = "list";                 % list only
-cfg_run.results_root      = "results";
+cfg_run.source_root       = "results";
+cfg_run.output_root       = "results/test_run";
 cfg_run.sigma_y           = [0 0 0];        % no measurement noise
 cfg_run.NumWorkers        = NumWorkers;
 
@@ -79,8 +80,8 @@ run_timestamp_list(cfg_run, base, "run2", t2);
 
 % Run a fixed list of controllers from a previous run folder with f forced to 1.0 and no noise
 function run_timestamp_list(cfg_run, base, run_label, timestamps)
-    src_dir = fullfile(cfg_run.results_root, run_label);
-    out_dir = fullfile(cfg_run.results_root, run_label + "_full_f1_no_noise");
+    src_dir = fullfile(cfg_run.source_root, run_label);
+    out_dir = fullfile(cfg_run.output_root, run_label + "_full_f1_no_noise");
     ensure_dir(out_dir);
     results_csv = fullfile(out_dir, "results_full.csv");
     theta_len = 1 + 2 + base.nx + 2*base.nu;
@@ -501,6 +502,7 @@ function y = Cheb5(x, c)
 
     y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3 + c(5)*T4 + c(6)*T5;
 end
+
 
 
 
