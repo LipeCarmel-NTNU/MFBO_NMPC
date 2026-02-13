@@ -95,6 +95,13 @@ function run_timestamp_list(cfg_run, base, run_label, timestamps)
             continue
         end
 
+        % Skip reruns if full simulation output already exists in output folder
+        full_result_path = fullfile(out_dir, "out_full_" + ts + ".mat");
+        if isfile(full_result_path)
+            fprintf("Skipping %s (results already exist in %s)\n", ts, full_result_path);
+            continue
+        end
+
         S = load(mat_path, "out");
         if ~isfield(S, "out")
             warning("No 'out' struct in %s", mat_path);
