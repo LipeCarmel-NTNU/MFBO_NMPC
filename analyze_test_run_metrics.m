@@ -1,38 +1,19 @@
 %% ANALYZE_TEST_RUN_METRICS
-% Offline diagnostics for NMPC full-horizon replay data in results/test_run.
+% Offline diagnostics for NMPC replay files in results/test_run.
 % No live simulation is executed.
 %
-% How to use:
-%   1) Ensure replay files exist in:
-%        results/test_run/run1_full_f1_no_noise/out_full_*.mat
-%        results/test_run/run2_full_f1_no_noise/out_full_*.mat
-%   2) Configure:
-%        cfg.final_pareto_timestamps  - timestamps to highlight in report
-%        cfg.settling_tol             - tolerance (default 2 %)
-%        cfg.debug_timestamp          - single timestamp for debug plots
-%   3) Run script and inspect:
-%        - command window report (aggregate + Pareto-only tables)
-%        - debug figure for cfg.debug_timestamp (x1, V, dV per case)
+% Settling-time definition (per state i):
+%   e_rel_i(k) = |y_i(k) - r_i| / max(|r_i|, eps_ref),  eps_ref = 1e-9
+%   t_s,i is the earliest time where e_rel_i(t) <= tol for ALL future t.
+%   If final relative error is > tol, settling time is NaN.
 %
-% Per-case output columns:
-%   - settle_x*_h: settling time per state (hours)
-%   - final_err_x*_pct, peak_err_x*_pct: relative tracking errors (%)
-%   - tot_dU_u*: total input variation per input (sum |du|)
-%   - lyap_V0, lyap_Vf: faux-Lyapunov start/end value
-%   - lyap_dV_mean, lyap_dV_max: mean/max increment of faux-Lyapunov
-%   - lyap_noninc_ratio: fraction of steps with dV <= 0
-%
-% Settling-time definition used below:
-%   For each state i, relative error is
-%       e_rel_i(k) = |y_i(k) - r_i| / max(|r_i|, eps_ref)
-%   with r_i the final setpoint value and eps_ref = 1e-9.
-%   Settling time t_s,i is the smallest time such that
-%       e_rel_i(t) <= 0.02 for all t >= t_s,i.
-%   If e_rel_i at the final sample is > 0.02, settling time is NaN.
-%
-% Additional faux-Lyapunov diagnostic:
+% Faux-Lyapunov diagnostics:
 %   V(k)  = sum_i (y_i(k) - r_i)^2
 %   dV(k) = V(k) - V(k-1)
+%
+% Observed stability criterion used in this script:
+%   Case is stable if Vf <= V0 and dV(k) <= 0 for all k >= 2.
+%   Controller (timestamp) is stable if all its cases are stable.
 
 clear; clc;
 
@@ -56,353 +37,409 @@ cfg.final_pareto_timestamps = [
     "20260211_134235"
 ];
 cfg.settling_tol = 0.02;
-cfg.debug_timestamp = "20260201_232106";
 
 diagnostics = run_full_run_diagnostics(cfg);
 print_full_run_report(diagnostics, cfg);
-debug_timestamp_analysis(cfg);
+plot_summary_boxplots(diagnostics);
 
 %% FUNCTIONS
 function diagnostics = run_full_run_diagnostics(cfg)
-%RUN_FULL_RUN_DIAGNOSTICS Load all replay MAT files and build case-wise diagnostics table.
-%
-% Returns struct:
-%   diagnostics.per_case                   table with one row per case
-%   diagnostics.mat_file_count             number of MAT files scanned
-%   diagnostics.pareto_cases               subset of per_case by timestamp
-%   diagnostics.missing_pareto_timestamps  configured timestamps not found
 arguments
     cfg struct
 end
 
-rows = [];
-matCount = 0;
+caseRecordList = [];
+controllerRecordList = [];
+matFileCount = 0;
 
 for k = 1:numel(cfg.run_folders)
-    runLabel = cfg.run_folders(k).label;
-    runDir = fullfile(cfg.test_run_root, cfg.run_folders(k).subfolder);
-    if ~isfolder(runDir)
-        warning("Run folder missing: %s", runDir);
+    runName = cfg.run_folders(k).label;
+    runFolder = fullfile(cfg.test_run_root, cfg.run_folders(k).subfolder);
+    if ~isfolder(runFolder)
+        warning("Run folder missing: %s", runFolder);
         continue
     end
 
-    matList = dir(fullfile(runDir, "out_full_*.mat"));
-    matCount = matCount + numel(matList);
+    matFiles = dir(fullfile(runFolder, "out_full_*.mat"));
+    matFileCount = matFileCount + numel(matFiles);
 
-    for m = 1:numel(matList)
-        matPath = fullfile(runDir, matList(m).name);
-        S = load(matPath, "ts", "out");
-        if ~isfield(S, "ts") || ~isfield(S, "out") || ~isfield(S.out, "case")
-            warning("Skipping %s (missing ts/out/case).", matPath);
+    for m = 1:numel(matFiles)
+        matFilePath = fullfile(runFolder, matFiles(m).name);
+        loaded = load(matFilePath, "ts", "out");
+        if ~isfield(loaded, "ts") || ~isfield(loaded, "out") || ~isfield(loaded.out, "case")
+            warning("Skipping %s (missing ts/out/case).", matFilePath);
             continue
         end
 
-        ts = string(S.ts);
-        out = S.out;
+        timestamp = string(loaded.ts);
+        outputData = loaded.out;
 
-        for c = 1:numel(out.case)
-            ci = out.case(c);
-            metrics = summarize_case_metrics(out, ci, cfg.settling_tol);
+        controllerRecord = struct();
+        controllerRecord.run_label = string(runName);
+        controllerRecord.timestamp = timestamp;
+        controllerRecord.SSE = get_struct_field_or_nan(outputData, "SSE");
+        controllerRecord.SSdU = get_struct_field_or_nan(outputData, "SSdU");
+        controllerRecord.J = controllerRecord.SSE + 1e4 * controllerRecord.SSdU;
+        controllerRecordList = [controllerRecordList; controllerRecord]; %#ok<AGROW>
 
-            row = struct();
-            row.run_label = string(runLabel);
-            row.timestamp = ts;
-            row.case_id = ci.case_id;
-            if isfield(out, "tf")
-                row.tf_h = double(out.tf);
-            else
-                row.tf_h = NaN;
+        for c = 1:numel(outputData.case)
+            caseData = outputData.case(c);
+            caseMetrics = summarize_case_metrics(outputData, caseData, cfg.settling_tol);
+
+            caseRecord = struct();
+            caseRecord.run_label = string(runName);
+            caseRecord.timestamp = timestamp;
+            caseRecord.case_id = caseData.case_id;
+            caseRecord.tf_h = get_struct_field_or_nan(outputData, "tf");
+            caseRecord.N_steps = size(caseData.Y, 1);
+            caseRecord.SSE = controllerRecord.SSE;
+            caseRecord.SSdU = controllerRecord.SSdU;
+            caseRecord.J = controllerRecord.J;
+
+            for s = 1:numel(caseMetrics.settling_times_h)
+                caseRecord.(sprintf("settle_x%d_h", s)) = caseMetrics.settling_times_h(s);
+                caseRecord.(sprintf("final_err_x%d_pct", s)) = caseMetrics.final_error_pct(s);
+                caseRecord.(sprintf("peak_err_x%d_pct", s)) = caseMetrics.peak_error_pct(s);
             end
-            row.N_steps = size(ci.Y, 1);
-
-            for s = 1:numel(metrics.settling_times_h)
-                row.(sprintf("settle_x%d_h", s)) = metrics.settling_times_h(s);
-                row.(sprintf("final_err_x%d_pct", s)) = metrics.final_error_pct(s);
-                row.(sprintf("peak_err_x%d_pct", s)) = metrics.peak_error_pct(s);
+            for u = 1:numel(caseMetrics.total_input_variation)
+                caseRecord.(sprintf("tot_dU_u%d", u)) = caseMetrics.total_input_variation(u);
             end
 
-            for u = 1:numel(metrics.total_input_variation)
-                row.(sprintf("tot_dU_u%d", u)) = metrics.total_input_variation(u);
-            end
+            caseRecord.lyap_V0 = caseMetrics.lyap_V0;
+            caseRecord.lyap_Vf = caseMetrics.lyap_Vf;
+            caseRecord.lyap_dV_mean = caseMetrics.lyap_dV_mean;
+            caseRecord.lyap_dV_max = caseMetrics.lyap_dV_max;
+            caseRecord.lyap_noninc_ratio = caseMetrics.lyap_noninc_ratio;
+            caseRecord.lyap_all_noninc = caseMetrics.lyap_all_noninc;
+            caseRecord.lyap_case_stable = caseMetrics.lyap_case_stable;
 
-            row.lyap_V0 = metrics.lyap_V0;
-            row.lyap_Vf = metrics.lyap_Vf;
-            row.lyap_dV_mean = metrics.lyap_dV_mean;
-            row.lyap_dV_max = metrics.lyap_dV_max;
-            row.lyap_noninc_ratio = metrics.lyap_noninc_ratio;
-
-            rows = [rows; row]; %#ok<AGROW>
+            caseRecordList = [caseRecordList; caseRecord]; %#ok<AGROW>
         end
     end
 end
 
-if isempty(rows)
-    perCase = table();
+if isempty(caseRecordList)
+    perCaseTable = table();
 else
-    perCase = struct2table(rows);
+    perCaseTable = struct2table(caseRecordList);
+end
+if isempty(controllerRecordList)
+    perControllerTable = table();
+else
+    perControllerTable = struct2table(controllerRecordList);
+    [~, uniqueIdx] = unique(perControllerTable(:, ["run_label","timestamp"]), "rows", "stable");
+    perControllerTable = perControllerTable(uniqueIdx, :);
 end
 
 diagnostics = struct();
-diagnostics.per_case = perCase;
-diagnostics.mat_file_count = matCount;
+diagnostics.per_case = perCaseTable;
+diagnostics.per_controller = perControllerTable;
+diagnostics.mat_file_count = matFileCount;
 
-if isempty(perCase)
+if isempty(perCaseTable)
     diagnostics.pareto_cases = table();
+    diagnostics.pareto_controllers = table();
     diagnostics.missing_pareto_timestamps = cfg.final_pareto_timestamps;
+    diagnostics.controller_stability = table();
+    diagnostics.stable_low_quartile = table();
     return
 end
 
-diagnostics.pareto_cases = perCase(ismember(perCase.timestamp, cfg.final_pareto_timestamps), :);
-foundTs = unique(perCase.timestamp);
-diagnostics.missing_pareto_timestamps = setdiff(cfg.final_pareto_timestamps, foundTs);
+diagnostics.pareto_cases = perCaseTable(ismember(perCaseTable.timestamp, cfg.final_pareto_timestamps), :);
+diagnostics.pareto_controllers = perControllerTable(ismember(perControllerTable.timestamp, cfg.final_pareto_timestamps), :);
+foundTimestamps = unique(perCaseTable.timestamp);
+diagnostics.missing_pareto_timestamps = setdiff(cfg.final_pareto_timestamps, foundTimestamps);
+
+diagnostics.controller_stability = compute_controller_stability(perCaseTable);
+diagnostics.stable_low_quartile = select_stable_low_quartile(diagnostics.controller_stability, perControllerTable);
+end
+
+
+function x = get_struct_field_or_nan(S, fieldName)
+if isfield(S, fieldName)
+    x = double(S.(fieldName));
+else
+    x = NaN;
+end
 end
 
 
 function metrics = summarize_case_metrics(outStruct, caseStruct, settlingTol)
-%SUMMARIZE_CASE_METRICS Compute all per-case scalar diagnostics.
 arguments
     outStruct struct
     caseStruct struct
     settlingTol (1,1) double {mustBePositive} = 0.02
 end
 
-Y = double(caseStruct.Y);
-Ysp = double(caseStruct.Ysp);
-U = double(caseStruct.U);
+stateTrajectory = double(caseStruct.Y);
+setpointTrajectory = double(caseStruct.Ysp);
+inputTrajectory = double(caseStruct.U);
 
 if isfield(caseStruct, "dt")
-    dt_h = double(caseStruct.dt);
+    sampleTimeHours = double(caseStruct.dt);
 elseif isfield(outStruct, "dt")
-    dt_h = double(outStruct.dt);
+    sampleTimeHours = double(outStruct.dt);
 else
     error("Missing dt in case/out struct.");
 end
-t_h = (0:size(Y,1)-1).' * dt_h;
+timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
 
-[settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times(Y, Ysp, t_h, settlingTol);
-totalVar = compute_total_input_variation(U);
-[V, dV] = compute_faux_lyapunov(Y, Ysp);
+[settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times( ...
+    stateTrajectory, setpointTrajectory, timeHours, settlingTol);
+totalInputVariation = compute_total_input_variation(inputTrajectory);
+[lyapV, lyapDeltaV] = compute_faux_lyapunov(stateTrajectory, setpointTrajectory);
+
+finiteDeltaV = lyapDeltaV(2:end);
+finiteDeltaV = finiteDeltaV(isfinite(finiteDeltaV));
+allNonIncreasing = all(finiteDeltaV <= 0);
+isCaseStable = (lyapV(end) <= lyapV(1)) && allNonIncreasing;
 
 metrics = struct();
 metrics.settling_times_h = settlingTimes_h;
 metrics.final_error_pct = finalErrPct;
 metrics.peak_error_pct = peakErrPct;
-metrics.total_input_variation = totalVar;
-metrics.lyap_V0 = V(1);
-metrics.lyap_Vf = V(end);
-metrics.lyap_dV_mean = mean(dV(2:end), "omitnan");
-metrics.lyap_dV_max = max(dV(2:end), [], "omitnan");
-metrics.lyap_noninc_ratio = mean(dV(2:end) <= 0, "omitnan");
+metrics.total_input_variation = totalInputVariation;
+metrics.lyap_V0 = lyapV(1);
+metrics.lyap_Vf = lyapV(end);
+metrics.lyap_dV_mean = mean(lyapDeltaV(2:end), "omitnan");
+metrics.lyap_dV_max = max(lyapDeltaV(2:end), [], "omitnan");
+metrics.lyap_noninc_ratio = mean(lyapDeltaV(2:end) <= 0, "omitnan");
+metrics.lyap_all_noninc = allNonIncreasing;
+metrics.lyap_case_stable = isCaseStable;
 end
 
 
-function [settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times(Y, Ysp, t_h, tol)
-%COMPUTE_SETTLING_TIMES Compute settling time in hours using "stay within band forever" rule.
-%
-% Notes:
-%   - Relative error normalization uses |reference| (with eps floor).
-%   - If final relative error is outside tolerance, settling time is NaN.
+function [settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times(stateTrajectory, setpointTrajectory, timeHours, tol)
 arguments
-    Y double
-    Ysp double
-    t_h double
+    stateTrajectory double
+    setpointTrajectory double
+    timeHours double
     tol (1,1) double {mustBeGreaterThan(tol,0)} = 0.02
 end
 
-nStates = size(Y, 2);
-settlingTimes_h = NaN(1, nStates);
-finalErrPct = NaN(1, nStates);
-peakErrPct = NaN(1, nStates);
+numStates = size(stateTrajectory, 2);
+settlingTimes_h = NaN(1, numStates);
+finalErrPct = NaN(1, numStates);
+peakErrPct = NaN(1, numStates);
 eps_ref = 1e-9;
 
-for s = 1:nStates
-    refVal = Ysp(end, s);
-    scale = max(abs(refVal), eps_ref);
+for stateIdx = 1:numStates
+    refValue = setpointTrajectory(end, stateIdx);
+    normalizer = max(abs(refValue), eps_ref);
+    relError = abs(stateTrajectory(:, stateIdx) - refValue) ./ normalizer;
 
-    errRel = abs(Y(:, s) - refVal) ./ scale;
-    finalErrPct(s) = 100 * errRel(end);
-    peakErrPct(s) = 100 * max(errRel);
+    finalErrPct(stateIdx) = 100 * relError(end);
+    peakErrPct(stateIdx) = 100 * max(relError);
 
-    if finalErrPct(s) > 100 * tol
-        settlingTimes_h(s) = NaN;
+    if finalErrPct(stateIdx) > 100 * tol
+        settlingTimes_h(stateIdx) = NaN;
         continue
     end
 
-    % First index from which ALL future samples stay inside the tolerance band.
-    futureMax = flipud(cummax(flipud(errRel)));
-    idx = find(futureMax <= tol, 1, "first");
-    if ~isempty(idx)
-        settlingTimes_h(s) = t_h(idx);
+    futureMaxRelError = flipud(cummax(flipud(relError)));
+    firstSettledIdx = find(futureMaxRelError <= tol, 1, "first");
+    if ~isempty(firstSettledIdx)
+        settlingTimes_h(stateIdx) = timeHours(firstSettledIdx);
     end
 end
 end
 
 
-function totalVar = compute_total_input_variation(U)
-%COMPUTE_TOTAL_INPUT_VARIATION Return per-input total variation sum(|du|).
-if isempty(U)
-    totalVar = [];
+function totalInputVariation = compute_total_input_variation(inputTrajectory)
+if isempty(inputTrajectory)
+    totalInputVariation = [];
     return
 end
-if size(U,1) < 2
-    totalVar = zeros(1, size(U,2));
+if size(inputTrajectory,1) < 2
+    totalInputVariation = zeros(1, size(inputTrajectory,2));
     return
 end
-dU = diff(U, 1, 1);
-totalVar = sum(abs(dU), 1);
+inputIncrements = diff(inputTrajectory, 1, 1);
+totalInputVariation = sum(abs(inputIncrements), 1);
 end
 
 
-function [V, dV] = compute_faux_lyapunov(Y, Ysp)
-%COMPUTE_FAUX_LYAPUNOV Compute V(k)=||y-r||^2 and dV(k)=V(k)-V(k-1).
-E = Y - Ysp;
-V = sum(E.^2, 2);
-dV = [NaN; diff(V)];
+function [lyapV, lyapDeltaV] = compute_faux_lyapunov(stateTrajectory, setpointTrajectory)
+trackingError = stateTrajectory - setpointTrajectory;
+trackingError(:, 1) = trackingError(:, 1) * 10;
+lyapV = sum(trackingError.^2, 2);
+lyapDeltaV = [NaN; diff(lyapV)];
+end
+
+
+function controllerStability = compute_controller_stability(caseTable)
+grouped = groupsummary(caseTable, ["run_label","timestamp"], "all", "lyap_case_stable");
+controllerStability = table();
+controllerStability.run_label = grouped.run_label;
+controllerStability.timestamp = grouped.timestamp;
+controllerStability.case_count = grouped.GroupCount;
+controllerStability.stable_case_count = grouped.sum_lyap_case_stable;
+controllerStability.all_cases_stable = (grouped.sum_lyap_case_stable == grouped.GroupCount);
+end
+
+
+function stableLowQ = select_stable_low_quartile(controllerStability, controllerTable)
+if isempty(controllerStability) || isempty(controllerTable)
+    stableLowQ = table();
+    return
+end
+
+validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
+validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
+if isempty(validSSE) || isempty(validSSdU)
+    stableLowQ = table();
+    return
+end
+trackingCostQ1 = prctile(validSSE, 25);
+inputUseCostQ1 = prctile(validSSdU, 25);
+
+joined = innerjoin(controllerStability, controllerTable, "Keys", ["run_label","timestamp"]);
+isStable = joined.all_cases_stable;
+isLowSSE = joined.SSE <= trackingCostQ1;
+isLowSSdU = joined.SSdU <= inputUseCostQ1;
+keepMask = isStable & isLowSSE & isLowSSdU;
+
+stableLowQ = joined(keepMask, :);
+if ~isempty(stableLowQ)
+    stableLowQ = sortrows(stableLowQ, ["SSE","SSdU"], ["ascend","ascend"]);
+end
 end
 
 
 function print_full_run_report(diagnostics, cfg)
-%PRINT_FULL_RUN_REPORT Print concise aggregate and Pareto-focused diagnostics.
-perCase = diagnostics.per_case;
+caseTable = diagnostics.per_case;
+controllerTable = diagnostics.per_controller;
 
 fprintf("=== NMPC Full-Horizon Replay Report ===\n");
-fprintf("Run folders scanned: %s\n", strjoin(string({cfg.run_folders.subfolder}), ", "));
-fprintf("MAT-files detected: %d\n", diagnostics.mat_file_count);
-fprintf("Case rows extracted: %d\n", height(perCase));
+fprintf("Run folders: %s\n", strjoin(string({cfg.run_folders.subfolder}), ", "));
+fprintf("MAT files scanned: %d\n", diagnostics.mat_file_count);
+fprintf("Cases: %d | Controllers: %d\n", height(caseTable), height(controllerTable));
 
-if isempty(perCase)
+if isempty(caseTable)
     fprintf("No case data found.\n");
     return
 end
 
-settleCols = perCase.Properties.VariableNames(startsWith(perCase.Properties.VariableNames, "settle_x"));
-if ~isempty(settleCols)
-    medSettle = varfun(@nanmedian, perCase(:, settleCols));
-    fprintf("\nMedian settling times across all cases (hours):\n");
-    disp(medSettle);
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+for i = 1:numel(settlingColumns)
+    nanCount = nnz(isnan(caseTable.(settlingColumns{i})));
+    fprintf("NaN settling times %s: %d/%d\n", settlingColumns{i}, nanCount, height(caseTable));
 end
 
-fprintf("Pareto timestamps requested: %d\n", numel(cfg.final_pareto_timestamps));
-paretoCases = diagnostics.pareto_cases;
-if isempty(paretoCases)
-    fprintf("Pareto timestamps present: 0\n");
-else
-    fprintf("Pareto timestamps present: %d\n", numel(unique(paretoCases.timestamp)));
+if ~isempty(settlingColumns)
+    fprintf("Median settling times (h):\n");
+    settlingData = table2array(caseTable(:, settlingColumns));
+    medianSettling = nanmedian(settlingData, 1);
+    for i = 1:numel(settlingColumns)
+        fprintf("  %s: %.6g\n", settlingColumns{i}, medianSettling(i));
+    end
 end
+
+controllerStability = diagnostics.controller_stability;
+stableCaseCount = nnz(caseTable.lyap_case_stable);
+stableControllerCount = nnz(controllerStability.all_cases_stable);
+fprintf("Lyapunov-stable cases: %d/%d\n", stableCaseCount, height(caseTable));
+fprintf("Lyapunov-stable controllers (all cases stable): %d/%d\n", stableControllerCount, height(controllerStability));
+
 if ~isempty(diagnostics.missing_pareto_timestamps)
-    fprintf("Missing Pareto controllers: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
+    fprintf("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
 end
 
-if isempty(paretoCases)
+if isempty(controllerTable)
     return
 end
 
-keyCols = ["run_label","timestamp","case_id","tf_h","N_steps"];
-stateCols = perCase.Properties.VariableNames(startsWith(perCase.Properties.VariableNames, "settle_x"));
-errCols = perCase.Properties.VariableNames(contains(perCase.Properties.VariableNames, "_err_"));
-uCols = perCase.Properties.VariableNames(startsWith(perCase.Properties.VariableNames, "tot_dU_u"));
-lyapCols = ["lyap_V0","lyap_Vf","lyap_dV_mean","lyap_dV_max","lyap_noninc_ratio"];
-showCols = [keyCols, stateCols, errCols, uCols, lyapCols];
-showCols = showCols(ismember(showCols, paretoCases.Properties.VariableNames));
+validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
+validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
+if isempty(validSSE) || isempty(validSSdU)
+    fprintf("Lower quartiles: unavailable (non-finite controller costs)\n");
+    return
+end
+trackingCostQ1 = prctile(validSSE, 25);
+inputUseCostQ1 = prctile(validSSdU, 25);
+fprintf("Lower quartiles: SSE <= %.6g, SSdU <= %.6g\n", trackingCostQ1, inputUseCostQ1);
 
-fprintf("\nPareto controller diagnostics (per case):\n");
-disp(paretoCases(:, showCols));
-
-if ~isempty(uCols)
-    fprintf("Median total input variation over Pareto cases:\n");
-    disp(varfun(@nanmedian, paretoCases(:, uCols)));
+stableControllerList = innerjoin( ...
+    controllerStability(controllerStability.all_cases_stable, :), ...
+    controllerTable, ...
+    "Keys", ["run_label","timestamp"]);
+if isempty(stableControllerList)
+    fprintf("Stable controllers: none\n");
+else
+    fprintf("Stable controllers:\n");
+    disp(stableControllerList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
 end
 
-fprintf("Median faux-Lyapunov stats over Pareto cases:\n");
-disp(varfun(@nanmedian, paretoCases(:, lyapCols)));
+stableLowQuartileList = diagnostics.stable_low_quartile;
+if isempty(stableLowQuartileList)
+    fprintf("Stable + lower-quartile (SSE and SSdU): none\n");
+else
+    fprintf("Stable + lower-quartile (SSE and SSdU):\n");
+    disp(stableLowQuartileList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
+end
 end
 
 
-function debug_timestamp_analysis(cfg)
-%DEBUG_TIMESTAMP_ANALYSIS Plot and print detailed diagnostics for one timestamp.
-%
-% Plots per case:
-%   - x1 and x1 setpoint over time
-%   - faux-Lyapunov V over time
-%   - increment dV over time
-if ~isfield(cfg, "debug_timestamp") || strlength(cfg.debug_timestamp) == 0
+function plot_summary_boxplots(diagnostics)
+caseTable = diagnostics.per_case;
+controllerTable = diagnostics.per_controller;
+if isempty(caseTable)
     return
 end
 
-ts = string(cfg.debug_timestamp);
-[matPath, runLabel] = find_test_run_mat(ts, cfg);
-if strlength(matPath) == 0
-    fprintf("\nDebug timestamp %s not found in test_run folders.\n", ts);
-    return
+figure("Color","w","Name","test_run_metric_summary");
+sgtitle("NMPC Test-Run Diagnostics");
+
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+if ~isempty(settlingColumns)
+    subplot(2, 3, 1);
+    stateLabels = regexprep(cellstr(settlingColumns), "^settle_(x\\d+)_h$", "$1");
+    boxplot(table2array(caseTable(:, settlingColumns)), "Labels", stateLabels);
+    xlabel("State");
+    ylabel("Settling time (h)");
+    title("Settling Time");
+    grid off; box off;
 end
 
-S = load(matPath, "out");
-if ~isfield(S, "out") || ~isfield(S.out, "case")
-    fprintf("\nDebug file %s missing out/case.\n", matPath);
-    return
+inputVariationColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "tot_dU_u"));
+if ~isempty(inputVariationColumns)
+    subplot(2, 3, 2);
+    inputLabels = regexprep(cellstr(inputVariationColumns), "^tot_dU_(u\\d+)$", "$1");
+    boxplot(table2array(caseTable(:, inputVariationColumns)), "Labels", inputLabels);
+    xlabel("Input");
+    ylabel("Total variation (sum |du|)");
+    title("Input Variation");
+    grid off; box off;
 end
-out = S.out;
 
-fprintf("\n=== Debug timestamp %s (%s) ===\n", ts, runLabel);
-fig = figure("Color","w","Name","debug_"+ts);
+subplot(2, 3, 3);
+boxplot([caseTable.lyap_dV_mean, caseTable.lyap_dV_max, caseTable.lyap_noninc_ratio], ...
+    "Labels", {'mean(dV)','max(dV)','ratio(dV<=0)'});
+xlabel("Metric");
+ylabel("Value");
+title("Faux-Lyapunov Diagnostics");
+grid off; box off;
 
-for c = 1:numel(out.case)
-    ci = out.case(c);
-    metrics = summarize_case_metrics(out, ci, cfg.settling_tol);
-    [V, dV] = compute_faux_lyapunov(double(ci.Y), double(ci.Ysp));
-
-    if isfield(ci, "dt")
-        dt_h = double(ci.dt);
-    elseif isfield(out, "dt")
-        dt_h = double(out.dt);
-    else
-        dt_h = NaN;
-    end
-    t_h = (0:size(ci.Y,1)-1).' * dt_h;
-
-    subplot(numel(out.case), 3, (c-1)*3 + 1);
-    plot(t_h, ci.Y(:,1), "LineWidth", 1.4); hold on;
-    plot(t_h, ci.Ysp(:,1), "--", "LineWidth", 1.2);
-    xlabel("t (h)"); ylabel("x1");
-    title(sprintf("case %d: x1", ci.case_id));
-    legend("x1","x1 sp","Location","best");
+if ~isempty(controllerTable)
+    subplot(2, 3, 4);
+    boxplot(controllerTable.SSE, "Labels", {'SSE'});
+    set(gca, "YScale", "log");
+    ylabel("SSE (log scale)");
+    title("Tracking Cost SSE");
     grid off; box off;
 
-    subplot(numel(out.case), 3, (c-1)*3 + 2);
-    plot(t_h, V, "LineWidth", 1.4);
-    xlabel("t (h)"); ylabel("V");
-    title("faux-Lyapunov V");
+    subplot(2, 3, 5);
+    boxplot(controllerTable.SSdU, "Labels", {'SSdU'});
+    set(gca, "YScale", "log");
+    ylabel("SSdU (log scale)");
+    title("Input-Use Cost SSdU");
     grid off; box off;
 
-    subplot(numel(out.case), 3, (c-1)*3 + 3);
-    plot(t_h, dV, "LineWidth", 1.2);
-    xlabel("t (h)"); ylabel("dV");
-    title("V(k)-V(k-1)");
+    subplot(2, 3, 6);
+    boxplot(controllerTable.J, "Labels", {'J'});
+    set(gca, "YScale", "log");
+    ylabel("J (log scale)");
+    title("Combined Cost J");
     grid off; box off;
-
-    fprintf("Case %d:\n", ci.case_id);
-    fprintf("  settle x1 (h): %.6g\n", metrics.settling_times_h(1));
-    fprintf("  final/peak x1 err (%%): %.4g / %.4g\n", metrics.final_error_pct(1), metrics.peak_error_pct(1));
-    fprintf("  total dU: %s\n", mat2str(metrics.total_input_variation, 5));
-    fprintf("  V0=%.6g, Vf=%.6g, mean(dV)=%.6g, max(dV)=%.6g, noninc_ratio=%.4f\n", ...
-        metrics.lyap_V0, metrics.lyap_Vf, metrics.lyap_dV_mean, metrics.lyap_dV_max, metrics.lyap_noninc_ratio);
-end
-end
-
-
-function [matPath, runLabel] = find_test_run_mat(ts, cfg)
-%FIND_TEST_RUN_MAT Resolve timestamp to replay MAT path and run label.
-matPath = "";
-runLabel = "";
-
-for k = 1:numel(cfg.run_folders)
-    runLabelCandidate = cfg.run_folders(k).label;
-    runDir = fullfile(cfg.test_run_root, cfg.run_folders(k).subfolder);
-    candidate = fullfile(runDir, "out_full_" + ts + ".mat");
-    if isfile(candidate)
-        matPath = candidate;
-        runLabel = runLabelCandidate;
-        return
-    end
 end
 end
