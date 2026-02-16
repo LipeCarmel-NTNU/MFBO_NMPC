@@ -36,7 +36,7 @@ cfg.final_pareto_timestamps = [
     "20260211_122653";
     "20260211_134235"
 ];
-cfg.settling_tol = 0.02;
+cfg.settling_tol = 0.05;
 
 diagnostics = run_full_run_diagnostics(cfg);
 print_full_run_report(diagnostics, cfg);
@@ -80,6 +80,19 @@ for k = 1:numel(cfg.run_folders)
         controllerRecord.SSE = get_struct_field_or_nan(outputData, "SSE");
         controllerRecord.SSdU = get_struct_field_or_nan(outputData, "SSdU");
         controllerRecord.J = controllerRecord.SSE + 1e4 * controllerRecord.SSdU;
+        controllerRecord.p = NaN;
+        controllerRecord.m = NaN;
+        controllerRecord.Q_diag = {NaN};
+        controllerRecord.R1_diag = {NaN};
+        controllerRecord.R2_diag = {NaN};
+        [decodedTheta, thetaOk] = decode_theta_weights(outputData);
+        if thetaOk
+            controllerRecord.p = decodedTheta.p;
+            controllerRecord.m = decodedTheta.m;
+            controllerRecord.Q_diag = {decodedTheta.Q_diag};
+            controllerRecord.R1_diag = {decodedTheta.R1_diag};
+            controllerRecord.R2_diag = {decodedTheta.R2_diag};
+        end
         controllerRecordList = [controllerRecordList; controllerRecord]; %#ok<AGROW>
 
         for c = 1:numel(outputData.case)
@@ -95,6 +108,8 @@ for k = 1:numel(cfg.run_folders)
             caseRecord.SSE = controllerRecord.SSE;
             caseRecord.SSdU = controllerRecord.SSdU;
             caseRecord.J = controllerRecord.J;
+            caseRecord.p = controllerRecord.p;
+            caseRecord.m = controllerRecord.m;
 
             for s = 1:numel(caseMetrics.settling_times_h)
                 caseRecord.(sprintf("settle_x%d_h", s)) = caseMetrics.settling_times_h(s);
@@ -112,6 +127,9 @@ for k = 1:numel(cfg.run_folders)
             caseRecord.lyap_noninc_ratio = caseMetrics.lyap_noninc_ratio;
             caseRecord.lyap_all_noninc = caseMetrics.lyap_all_noninc;
             caseRecord.lyap_case_stable = caseMetrics.lyap_case_stable;
+            caseRecord.value_V1 = caseMetrics.value_V1;
+            caseRecord.value_VN = caseMetrics.value_VN;
+            caseRecord.stage_cost_sum = caseMetrics.stage_cost_sum;
 
             caseRecordList = [caseRecordList; caseRecord]; %#ok<AGROW>
         end
@@ -164,6 +182,73 @@ end
 end
 
 
+function [decodedTheta, isValid] = decode_theta_weights(outputStruct)
+decodedTheta = struct("p", NaN, "m", NaN, "Q_diag", [], "R1_diag", [], "R2_diag", []);
+isValid = false;
+if ~isfield(outputStruct, "theta")
+    return
+end
+
+theta = double(outputStruct.theta(:).');
+if numel(theta) < 4
+    return
+end
+
+if isfield(outputStruct, "cfg") && isfield(outputStruct.cfg, "Q") && isfield(outputStruct.cfg, "Ru")
+    nx = size(outputStruct.cfg.Q, 1);
+    nu = size(outputStruct.cfg.Ru, 1);
+else
+    nx = floor((numel(theta) - 3) / 3);
+    nu = nx;
+end
+expectedLength = 1 + 2 + nx + nu + nu;
+if expectedLength ~= numel(theta)
+    return
+end
+
+f_unused = theta(1); %#ok<NASGU>
+thetaP = theta(2);
+thetaM = theta(3);
+qExp = theta(4:3+nx);
+r1Exp = theta(4+nx:3+nx+nu);
+r2Exp = theta(4+nx+nu:3+nx+2*nu);
+
+decodedTheta.p = thetaP + (thetaM + 1);
+decodedTheta.m = thetaM + 1;
+decodedTheta.Q_diag = 10.^qExp;
+decodedTheta.R1_diag = 10.^r1Exp;
+decodedTheta.R2_diag = 10.^r2Exp;
+isValid = true;
+end
+
+
+function approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta)
+numSteps = size(stateTrajectory, 1);
+trackingError = stateTrajectory - setpointTrajectory;
+
+stateCost = sum((trackingError.^2) .* decodedTheta.Q_diag(:).', 2);
+inputCost = sum(((inputTrajectory- inputTrajectory(:, end)).^2) .* decodedTheta.R1_diag(:).', 2);
+
+inputIncrements = [zeros(1, size(inputTrajectory,2)); diff(inputTrajectory, 1, 1)];
+deltaInputCost = sum((inputIncrements.^2) .* decodedTheta.R2_diag(:).', 2);
+
+stageCost = stateCost + inputCost + deltaInputCost;
+
+% Backward approximation with zero terminal value: V_{N+1} ~= 0.
+% This implies V_k ~= sum_{j=k..N} stageCost(j). We do not validate this assumption here.
+valueSequence = zeros(numSteps, 1);
+runningTailCost = 0;
+for k = numSteps:-1:1
+    runningTailCost = runningTailCost + stageCost(k);
+    valueSequence(k) = runningTailCost;
+end
+
+approxValue = struct();
+approxValue.stage_cost = stageCost;
+approxValue.V = valueSequence;
+end
+
+
 function metrics = summarize_case_metrics(outStruct, caseStruct, settlingTol)
 arguments
     outStruct struct
@@ -188,6 +273,17 @@ timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
     stateTrajectory, setpointTrajectory, timeHours, settlingTol);
 totalInputVariation = compute_total_input_variation(inputTrajectory);
 [lyapV, lyapDeltaV] = compute_faux_lyapunov(stateTrajectory, setpointTrajectory);
+[decodedTheta, thetaOk] = decode_theta_weights(outStruct);
+if thetaOk
+    approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta);
+    valueV1 = approxValue.V(1);
+    valueVN = approxValue.V(end);
+    stageCostSum = sum(approxValue.stage_cost, "omitnan");
+else
+    valueV1 = NaN;
+    valueVN = NaN;
+    stageCostSum = NaN;
+end
 
 finiteDeltaV = lyapDeltaV(2:end);
 finiteDeltaV = finiteDeltaV(isfinite(finiteDeltaV));
@@ -206,6 +302,9 @@ metrics.lyap_dV_max = max(lyapDeltaV(2:end), [], "omitnan");
 metrics.lyap_noninc_ratio = mean(lyapDeltaV(2:end) <= 0, "omitnan");
 metrics.lyap_all_noninc = allNonIncreasing;
 metrics.lyap_case_stable = isCaseStable;
+metrics.value_V1 = valueV1;
+metrics.value_VN = valueVN;
+metrics.stage_cost_sum = stageCostSum;
 end
 
 
@@ -317,7 +416,7 @@ if isempty(allControllersBothCases)
     fprintf("Controllers table (both case 1 and case 2, no removals): none\n");
 else
     fprintf("Controllers table (both case 1 and case 2, no removals):\n");
-    allCols = ["run_label","timestamp","SSE","SSdU","J"];
+    allCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"];
     settleBothCols = allControllersBothCases.Properties.VariableNames(startsWith(allControllersBothCases.Properties.VariableNames, "settle_"));
     allCols = [allCols, settleBothCols, "lyap_case_stable_c1", "lyap_case_stable_c2"];
     allCols = allCols(ismember(allCols, allControllersBothCases.Properties.VariableNames));
@@ -405,7 +504,9 @@ if ~isempty(settlingColumns)
     else
         settlingBothCols = bothCasesTable.Properties.VariableNames(startsWith(bothCasesTable.Properties.VariableNames, "settle_"));
         fprintf("Controllers table (both case 1 and case 2, excluding any NaN settling time):\n");
-        reportCols = ["run_label","timestamp","SSE","SSdU","J",settlingBothCols,"lyap_case_stable_c1","lyap_case_stable_c2"];
+        reportCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag", ...
+            "value_V1_c1","value_VN_c1","value_V1_c2","value_VN_c2", ...
+            settlingBothCols,"lyap_case_stable_c1","lyap_case_stable_c2"];
         reportCols = reportCols(ismember(reportCols, bothCasesTable.Properties.VariableNames));
         disp(bothCasesTable(:, reportCols));
     end
@@ -419,20 +520,22 @@ if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
     return
 end
 
-case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"lyap_case_stable"]);
-case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"lyap_case_stable"]);
+case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"lyap_case_stable","value_V1","value_VN"]);
+case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"lyap_case_stable","value_V1","value_VN"]);
 if isempty(case1Table) || isempty(case2Table)
     controllerCaseTable = table();
     return
 end
 
-case1Table = renamevars(case1Table, [settlingColumns, "lyap_case_stable"], [settlingColumns + "_c1", "lyap_case_stable_c1"]);
-case2Table = renamevars(case2Table, [settlingColumns, "lyap_case_stable"], [settlingColumns + "_c2", "lyap_case_stable_c2"]);
+case1Table = renamevars(case1Table, [settlingColumns, "lyap_case_stable","value_V1","value_VN"], ...
+    [settlingColumns + "_c1", "lyap_case_stable_c1","value_V1_c1","value_VN_c1"]);
+case2Table = renamevars(case2Table, [settlingColumns, "lyap_case_stable","value_V1","value_VN"], ...
+    [settlingColumns + "_c2", "lyap_case_stable_c2","value_V1_c2","value_VN_c2"]);
 
 controllerCaseTable = innerjoin(case1Table, case2Table, "Keys", ["run_label","timestamp"]);
 controllerCaseTable = innerjoin( ...
     controllerCaseTable, ...
-    controllerTable(:, ["run_label","timestamp","SSE","SSdU","J"]), ...
+    controllerTable(:, ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"]), ...
     "Keys", ["run_label","timestamp"]);
 
 if removeNaNSettling
