@@ -309,6 +309,20 @@ end
 function print_full_run_report(diagnostics, cfg)
 caseTable = diagnostics.per_case;
 controllerTable = diagnostics.per_controller;
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+
+% Print full controller table (both cases) before summary, with no removals.
+allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
+if isempty(allControllersBothCases)
+    fprintf("Controllers table (both case 1 and case 2, no removals): none\n");
+else
+    fprintf("Controllers table (both case 1 and case 2, no removals):\n");
+    allCols = ["run_label","timestamp","SSE","SSdU","J"];
+    settleBothCols = allControllersBothCases.Properties.VariableNames(startsWith(allControllersBothCases.Properties.VariableNames, "settle_"));
+    allCols = [allCols, settleBothCols, "lyap_case_stable_c1", "lyap_case_stable_c2"];
+    allCols = allCols(ismember(allCols, allControllersBothCases.Properties.VariableNames));
+    disp(allControllersBothCases(:, allCols));
+end
 
 fprintf("=== NMPC Full-Horizon Replay Report ===\n");
 fprintf("Run folders: %s\n", strjoin(string({cfg.run_folders.subfolder}), ", "));
@@ -320,7 +334,6 @@ if isempty(caseTable)
     return
 end
 
-settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
 for i = 1:numel(settlingColumns)
     nanCount = nnz(isnan(caseTable.(settlingColumns{i})));
     fprintf("NaN settling times %s: %d/%d\n", settlingColumns{i}, nanCount, height(caseTable));
@@ -340,6 +353,12 @@ stableCaseCount = nnz(caseTable.lyap_case_stable);
 stableControllerCount = nnz(controllerStability.all_cases_stable);
 fprintf("Lyapunov-stable cases: %d/%d\n", stableCaseCount, height(caseTable));
 fprintf("Lyapunov-stable controllers (all cases stable): %d/%d\n", stableControllerCount, height(controllerStability));
+
+% Stability counts split by scenario/case id.
+case1Mask = (caseTable.case_id == 1);
+case2Mask = (caseTable.case_id == 2);
+fprintf("Lyapunov-stable case 1 rows: %d/%d\n", nnz(caseTable.lyap_case_stable & case1Mask), nnz(case1Mask));
+fprintf("Lyapunov-stable case 2 rows: %d/%d\n", nnz(caseTable.lyap_case_stable & case2Mask), nnz(case2Mask));
 
 if ~isempty(diagnostics.missing_pareto_timestamps)
     fprintf("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
@@ -376,6 +395,54 @@ if isempty(stableLowQuartileList)
 else
     fprintf("Stable + lower-quartile (SSE and SSdU):\n");
     disp(stableLowQuartileList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
+end
+
+% Controller-level listing: require BOTH cases and no NaN settling times in either case.
+if ~isempty(settlingColumns)
+    bothCasesTable = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, true);
+    if isempty(bothCasesTable)
+        fprintf("Controllers table (both cases with complete settling times): none\n");
+    else
+        settlingBothCols = bothCasesTable.Properties.VariableNames(startsWith(bothCasesTable.Properties.VariableNames, "settle_"));
+        fprintf("Controllers table (both case 1 and case 2, excluding any NaN settling time):\n");
+        reportCols = ["run_label","timestamp","SSE","SSdU","J",settlingBothCols,"lyap_case_stable_c1","lyap_case_stable_c2"];
+        reportCols = reportCols(ismember(reportCols, bothCasesTable.Properties.VariableNames));
+        disp(bothCasesTable(:, reportCols));
+    end
+end
+end
+
+
+function controllerCaseTable = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, removeNaNSettling)
+if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
+    controllerCaseTable = table();
+    return
+end
+
+case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"lyap_case_stable"]);
+case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"lyap_case_stable"]);
+if isempty(case1Table) || isempty(case2Table)
+    controllerCaseTable = table();
+    return
+end
+
+case1Table = renamevars(case1Table, [settlingColumns, "lyap_case_stable"], [settlingColumns + "_c1", "lyap_case_stable_c1"]);
+case2Table = renamevars(case2Table, [settlingColumns, "lyap_case_stable"], [settlingColumns + "_c2", "lyap_case_stable_c2"]);
+
+controllerCaseTable = innerjoin(case1Table, case2Table, "Keys", ["run_label","timestamp"]);
+controllerCaseTable = innerjoin( ...
+    controllerCaseTable, ...
+    controllerTable(:, ["run_label","timestamp","SSE","SSdU","J"]), ...
+    "Keys", ["run_label","timestamp"]);
+
+if removeNaNSettling
+    settlingBothCols = controllerCaseTable.Properties.VariableNames(startsWith(controllerCaseTable.Properties.VariableNames, "settle_"));
+    validRowsMask = ~any(isnan(table2array(controllerCaseTable(:, settlingBothCols))), 2);
+    controllerCaseTable = controllerCaseTable(validRowsMask, :);
+end
+
+if ~isempty(controllerCaseTable)
+    controllerCaseTable = sortrows(controllerCaseTable, ["SSE","SSdU"], ["ascend","ascend"]);
 end
 end
 
