@@ -118,10 +118,28 @@ for k = 1:numel(datasets)
     display_runtime_phase_summary(T, datasets(k).name, 20);
     plot_out_runtime_vs_tuning(T, datasets(k).outDir, datasets(k).name, fontSize);
 end
-
-plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
+%%
+final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
 plot_available_paper_results(allT, allTp, datasets, rootFolder, 20, fontSize);
 plot_out_runtime_vs_tuning_combined(allTout, datasets, rootFolder, fontSize);
+
+% final_Tp.timestamp
+% 
+% ans = 
+% 
+%   11×1 string array
+% 
+%     "20260131_151035"
+%     "20260201_111557"
+%     "20260201_111928"
+%     "20260201_192807"
+%     "20260201_223337"
+%     "20260201_232106"
+%     "20260210_151703"
+%     "20260210_171107"
+%     "20260210_180826"
+%     "20260211_122653"
+%     "20260211_134235"
 
 
 function [T, Tp, isPareto] = load_results_table(csvPath)
@@ -359,7 +377,7 @@ disp(summaryTbl);
 end
 
 
-function plot_combined_pareto_curves(T1, Tp1, T2, Tp2, outPath, fontSize)
+function Tpf = plot_combined_pareto_curves(T1, Tp1, T2, Tp2, outPath, fontSize)
 % Final frontier from all points (run1 + run2)
 Tall = [T1; T2];
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
