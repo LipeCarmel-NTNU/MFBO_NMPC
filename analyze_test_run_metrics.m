@@ -8,8 +8,8 @@
 %   If final relative error is > tol, settling time is NaN.
 %
 % Observed stability criterion used in this script:
-%   Case is "possibly stable" if the approximated value function is
-%   nonincreasing along the trajectory: V(k+1) <= V(k) for all k.
+%   Let d_k = ||x_k - r_k||_2 using the simulated trajectory and setpoint.
+%   Case is "possibly stable" if d_{k+1} <= d_k for all k.
 %   Controller (timestamp) is stable if all its cases are stable.
 
 clear; clc;
@@ -227,31 +227,15 @@ end
 
 
 function approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta)
-% Approximate stage cost and tail-sum value sequence using decoded weights.
-numSteps = size(stateTrajectory, 1);
+% Empirical contraction signal based on trajectory distance to reference.
+% We intentionally overwrite the previous value-function approximation with:
+%   V_k := d_k = ||x_k - r_k||_2
+% so that monotonicity checks directly test d_{k+1} <= d_k.
 trackingError = stateTrajectory - setpointTrajectory;
-
-% Stage terms: tracking + input magnitude + input increments.
-stateCost = sum((trackingError.^2) .* decodedTheta.Q_diag(:).', 2);
-inputCost = sum((inputTrajectory.^2) .* decodedTheta.R1_diag(:).', 2);
-
-inputIncrements = [zeros(1, size(inputTrajectory,2)); diff(inputTrajectory, 1, 1)];
-deltaInputCost = sum((inputIncrements.^2) .* decodedTheta.R2_diag(:).', 2);
-
-stageCost = stateCost + inputCost + deltaInputCost;
-
-% Backward approximation with zero terminal value: V_{N+1} ~= 0.
-% This implies V_k ~= sum_{j=k..N} stageCost(j). We do not validate this assumption here.
-valueSequence = zeros(numSteps, 1);
-runningTailCost = 0;
-% Backward recursion implementing V_k ~= sum_{j=k..N} l_j.
-for k = numSteps:-1:1
-    runningTailCost = runningTailCost + stageCost(k);
-    valueSequence(k) = runningTailCost;
-end
+valueSequence = vecnorm(trackingError, 2, 2);
 
 approxValue = struct();
-approxValue.stage_cost = stageCost;
+approxValue.stage_cost = valueSequence;
 approxValue.V = valueSequence;
 end
 
@@ -281,7 +265,7 @@ timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
 totalInputVariation = compute_total_input_variation(inputTrajectory);
 [IAEByState, ~] = compute_integral_abs_error(stateTrajectory, setpointTrajectory, sampleTimeHours);
 [decodedTheta, thetaOk] = decode_theta_weights(outStruct);
-% Value-based "possible stability": nonincreasing V along trajectory.
+% Empirical contraction check: d_{k+1} <= d_k where d_k = ||x_k-r_k||_2.
 if thetaOk
     approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta);
     valueDiff = diff(approxValue.V);
