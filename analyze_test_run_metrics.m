@@ -400,6 +400,7 @@ if isempty(allControllersBothCases)
     fprintf("Controllers table (both case 1 and case 2, no removals): none\n");
 else
     fprintf("Controllers table (both case 1 and case 2, no removals):\n");
+    allControllersBothCases = sort_table_by_sse(allControllersBothCases);
     allCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"];
     settleBothCols = allControllersBothCases.Properties.VariableNames(startsWith(allControllersBothCases.Properties.VariableNames, "settle_"));
     allCols = [allCols, settleBothCols, "value_case_stable_c1", "value_case_stable_c2"];
@@ -469,6 +470,7 @@ if isempty(stableControllerList)
     fprintf("Stable controllers: none\n");
 else
     fprintf("Stable controllers:\n");
+    stableControllerList = sort_table_by_sse(stableControllerList);
     disp(stableControllerList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
 end
 
@@ -477,6 +479,7 @@ if isempty(stableLowQuartileList)
     fprintf("Stable + lower-quartile (SSE and SSdU): none\n");
 else
     fprintf("Stable + lower-quartile (SSE and SSdU):\n");
+    stableLowQuartileList = sort_table_by_sse(stableLowQuartileList);
     disp(stableLowQuartileList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
 end
 
@@ -486,6 +489,7 @@ if ~isempty(settlingColumns)
     if isempty(bothCasesTable)
         fprintf("Controllers table (both cases with complete settling times): none\n");
     else
+        bothCasesTable = sort_table_by_sse(bothCasesTable);
         settlingBothCols = bothCasesTable.Properties.VariableNames(startsWith(bothCasesTable.Properties.VariableNames, "settle_"));
         fprintf("Controllers table (both case 1 and case 2, excluding any NaN settling time):\n");
         reportCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag", ...
@@ -495,6 +499,14 @@ if ~isempty(settlingColumns)
         disp(bothCasesTable(:, reportCols));
     end
 end
+end
+
+
+function T = sort_table_by_sse(T)
+if isempty(T) || ~ismember("SSE", string(T.Properties.VariableNames))
+    return
+end
+T = sortrows(T, "SSE", "ascend");
 end
 
 
