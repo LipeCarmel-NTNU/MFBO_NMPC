@@ -25,7 +25,8 @@
 % Generated figures
 % - Per run (`results/runX/`):
 %   `sse_vs_ssdu.png`, `runtime_vs_iteration.png`,
-%   `runtime_cumulative_vs_iteration.png`
+%   `runtime_cumulative_vs_iteration.png`,
+%   `f_vs_iteration.png`
 % - Combined (`results/`):
 %   `pareto_curves_run1_run2_final.png`
 %   `runtime_cumulative_run1_run2.png`
@@ -295,6 +296,7 @@ end
 outScatterPath = fullfile(outDir, "sse_vs_ssdu.png");
 outRuntimePath = fullfile(outDir, "runtime_vs_iteration.png");
 outCumRuntimePath = fullfile(outDir, "runtime_cumulative_vs_iteration.png");
+outFvsIterPath = fullfile(outDir, "f_vs_iteration.png");
 
 J_track = double(T.SSE);
 J_TV = double(T.SSdU);
@@ -316,10 +318,11 @@ exportgraphics(fig1, outScatterPath, "Resolution", 300);
 fig2 = figure("Color", "w");
 ax2 = axes(fig2); hold(ax2, "on");
 runtime_h = double(T.runtime_min) / 60;
-plot(ax2, T.iteration, runtime_h, "-", "LineWidth", 2.0);
-xline(ax2, 20, "--", "LineWidth", 1.3);
+plot(ax2, T.iteration, runtime_h, "-", "LineWidth", 1.5);
+xline(ax2, 20.5, "--", "LineWidth", 1.3);
 xlabel(ax2, "$k$ (iteration)");
-ylabel(ax2, "$t_{\mathrm{run}}$ (h)");
+ylabel(ax2, "$t_{\mathrm{iter}}$ (h)");
+xlim(ax2, [1, max(1, height(T))]);
 set(ax2, "FontSize", fontSize);
 grid(ax2, "off");
 box(ax2, "off");
@@ -327,14 +330,27 @@ exportgraphics(fig2, outRuntimePath, "Resolution", 300);
 
 fig3 = figure("Color", "w");
 ax3 = axes(fig3); hold(ax3, "on");
-plot(ax3, T.iteration, cumsum(runtime_h, "omitnan"), "-", "LineWidth", 2.0);
-xline(ax3, 20, "--", "LineWidth", 1.3);
+plot(ax3, T.iteration, cumsum(runtime_h, "omitnan"), "-", "LineWidth", 1.5);
+xline(ax3, 20.5, "--", "LineWidth", 1.3);
 xlabel(ax3, "$k$ (iteration)");
-ylabel(ax3, "$\sum t_{\mathrm{run}}$ (h)");
+ylabel(ax3, "$t_{\mathrm{run}}$ (h)");
+xlim(ax3, [1, max(1, height(T))]);
 set(ax3, "FontSize", fontSize);
 grid(ax3, "off");
 box(ax3, "off");
 exportgraphics(fig3, outCumRuntimePath, "Resolution", 300);
+
+fig4 = figure("Color", "w");
+ax4 = axes(fig4); hold(ax4, "on");
+plot(ax4, T.iteration, double(T.f), "-", "LineWidth", 1.5);
+xline(ax4, 20.5, "--", "LineWidth", 1.3);
+xlabel(ax4, "$k$ (iteration)");
+ylabel(ax4, "$f$");
+xlim(ax4, [1, max(1, height(T))]);
+set(ax4, "FontSize", fontSize);
+grid(ax4, "off");
+box(ax4, "off");
+exportgraphics(fig4, outFvsIterPath, "Resolution", 300);
 end
 
 
@@ -485,7 +501,7 @@ end
 figBox = figure("Color","w");
 axBox = axes(figBox); hold(axBox, "on");
 boxplot(axBox, rtAll, grpAll);
-ylabel(axBox, "$t_{\mathrm{run}}$ per iteration (h)");
+ylabel(axBox, "$t_{\mathrm{iter}}$ (h)");
 set(axBox, "FontSize", fontSize);
 grid(axBox, "off");
 box(axBox, "off");
@@ -653,13 +669,15 @@ ax = axes(fig); hold(ax, "on");
 runtime_h_1 = double(allT{1}.runtime_min) / 60;
 runtime_h_2 = double(allT{2}.runtime_min) / 60;
 
-plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWidth", 2.0, ...
+plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWidth", 1.5, ...
     "DisplayName", string(datasets(1).name));
-plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
+plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 1.5, ...
     "DisplayName", string(datasets(2).name));
+xline(ax, 20.5, "--", "LineWidth", 1.3);
 
 xlabel(ax, "$k$ (iteration)");
-ylabel(ax, "$\sum t_{\mathrm{run}}$ (h)");
+ylabel(ax, "$t_{\mathrm{run}}$ (h)");
+xlim(ax, [1, max(1, max(height(allT{1}), height(allT{2})))]);
 set(ax, "FontSize", fontSize);
 grid(ax, "off");
 box(ax, "off");
