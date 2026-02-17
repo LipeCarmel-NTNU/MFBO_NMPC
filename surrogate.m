@@ -84,6 +84,12 @@ c5_0   = zeros(6,1);
 c_SSdU = fminunc(@(c) obj_Cheb5(c, x_all, SSdU_all), c5_0, opts);
 c_SSE  = fminunc(@(c) obj_Cheb5(c, x_all, SSE_all ), c5_0, opts);
 
+% Goodness-of-fit on the aggregated training set
+SSdU_hat_all = clamp01(Cheb5(x_all, c_SSdU));
+SSE_hat_all  = clamp01(Cheb5(x_all, c_SSE));
+R2_SSdU = compute_r2(SSdU_all, SSdU_hat_all);
+R2_SSE  = compute_r2(SSE_all,  SSE_hat_all);
+
 % Check rng(1) results. If non destructive changes are made to the code, then
 % the results should be the same within rouding error
 c_SSdU_check = [6.442657e-01   4.682368e-01  -1.455242e-01   2.457724e-02   2.198219e-02  -1.598959e-02]';
@@ -131,6 +137,10 @@ fprintf('Time params:\n');
 fprintf('alfa = %.6g, beta = %.6g\n', alfa, beta);
 fprintf('c_time (c0..c3):\n');
 fprintf('% .6e  ', cT); fprintf('\n');
+
+fprintf('\nR^2 on aggregated fit data:\n');
+fprintf('R^2(SSdU) = %.6f\n', R2_SSdU);
+fprintf('R^2(SSE)  = %.6f\n', R2_SSE);
 
 %% -----------------------------
 % Quick diagnostics plots (optional)
@@ -239,4 +249,16 @@ end
 
 function y = clamp01(y)
     y = min(max(y, 0), 1);
+end
+
+function r2 = compute_r2(y, y_hat)
+    y = y(:);
+    y_hat = y_hat(:);
+    sse_res = sum((y - y_hat).^2);
+    sse_tot = sum((y - mean(y)).^2);
+    if sse_tot <= eps
+        r2 = NaN;
+    else
+        r2 = 1 - sse_res / sse_tot;
+    end
 end
