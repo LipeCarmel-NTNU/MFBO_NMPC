@@ -84,6 +84,27 @@ c5_0   = zeros(6,1);
 c_SSdU = fminunc(@(c) obj_Cheb5(c, x_all, SSdU_all), c5_0, opts);
 c_SSE  = fminunc(@(c) obj_Cheb5(c, x_all, SSE_all ), c5_0, opts);
 
+% Check rng(1) results. If non destructive changes are made to the code, then
+% the results should be the same within rouding error
+c_SSdU_check = [6.442657e-01   4.682368e-01  -1.455242e-01   2.457724e-02   2.198219e-02  -1.598959e-02]';
+c_SSE_check = [7.827330e-01   3.771709e-01  -2.433549e-01   1.091471e-01  -2.846259e-02   1.358572e-03]';
+exp_SSdU = floor(log10(abs(c_SSdU_check)));
+exp_SSE  = floor(log10(abs(c_SSE_check)));
+
+% Absolute rounding tolerance per entry (within significant digits)
+significant_digits = 6;
+tol_SSdU = 0.5 * 10.^(exp_SSdU - significant_digits);
+tol_SSE  = 0.5 * 10.^(exp_SSE  - significant_digits);
+
+if all(abs(c_SSdU - c_SSdU_check) <= tol_SSdU) && ...
+   all(abs(c_SSE  - c_SSE_check ) <= tol_SSE)
+
+    fprintf("Chebyshev coefficient check passed (within printed rounding tolerance).\n");
+
+else
+    error("Chebyshev coefficient check failed: deviation exceeds printed rounding tolerance.");
+end
+
 % -----------------------------
 % Fit time model
 %   t = (m/10)^alfa * (p/30)^beta * softmax(cheb3(x,c))
