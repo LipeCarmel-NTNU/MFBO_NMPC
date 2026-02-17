@@ -201,14 +201,10 @@ if numel(theta) < 4
     return
 end
 
-% Prefer dimensions from cfg if available; otherwise infer from theta length.
-if isfield(outputStruct, "cfg") && isfield(outputStruct.cfg, "Q") && isfield(outputStruct.cfg, "Ru")
     nx = size(outputStruct.cfg.Q, 1);
     nu = size(outputStruct.cfg.Ru, 1);
-else
-    nx = floor((numel(theta) - 3) / 3);
-    nu = nx;
-end
+
+
 expectedLength = 1 + 2 + nx + nu + nu;
 if expectedLength ~= numel(theta)
     return
