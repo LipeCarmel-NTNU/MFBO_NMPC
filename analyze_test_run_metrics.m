@@ -7,12 +7,9 @@
 %   t_s,i is the earliest time where e_rel_i(t) <= tol for ALL future t.
 %   If final relative error is > tol, settling time is NaN.
 %
-% Faux-Lyapunov diagnostics:
-%   V(k)  = sum_i (y_i(k) - r_i)^2
-%   dV(k) = V(k) - V(k-1)
-%
 % Observed stability criterion used in this script:
-%   Case is stable if Vf <= V0 and dV(k) <= 0 for all k >= 2.
+%   Case is "possibly stable" if the approximated value function is
+%   nonincreasing along the trajectory: V(k+1) <= V(k) for all k.
 %   Controller (timestamp) is stable if all its cases are stable.
 
 clear; clc;
@@ -120,16 +117,11 @@ for k = 1:numel(cfg.run_folders)
                 caseRecord.(sprintf("tot_dU_u%d", u)) = caseMetrics.total_input_variation(u);
             end
 
-            caseRecord.lyap_V0 = caseMetrics.lyap_V0;
-            caseRecord.lyap_Vf = caseMetrics.lyap_Vf;
-            caseRecord.lyap_dV_mean = caseMetrics.lyap_dV_mean;
-            caseRecord.lyap_dV_max = caseMetrics.lyap_dV_max;
-            caseRecord.lyap_noninc_ratio = caseMetrics.lyap_noninc_ratio;
-            caseRecord.lyap_all_noninc = caseMetrics.lyap_all_noninc;
-            caseRecord.lyap_case_stable = caseMetrics.lyap_case_stable;
             caseRecord.value_V1 = caseMetrics.value_V1;
             caseRecord.value_VN = caseMetrics.value_VN;
             caseRecord.stage_cost_sum = caseMetrics.stage_cost_sum;
+            caseRecord.value_noninc_ratio = caseMetrics.value_noninc_ratio;
+            caseRecord.value_case_stable = caseMetrics.value_case_stable;
 
             caseRecordList = [caseRecordList; caseRecord]; %#ok<AGROW>
         end
@@ -227,7 +219,7 @@ numSteps = size(stateTrajectory, 1);
 trackingError = stateTrajectory - setpointTrajectory;
 
 stateCost = sum((trackingError.^2) .* decodedTheta.Q_diag(:).', 2);
-inputCost = sum(((inputTrajectory- inputTrajectory(:, end)).^2) .* decodedTheta.R1_diag(:).', 2);
+inputCost = sum((inputTrajectory.^2) .* decodedTheta.R1_diag(:).', 2);
 
 inputIncrements = [zeros(1, size(inputTrajectory,2)); diff(inputTrajectory, 1, 1)];
 deltaInputCost = sum((inputIncrements.^2) .* decodedTheta.R2_diag(:).', 2);
@@ -272,10 +264,18 @@ timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
 [settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times( ...
     stateTrajectory, setpointTrajectory, timeHours, settlingTol);
 totalInputVariation = compute_total_input_variation(inputTrajectory);
-[lyapV, lyapDeltaV] = compute_faux_lyapunov(stateTrajectory, setpointTrajectory);
 [decodedTheta, thetaOk] = decode_theta_weights(outStruct);
 if thetaOk
     approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta);
+    valueDiff = diff(approxValue.V);
+    finiteValueDiff = valueDiff(isfinite(valueDiff));
+    if isempty(finiteValueDiff)
+        valueNonIncRatio = NaN;
+        isValueCaseStable = false;
+    else
+        valueNonIncRatio = mean(finiteValueDiff <= 0);
+        isValueCaseStable = all(finiteValueDiff <= 0);
+    end
     valueV1 = approxValue.V(1);
     valueVN = approxValue.V(end);
     stageCostSum = sum(approxValue.stage_cost, "omitnan");
@@ -283,28 +283,20 @@ else
     valueV1 = NaN;
     valueVN = NaN;
     stageCostSum = NaN;
+    valueNonIncRatio = NaN;
+    isValueCaseStable = false;
 end
-
-finiteDeltaV = lyapDeltaV(2:end);
-finiteDeltaV = finiteDeltaV(isfinite(finiteDeltaV));
-allNonIncreasing = all(finiteDeltaV <= 0);
-isCaseStable = (lyapV(end) <= lyapV(1)) && allNonIncreasing;
 
 metrics = struct();
 metrics.settling_times_h = settlingTimes_h;
 metrics.final_error_pct = finalErrPct;
 metrics.peak_error_pct = peakErrPct;
 metrics.total_input_variation = totalInputVariation;
-metrics.lyap_V0 = lyapV(1);
-metrics.lyap_Vf = lyapV(end);
-metrics.lyap_dV_mean = mean(lyapDeltaV(2:end), "omitnan");
-metrics.lyap_dV_max = max(lyapDeltaV(2:end), [], "omitnan");
-metrics.lyap_noninc_ratio = mean(lyapDeltaV(2:end) <= 0, "omitnan");
-metrics.lyap_all_noninc = allNonIncreasing;
-metrics.lyap_case_stable = isCaseStable;
 metrics.value_V1 = valueV1;
 metrics.value_VN = valueVN;
 metrics.stage_cost_sum = stageCostSum;
+metrics.value_noninc_ratio = valueNonIncRatio;
+metrics.value_case_stable = isValueCaseStable;
 end
 
 
@@ -358,22 +350,14 @@ totalInputVariation = sum(abs(inputIncrements), 1);
 end
 
 
-function [lyapV, lyapDeltaV] = compute_faux_lyapunov(stateTrajectory, setpointTrajectory)
-trackingError = stateTrajectory - setpointTrajectory;
-trackingError(:, 1) = trackingError(:, 1) * 10;
-lyapV = sum(trackingError.^2, 2);
-lyapDeltaV = [NaN; diff(lyapV)];
-end
-
-
 function controllerStability = compute_controller_stability(caseTable)
-grouped = groupsummary(caseTable, ["run_label","timestamp"], "all", "lyap_case_stable");
+grouped = groupsummary(caseTable, ["run_label","timestamp"], "all", "value_case_stable");
 controllerStability = table();
 controllerStability.run_label = grouped.run_label;
 controllerStability.timestamp = grouped.timestamp;
 controllerStability.case_count = grouped.GroupCount;
-controllerStability.stable_case_count = grouped.sum_lyap_case_stable;
-controllerStability.all_cases_stable = (grouped.sum_lyap_case_stable == grouped.GroupCount);
+controllerStability.stable_case_count = grouped.sum_value_case_stable;
+controllerStability.all_cases_stable = (grouped.sum_value_case_stable == grouped.GroupCount);
 end
 
 
@@ -418,7 +402,7 @@ else
     fprintf("Controllers table (both case 1 and case 2, no removals):\n");
     allCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"];
     settleBothCols = allControllersBothCases.Properties.VariableNames(startsWith(allControllersBothCases.Properties.VariableNames, "settle_"));
-    allCols = [allCols, settleBothCols, "lyap_case_stable_c1", "lyap_case_stable_c2"];
+    allCols = [allCols, settleBothCols, "value_case_stable_c1", "value_case_stable_c2"];
     allCols = allCols(ismember(allCols, allControllersBothCases.Properties.VariableNames));
     disp(allControllersBothCases(:, allCols));
 end
@@ -448,16 +432,16 @@ if ~isempty(settlingColumns)
 end
 
 controllerStability = diagnostics.controller_stability;
-stableCaseCount = nnz(caseTable.lyap_case_stable);
+stableCaseCount = nnz(caseTable.value_case_stable);
 stableControllerCount = nnz(controllerStability.all_cases_stable);
-fprintf("Lyapunov-stable cases: %d/%d\n", stableCaseCount, height(caseTable));
-fprintf("Lyapunov-stable controllers (all cases stable): %d/%d\n", stableControllerCount, height(controllerStability));
+fprintf("Possibly stable cases (value nonincreasing): %d/%d\n", stableCaseCount, height(caseTable));
+fprintf("Possibly stable controllers (all cases stable): %d/%d\n", stableControllerCount, height(controllerStability));
 
 % Stability counts split by scenario/case id.
 case1Mask = (caseTable.case_id == 1);
 case2Mask = (caseTable.case_id == 2);
-fprintf("Lyapunov-stable case 1 rows: %d/%d\n", nnz(caseTable.lyap_case_stable & case1Mask), nnz(case1Mask));
-fprintf("Lyapunov-stable case 2 rows: %d/%d\n", nnz(caseTable.lyap_case_stable & case2Mask), nnz(case2Mask));
+fprintf("Possibly stable case 1 rows: %d/%d\n", nnz(caseTable.value_case_stable & case1Mask), nnz(case1Mask));
+fprintf("Possibly stable case 2 rows: %d/%d\n", nnz(caseTable.value_case_stable & case2Mask), nnz(case2Mask));
 
 if ~isempty(diagnostics.missing_pareto_timestamps)
     fprintf("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
@@ -506,7 +490,7 @@ if ~isempty(settlingColumns)
         fprintf("Controllers table (both case 1 and case 2, excluding any NaN settling time):\n");
         reportCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag", ...
             "value_V1_c1","value_VN_c1","value_V1_c2","value_VN_c2", ...
-            settlingBothCols,"lyap_case_stable_c1","lyap_case_stable_c2"];
+            settlingBothCols,"value_case_stable_c1","value_case_stable_c2"];
         reportCols = reportCols(ismember(reportCols, bothCasesTable.Properties.VariableNames));
         disp(bothCasesTable(:, reportCols));
     end
@@ -520,17 +504,17 @@ if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
     return
 end
 
-case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"lyap_case_stable","value_V1","value_VN"]);
-case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"lyap_case_stable","value_V1","value_VN"]);
+case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"value_case_stable","value_V1","value_VN"]);
+case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"value_case_stable","value_V1","value_VN"]);
 if isempty(case1Table) || isempty(case2Table)
     controllerCaseTable = table();
     return
 end
 
-case1Table = renamevars(case1Table, [settlingColumns, "lyap_case_stable","value_V1","value_VN"], ...
-    [settlingColumns + "_c1", "lyap_case_stable_c1","value_V1_c1","value_VN_c1"]);
-case2Table = renamevars(case2Table, [settlingColumns, "lyap_case_stable","value_V1","value_VN"], ...
-    [settlingColumns + "_c2", "lyap_case_stable_c2","value_V1_c2","value_VN_c2"]);
+case1Table = renamevars(case1Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
+    [settlingColumns + "_c1", "value_case_stable_c1","value_V1_c1","value_VN_c1"]);
+case2Table = renamevars(case2Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
+    [settlingColumns + "_c2", "value_case_stable_c2","value_V1_c2","value_VN_c2"]);
 
 controllerCaseTable = innerjoin(case1Table, case2Table, "Keys", ["run_label","timestamp"]);
 controllerCaseTable = innerjoin( ...
@@ -583,11 +567,11 @@ if ~isempty(inputVariationColumns)
 end
 
 subplot(2, 3, 3);
-boxplot([caseTable.lyap_dV_mean, caseTable.lyap_dV_max, caseTable.lyap_noninc_ratio], ...
-    "Labels", {'mean(dV)','max(dV)','ratio(dV<=0)'});
+boxplot([caseTable.value_V1, caseTable.value_VN, caseTable.value_noninc_ratio], ...
+    "Labels", {'V(1)','V(N)','ratio(DeltaV<=0)'});
 xlabel("Metric");
 ylabel("Value");
-title("Faux-Lyapunov Diagnostics");
+title("Approximate Value Metrics");
 grid off; box off;
 
 if ~isempty(controllerTable)
