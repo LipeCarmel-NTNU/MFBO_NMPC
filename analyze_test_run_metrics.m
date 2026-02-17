@@ -14,6 +14,7 @@
 
 clear; clc;
 
+% User-level configuration for input folders and analysis scope.
 cfg = struct();
 cfg.test_run_root = fullfile("results", "test_run");
 cfg.run_folders = [
@@ -36,8 +37,12 @@ cfg.final_pareto_timestamps = [
 cfg.settling_tol = 0.05;
 
 diagnostics = run_full_run_diagnostics(cfg);
+% Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
 plot_summary_boxplots(diagnostics);
+plot_pareto_r1_vs_p(diagnostics);
+plot_p_distribution_by_run(diagnostics);
+plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
 %% FUNCTIONS
 function diagnostics = run_full_run_diagnostics(cfg)
@@ -49,6 +54,7 @@ caseRecordList = [];
 controllerRecordList = [];
 matFileCount = 0;
 
+% Traverse all configured replay folders (run1/run2).
 for k = 1:numel(cfg.run_folders)
     runName = cfg.run_folders(k).label;
     runFolder = fullfile(cfg.test_run_root, cfg.run_folders(k).subfolder);
@@ -57,6 +63,7 @@ for k = 1:numel(cfg.run_folders)
         continue
     end
 
+    % One replay artifact per timestamp/controller.
     matFiles = dir(fullfile(runFolder, "out_full_*.mat"));
     matFileCount = matFileCount + numel(matFiles);
 
@@ -71,6 +78,7 @@ for k = 1:numel(cfg.run_folders)
         timestamp = string(loaded.ts);
         outputData = loaded.out;
 
+        % Controller-level metadata (shared by both simulated cases).
         controllerRecord = struct();
         controllerRecord.run_label = string(runName);
         controllerRecord.timestamp = timestamp;
@@ -92,6 +100,7 @@ for k = 1:numel(cfg.run_folders)
         end
         controllerRecordList = [controllerRecordList; controllerRecord]; %#ok<AGROW>
 
+        % Case-level metrics (two initial-condition scenarios per controller).
         for c = 1:numel(outputData.case)
             caseData = outputData.case(c);
             caseMetrics = summarize_case_metrics(outputData, caseData, cfg.settling_tol);
@@ -112,6 +121,7 @@ for k = 1:numel(cfg.run_folders)
                 caseRecord.(sprintf("settle_x%d_h", s)) = caseMetrics.settling_times_h(s);
                 caseRecord.(sprintf("final_err_x%d_pct", s)) = caseMetrics.final_error_pct(s);
                 caseRecord.(sprintf("peak_err_x%d_pct", s)) = caseMetrics.peak_error_pct(s);
+                caseRecord.(sprintf("IAE_x%d", s)) = caseMetrics.IAE_by_state(s);
             end
             for u = 1:numel(caseMetrics.total_input_variation)
                 caseRecord.(sprintf("tot_dU_u%d", u)) = caseMetrics.total_input_variation(u);
@@ -128,6 +138,7 @@ for k = 1:numel(cfg.run_folders)
     end
 end
 
+% Convert accumulated structs to tables for downstream grouping/filtering.
 if isempty(caseRecordList)
     perCaseTable = table();
 else
@@ -146,6 +157,7 @@ diagnostics.per_case = perCaseTable;
 diagnostics.per_controller = perControllerTable;
 diagnostics.mat_file_count = matFileCount;
 
+% Early return path when no usable replay files are found.
 if isempty(perCaseTable)
     diagnostics.pareto_cases = table();
     diagnostics.pareto_controllers = table();
@@ -160,12 +172,14 @@ diagnostics.pareto_controllers = perControllerTable(ismember(perControllerTable.
 foundTimestamps = unique(perCaseTable.timestamp);
 diagnostics.missing_pareto_timestamps = setdiff(cfg.final_pareto_timestamps, foundTimestamps);
 
+% Stability + low-quartile flags are computed from the case/controller tables.
 diagnostics.controller_stability = compute_controller_stability(perCaseTable);
 diagnostics.stable_low_quartile = select_stable_low_quartile(diagnostics.controller_stability, perControllerTable);
 end
 
 
 function x = get_struct_field_or_nan(S, fieldName)
+% Defensive accessor for optional fields in saved replay structs.
 if isfield(S, fieldName)
     x = double(S.(fieldName));
 else
@@ -175,6 +189,7 @@ end
 
 
 function [decodedTheta, isValid] = decode_theta_weights(outputStruct)
+% Decode theta = [f, theta_p, theta_m, q(1:nx), r1(1:nu), r2(1:nu)].
 decodedTheta = struct("p", NaN, "m", NaN, "Q_diag", [], "R1_diag", [], "R2_diag", []);
 isValid = false;
 if ~isfield(outputStruct, "theta")
@@ -186,6 +201,7 @@ if numel(theta) < 4
     return
 end
 
+% Prefer dimensions from cfg if available; otherwise infer from theta length.
 if isfield(outputStruct, "cfg") && isfield(outputStruct.cfg, "Q") && isfield(outputStruct.cfg, "Ru")
     nx = size(outputStruct.cfg.Q, 1);
     nu = size(outputStruct.cfg.Ru, 1);
@@ -215,9 +231,11 @@ end
 
 
 function approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta)
+% Approximate stage cost and tail-sum value sequence using decoded weights.
 numSteps = size(stateTrajectory, 1);
 trackingError = stateTrajectory - setpointTrajectory;
 
+% Stage terms: tracking + input magnitude + input increments.
 stateCost = sum((trackingError.^2) .* decodedTheta.Q_diag(:).', 2);
 inputCost = sum((inputTrajectory.^2) .* decodedTheta.R1_diag(:).', 2);
 
@@ -230,6 +248,7 @@ stageCost = stateCost + inputCost + deltaInputCost;
 % This implies V_k ~= sum_{j=k..N} stageCost(j). We do not validate this assumption here.
 valueSequence = zeros(numSteps, 1);
 runningTailCost = 0;
+% Backward recursion implementing V_k ~= sum_{j=k..N} l_j.
 for k = numSteps:-1:1
     runningTailCost = runningTailCost + stageCost(k);
     valueSequence(k) = runningTailCost;
@@ -264,7 +283,9 @@ timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
 [settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times( ...
     stateTrajectory, setpointTrajectory, timeHours, settlingTol);
 totalInputVariation = compute_total_input_variation(inputTrajectory);
+[IAEByState, ~] = compute_integral_abs_error(stateTrajectory, setpointTrajectory, sampleTimeHours);
 [decodedTheta, thetaOk] = decode_theta_weights(outStruct);
+% Value-based "possible stability": nonincreasing V along trajectory.
 if thetaOk
     approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta);
     valueDiff = diff(approxValue.V);
@@ -291,6 +312,7 @@ metrics = struct();
 metrics.settling_times_h = settlingTimes_h;
 metrics.final_error_pct = finalErrPct;
 metrics.peak_error_pct = peakErrPct;
+metrics.IAE_by_state = IAEByState;
 metrics.total_input_variation = totalInputVariation;
 metrics.value_V1 = valueV1;
 metrics.value_VN = valueVN;
@@ -327,6 +349,7 @@ for stateIdx = 1:numStates
         continue
     end
 
+    % First time index from which all future samples remain within tolerance.
     futureMaxRelError = flipud(cummax(flipud(relError)));
     firstSettledIdx = find(futureMaxRelError <= tol, 1, "first");
     if ~isempty(firstSettledIdx)
@@ -337,6 +360,7 @@ end
 
 
 function totalInputVariation = compute_total_input_variation(inputTrajectory)
+% Sum of absolute input increments per actuator.
 if isempty(inputTrajectory)
     totalInputVariation = [];
     return
@@ -350,7 +374,15 @@ totalInputVariation = sum(abs(inputIncrements), 1);
 end
 
 
+function [IAEByState, absError] = compute_integral_abs_error(stateTrajectory, setpointTrajectory, sampleTimeHours)
+% IAE per state with rectangular integration on uniform sampling.
+absError = abs(stateTrajectory - setpointTrajectory);
+IAEByState = sum(absError, 1) * sampleTimeHours;
+end
+
+
 function controllerStability = compute_controller_stability(caseTable)
+% Controller is stable only if all its case rows are stable.
 grouped = groupsummary(caseTable, ["run_label","timestamp"], "all", "value_case_stable");
 controllerStability = table();
 controllerStability.run_label = grouped.run_label;
@@ -367,6 +399,7 @@ if isempty(controllerStability) || isempty(controllerTable)
     return
 end
 
+% Quartile thresholds are computed on finite controller-level costs.
 validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
 validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
 if isempty(validSSE) || isempty(validSSdU)
@@ -376,6 +409,7 @@ end
 trackingCostQ1 = prctile(validSSE, 25);
 inputUseCostQ1 = prctile(validSSdU, 25);
 
+% Keep controllers that are stable and sit in the lower quartile for BOTH objectives.
 joined = innerjoin(controllerStability, controllerTable, "Keys", ["run_label","timestamp"]);
 isStable = joined.all_cases_stable;
 isLowSSE = joined.SSE <= trackingCostQ1;
@@ -423,6 +457,7 @@ for i = 1:numel(settlingColumns)
     fprintf("NaN settling times %s: %d/%d\n", settlingColumns{i}, nanCount, height(caseTable));
 end
 
+% Case-level NaN diagnostics for settling times.
 if ~isempty(settlingColumns)
     fprintf("Median settling times (h):\n");
     settlingData = table2array(caseTable(:, settlingColumns));
@@ -432,6 +467,7 @@ if ~isempty(settlingColumns)
     end
 end
 
+% Value-based stability counts for all case rows and controller rows.
 controllerStability = diagnostics.controller_stability;
 stableCaseCount = nnz(caseTable.value_case_stable);
 stableControllerCount = nnz(controllerStability.all_cases_stable);
@@ -452,6 +488,7 @@ if isempty(controllerTable)
     return
 end
 
+% Quartile thresholds used for "stable + low-cost" shortlist.
 validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
 validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
 if isempty(validSSE) || isempty(validSSdU)
@@ -483,6 +520,33 @@ else
     disp(stableLowQuartileList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
 end
 
+% Controller-level IAE table: one row per controller, with case-1/case-2 columns.
+iaeColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "IAE_x"));
+if ~isempty(iaeColumns)
+    iaeCase1 = caseTable(caseTable.case_id == 1, ["run_label","timestamp",iaeColumns]);
+    iaeCase2 = caseTable(caseTable.case_id == 2, ["run_label","timestamp",iaeColumns]);
+    if ~isempty(iaeCase1) && ~isempty(iaeCase2)
+        iaeCase1 = renamevars(iaeCase1, iaeColumns, iaeColumns + "_c1");
+        iaeCase2 = renamevars(iaeCase2, iaeColumns, iaeColumns + "_c2");
+        iaeControllerTable = innerjoin(iaeCase1, iaeCase2, "Keys", ["run_label","timestamp"]);
+        iaeControllerTable = innerjoin( ...
+            iaeControllerTable, ...
+            controllerTable(:, ["run_label","timestamp","SSE"]), ...
+            "Keys", ["run_label","timestamp"]);
+        iaeControllerTable = sort_table_by_sse(iaeControllerTable);
+
+        leftCols = ["timestamp","SSE","run_label"];
+        iaeColsBoth = iaeControllerTable.Properties.VariableNames(startsWith(iaeControllerTable.Properties.VariableNames, "IAE_"));
+        reportCols = [leftCols, iaeColsBoth];
+        reportCols = reportCols(ismember(reportCols, iaeControllerTable.Properties.VariableNames));
+
+        fprintf("Integral absolute error table (one row per controller):\n");
+        disp(iaeControllerTable(:, reportCols));
+    else
+        fprintf("Integral absolute error table (one row per controller): none\n");
+    end
+end
+
 % Controller-level listing: require BOTH cases and no NaN settling times in either case.
 if ~isempty(settlingColumns)
     bothCasesTable = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, true);
@@ -503,6 +567,7 @@ end
 
 
 function T = sort_table_by_sse(T)
+% Standard print ordering for all tables in this script.
 if isempty(T) || ~ismember("SSE", string(T.Properties.VariableNames))
     return
 end
@@ -511,6 +576,7 @@ end
 
 
 function controllerCaseTable = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, removeNaNSettling)
+% Build one row per controller by joining case 1 and case 2 side-by-side.
 if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
     controllerCaseTable = table();
     return
@@ -523,6 +589,7 @@ if isempty(case1Table) || isempty(case2Table)
     return
 end
 
+% Suffix columns by case id to make the merged table explicit.
 case1Table = renamevars(case1Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
     [settlingColumns + "_c1", "value_case_stable_c1","value_V1_c1","value_VN_c1"]);
 case2Table = renamevars(case2Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
@@ -535,6 +602,7 @@ controllerCaseTable = innerjoin( ...
     "Keys", ["run_label","timestamp"]);
 
 if removeNaNSettling
+    % Optional strict filter: drop controllers with any NaN settling metric.
     settlingBothCols = controllerCaseTable.Properties.VariableNames(startsWith(controllerCaseTable.Properties.VariableNames, "settle_"));
     validRowsMask = ~any(isnan(table2array(controllerCaseTable(:, settlingBothCols))), 2);
     controllerCaseTable = controllerCaseTable(validRowsMask, :);
@@ -553,6 +621,7 @@ if isempty(caseTable)
     return
 end
 
+% Compact multi-panel diagnostic summary.
 figure("Color","w","Name","test_run_metric_summary");
 sgtitle("NMPC Test-Run Diagnostics");
 
@@ -587,6 +656,7 @@ title("Approximate Value Metrics");
 grid off; box off;
 
 if ~isempty(controllerTable)
+    % Costs are separated into different subplots due to different scales.
     subplot(2, 3, 4);
     boxplot(controllerTable.SSE, "Labels", {'SSE'});
     set(gca, "YScale", "log");
@@ -607,5 +677,178 @@ if ~isempty(controllerTable)
     ylabel("J (log scale)");
     title("Combined Cost J");
     grid off; box off;
+end
+end
+
+
+function plot_pareto_r1_vs_p(diagnostics)
+caseTable = diagnostics.per_case;
+controllerTable = diagnostics.per_controller;
+if isempty(caseTable) || isempty(controllerTable)
+    return
+end
+
+% Use the same "both cases, no removals" population as the report table.
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
+if isempty(allControllersBothCases)
+    fprintf("p-vs-R1 plot: no controllers found in both-case table.\n");
+    return
+end
+
+hasP = isfinite(allControllersBothCases.p);
+hasR1 = cellfun(@(x) isnumeric(x) && all(isfinite(x(:))), allControllersBothCases.R1_diag);
+allControllersBothCases = allControllersBothCases(hasP & hasR1, :);
+if isempty(allControllersBothCases)
+    fprintf("p-vs-R1 plot: missing valid p or R1 values.\n");
+    return
+end
+
+r1Norm = cellfun(@(x) norm(x(:), 2), allControllersBothCases.R1_diag);
+pVals = allControllersBothCases.p;
+sseVals = allControllersBothCases.SSE;
+
+% Marker size proportional to SSE (normalized for readability).
+sizeMin = 30;
+sizeMax = 180;
+sseMin = min(sseVals);
+sseMax = max(sseVals);
+if isfinite(sseMin) && isfinite(sseMax) && (sseMax > sseMin)
+    markerSizes = sizeMin + (sseVals - sseMin) .* (sizeMax - sizeMin) ./ (sseMax - sseMin);
+else
+    markerSizes = repmat((sizeMin + sizeMax) / 2, size(sseVals));
+end
+
+figure("Color","w","Name","pareto_p_vs_r1_norm");
+scatter(pVals, r1Norm, markerSizes, "filled");
+xlabel("Prediction horizon p");
+ylabel("||R1||_2");
+title("All Controllers (Both Cases): ||R1||_2 vs p");
+grid off; box off;
+
+if numel(pVals) >= 2
+    trendCoeff = polyfit(pVals, r1Norm, 1);
+    xFit = linspace(min(pVals), max(pVals), 100);
+    yFit = polyval(trendCoeff, xFit);
+    hold on;
+    plot(xFit, yFit, "k--", "LineWidth", 1.2);
+    legend("Controllers (size ~ SSE)", sprintf("Linear trend (slope=%.3g)", trendCoeff(1)), "Location","best");
+end
+end
+
+
+function plot_p_distribution_by_run(diagnostics)
+caseTable = diagnostics.per_case;
+controllerTable = diagnostics.per_controller;
+if isempty(caseTable) || isempty(controllerTable)
+    return
+end
+
+% Compare p between runs using all controllers (both-case table, no removals).
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
+if isempty(allControllersBothCases) || ~ismember("p", string(allControllersBothCases.Properties.VariableNames))
+    fprintf("Run comparison plot (p): insufficient data.\n");
+    return
+end
+
+hasValidP = isfinite(allControllersBothCases.p);
+plotTable = allControllersBothCases(hasValidP, :);
+if isempty(plotTable)
+    fprintf("Run comparison plot (p): no finite p values.\n");
+    return
+end
+
+runGroup = categorical(plotTable.run_label);
+pVals = plotTable.p;
+
+figure("Color","w","Name","p_distribution_by_run_all_controllers");
+
+subplot(1, 2, 1);
+boxplot(pVals, runGroup);
+xlabel("Run");
+ylabel("Prediction horizon p");
+title("All Controllers (Both Cases): p by run - boxplot");
+grid off; box off;
+
+subplot(1, 2, 2); hold on;
+% Jitter points horizontally for visibility on overlapping integer p values.
+runNames = categories(runGroup);
+for i = 1:numel(runNames)
+    mask = (runGroup == runNames{i});
+    x = i + 0.12 * (rand(nnz(mask), 1) - 0.5);
+    scatter(x, pVals(mask), 35, "filled", "MarkerFaceAlpha", 0.75);
+    yMed = median(pVals(mask), "omitnan");
+    plot([i-0.22, i+0.22], [yMed, yMed], "k-", "LineWidth", 1.6);
+end
+set(gca, "XTick", 1:numel(runNames), "XTickLabel", runNames);
+xlabel("Run");
+ylabel("Prediction horizon p");
+title("All Controllers (Both Cases): p by run - points + median");
+grid off; box off;
+
+fprintf("Run-wise median p (all controllers in both-case table):\n");
+for i = 1:numel(runNames)
+    mask = (runGroup == runNames{i});
+    fprintf("  %s: %.4g\n", string(runNames{i}), median(pVals(mask), "omitnan"));
+end
+end
+
+
+function plot_p_distribution_by_run_pareto(diagnostics, cfg)
+caseTable = diagnostics.per_case;
+controllerTable = diagnostics.per_controller;
+if isempty(caseTable) || isempty(controllerTable)
+    return
+end
+
+% Same run comparison as above, but restricted to configured final Pareto timestamps.
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
+if isempty(allControllersBothCases) || ~ismember("p", string(allControllersBothCases.Properties.VariableNames))
+    fprintf("Run comparison plot (p, Pareto): insufficient data.\n");
+    return
+end
+
+isPareto = ismember(allControllersBothCases.timestamp, cfg.final_pareto_timestamps);
+plotTable = allControllersBothCases(isPareto, :);
+hasValidP = isfinite(plotTable.p);
+plotTable = plotTable(hasValidP, :);
+if isempty(plotTable)
+    fprintf("Run comparison plot (p, Pareto): no finite p values.\n");
+    return
+end
+
+runGroup = categorical(plotTable.run_label);
+pVals = plotTable.p;
+
+figure("Color","w","Name","p_distribution_by_run_final_pareto");
+
+subplot(1, 2, 1);
+boxplot(pVals, runGroup);
+xlabel("Run");
+ylabel("Prediction horizon p");
+title("Final Pareto Controllers: p by run - boxplot");
+grid off; box off;
+
+subplot(1, 2, 2); hold on;
+runNames = categories(runGroup);
+for i = 1:numel(runNames)
+    mask = (runGroup == runNames{i});
+    x = i + 0.12 * (rand(nnz(mask), 1) - 0.5);
+    scatter(x, pVals(mask), 35, "filled", "MarkerFaceAlpha", 0.75);
+    yMed = median(pVals(mask), "omitnan");
+    plot([i-0.22, i+0.22], [yMed, yMed], "k-", "LineWidth", 1.6);
+end
+set(gca, "XTick", 1:numel(runNames), "XTickLabel", runNames);
+xlabel("Run");
+ylabel("Prediction horizon p");
+title("Final Pareto Controllers: p by run - points + median");
+grid off; box off;
+
+fprintf("Run-wise median p (final Pareto controllers):\n");
+for i = 1:numel(runNames)
+    mask = (runGroup == runNames{i});
+    fprintf("  %s: %.4g\n", string(runNames{i}), median(pVals(mask), "omitnan"));
 end
 end
