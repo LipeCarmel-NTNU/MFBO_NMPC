@@ -24,9 +24,11 @@
 %
 % Generated figures
 % - Per run (`results/runX/`):
-%   `sse_vs_ssdu.png`, `runtime_vs_iteration.png`
+%   `sse_vs_ssdu.png`, `runtime_vs_iteration.png`,
+%   `runtime_cumulative_vs_iteration.png`
 % - Combined (`results/`):
 %   `pareto_curves_run1_run2_final.png`
+%   `runtime_cumulative_run1_run2.png`
 %   (Run 1 Pareto, Run 2 Pareto, and final Pareto from all points).
 
 % RULES FOR PLOTTING AND ANALYSIS
@@ -39,7 +41,7 @@
 % A) Directly available from T/results (ready now)
 % - Pareto frontier comparison: Run 1 vs Run 2 vs final combined frontier.
 % - Runtime decomposition by phase:
-%   DOE (`k < 20`), optimisation (`k >= 20`), and total runtime.
+%   DOE (`k <= 20`), optimisation (`k >= 21`), and total runtime.
 % - Runtime statistics per run:
 %   mean/median/std/min/max runtime per iteration and per phase.
 % - Efficiency metrics:
@@ -122,6 +124,7 @@ end
 final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
 plot_available_paper_results(allT, allTp, datasets, rootFolder, 20, fontSize);
 plot_out_runtime_vs_tuning_combined(allTout, datasets, rootFolder, fontSize);
+plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize);
 
 % final_Tp.timestamp
 % 
@@ -291,6 +294,7 @@ end
 
 outScatterPath = fullfile(outDir, "sse_vs_ssdu.png");
 outRuntimePath = fullfile(outDir, "runtime_vs_iteration.png");
+outCumRuntimePath = fullfile(outDir, "runtime_cumulative_vs_iteration.png");
 
 J_track = double(T.SSE);
 J_TV = double(T.SSdU);
@@ -311,14 +315,26 @@ exportgraphics(fig1, outScatterPath, "Resolution", 300);
 
 fig2 = figure("Color", "w");
 ax2 = axes(fig2); hold(ax2, "on");
-plot(ax2, T.iteration, T.runtime_min, "-o", "LineWidth", 2.0, "MarkerSize", 6);
+runtime_h = double(T.runtime_min) / 60;
+plot(ax2, T.iteration, runtime_h, "-", "LineWidth", 2.0);
 xline(ax2, 20, "--", "LineWidth", 1.3);
 xlabel(ax2, "$k$ (iteration)");
-ylabel(ax2, "$t_{\mathrm{run}}$ (min)");
+ylabel(ax2, "$t_{\mathrm{run}}$ (h)");
 set(ax2, "FontSize", fontSize);
 grid(ax2, "off");
 box(ax2, "off");
 exportgraphics(fig2, outRuntimePath, "Resolution", 300);
+
+fig3 = figure("Color", "w");
+ax3 = axes(fig3); hold(ax3, "on");
+plot(ax3, T.iteration, cumsum(runtime_h, "omitnan"), "-", "LineWidth", 2.0);
+xline(ax3, 20, "--", "LineWidth", 1.3);
+xlabel(ax3, "$k$ (iteration)");
+ylabel(ax3, "$\sum t_{\mathrm{run}}$ (h)");
+set(ax3, "FontSize", fontSize);
+grid(ax3, "off");
+box(ax3, "off");
+exportgraphics(fig3, outCumRuntimePath, "Resolution", 300);
 end
 
 
@@ -339,14 +355,14 @@ end
 
 function display_runtime_phase_summary(T, runName, optimizationStartIter)
 if nargin < 3
-    optimizationStartIter = 20;
+    optimizationStartIter = 20; % last DOE iteration (1-based)
 end
 
 iter = double(T.iteration);
 rtMin = double(T.runtime_min);
 
-doeMask = iter < optimizationStartIter;
-optMask = iter >= optimizationStartIter;
+doeMask = iter <= optimizationStartIter;
+optMask = iter > optimizationStartIter;
 
 doeTime = sum(rtMin(doeMask), "omitnan");
 optTime = sum(rtMin(optMask), "omitnan");
@@ -410,7 +426,7 @@ end
 
 function plot_available_paper_results(allT, allTp, datasets, outDir, optimizationStartIter, fontSize)
 if nargin < 5
-    optimizationStartIter = 20;
+    optimizationStartIter = 20; % last DOE iteration (1-based)
 end
 if ~isfolder(outDir)
     mkdir(outDir);
@@ -432,8 +448,8 @@ for i = 1:nRuns
     Ti = allT{i};
     iter = double(Ti.iteration);
     rt = double(Ti.runtime_min);
-    doeHr(i) = sum(rt(iter < optimizationStartIter), "omitnan") / 60;
-    optHr(i) = sum(rt(iter >= optimizationStartIter), "omitnan") / 60;
+    doeHr(i) = sum(rt(iter <= optimizationStartIter), "omitnan") / 60;
+    optHr(i) = sum(rt(iter > optimizationStartIter), "omitnan") / 60;
 end
 
 figRt = figure("Color","w");
@@ -454,7 +470,7 @@ rtAll = [];
 grpAll = [];
 for i = 1:nRuns
     % Standard outlier filtering: Tukey rule (outside [Q1-1.5*IQR, Q3+1.5*IQR]).
-    rt = double(allT{i}.runtime_min);
+    rt = double(allT{i}.runtime_min) / 60;
     q1 = prctile(rt, 25);
     q3 = prctile(rt, 75);
     iqrVal = q3 - q1;
@@ -469,7 +485,7 @@ end
 figBox = figure("Color","w");
 axBox = axes(figBox); hold(axBox, "on");
 boxplot(axBox, rtAll, grpAll);
-ylabel(axBox, "$t_{\mathrm{run}}$ per iteration (min)");
+ylabel(axBox, "$t_{\mathrm{run}}$ per iteration (h)");
 set(axBox, "FontSize", fontSize);
 grid(axBox, "off");
 box(axBox, "off");
@@ -623,4 +639,30 @@ set(ax2, "YScale", "log", "FontSize", fontSize);
 grid(ax2, "off"); box(ax2, "off");
 
 exportgraphics(fig, fullfile(outDir, "out_mean_step_runtime_vs_objectives.png"), "Resolution", 300);
+end
+
+
+function plot_cumulative_runtime_combined(allT, datasets, outDir, fontSize)
+if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
+    return
+end
+
+fig = figure("Color","w");
+ax = axes(fig); hold(ax, "on");
+
+runtime_h_1 = double(allT{1}.runtime_min) / 60;
+runtime_h_2 = double(allT{2}.runtime_min) / 60;
+
+plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWidth", 2.0, ...
+    "DisplayName", string(datasets(1).name));
+plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
+    "DisplayName", string(datasets(2).name));
+
+xlabel(ax, "$k$ (iteration)");
+ylabel(ax, "$\sum t_{\mathrm{run}}$ (h)");
+set(ax, "FontSize", fontSize);
+grid(ax, "off");
+box(ax, "off");
+
+exportgraphics(fig, fullfile(outDir, "runtime_cumulative_run1_run2.png"), "Resolution", 300);
 end

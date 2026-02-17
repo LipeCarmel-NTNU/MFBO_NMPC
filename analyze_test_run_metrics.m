@@ -7,11 +7,6 @@
 %   t_s,i is the earliest time where e_rel_i(t) <= tol for ALL future t.
 %   If final relative error is > tol, settling time is NaN.
 %
-% Observed stability criterion used in this script:
-%   Let d_k = ||x_k - r_k||_2 using the simulated trajectory and setpoint.
-%   Case is "possibly stable" if d_{k+1} <= d_k for all k.
-%   Controller (timestamp) is stable if all its cases are stable.
-
 clear; clc;
 
 % User-level configuration for input folders and analysis scope.
@@ -127,12 +122,6 @@ for k = 1:numel(cfg.run_folders)
                 caseRecord.(sprintf("tot_dU_u%d", u)) = caseMetrics.total_input_variation(u);
             end
 
-            caseRecord.value_V1 = caseMetrics.value_V1;
-            caseRecord.value_VN = caseMetrics.value_VN;
-            caseRecord.stage_cost_sum = caseMetrics.stage_cost_sum;
-            caseRecord.value_noninc_ratio = caseMetrics.value_noninc_ratio;
-            caseRecord.value_case_stable = caseMetrics.value_case_stable;
-
             caseRecordList = [caseRecordList; caseRecord]; %#ok<AGROW>
         end
     end
@@ -162,8 +151,6 @@ if isempty(perCaseTable)
     diagnostics.pareto_cases = table();
     diagnostics.pareto_controllers = table();
     diagnostics.missing_pareto_timestamps = cfg.final_pareto_timestamps;
-    diagnostics.controller_stability = table();
-    diagnostics.stable_low_quartile = table();
     return
 end
 
@@ -171,10 +158,6 @@ diagnostics.pareto_cases = perCaseTable(ismember(perCaseTable.timestamp, cfg.fin
 diagnostics.pareto_controllers = perControllerTable(ismember(perControllerTable.timestamp, cfg.final_pareto_timestamps), :);
 foundTimestamps = unique(perCaseTable.timestamp);
 diagnostics.missing_pareto_timestamps = setdiff(cfg.final_pareto_timestamps, foundTimestamps);
-
-% Stability + low-quartile flags are computed from the case/controller tables.
-diagnostics.controller_stability = compute_controller_stability(perCaseTable);
-diagnostics.stable_low_quartile = select_stable_low_quartile(diagnostics.controller_stability, perControllerTable);
 end
 
 
@@ -226,20 +209,6 @@ isValid = true;
 end
 
 
-function approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta)
-% Empirical contraction signal based on trajectory distance to reference.
-% We intentionally overwrite the previous value-function approximation with:
-%   V_k := d_k = ||x_k - r_k||_2
-% so that monotonicity checks directly test d_{k+1} <= d_k.
-trackingError = stateTrajectory - setpointTrajectory;
-valueSequence = vecnorm(trackingError, 2, 2);
-
-approxValue = struct();
-approxValue.stage_cost = valueSequence;
-approxValue.V = valueSequence;
-end
-
-
 function metrics = summarize_case_metrics(outStruct, caseStruct, settlingTol)
 arguments
     outStruct struct
@@ -264,29 +233,6 @@ timeHours = (0:size(stateTrajectory,1)-1).' * sampleTimeHours;
     stateTrajectory, setpointTrajectory, timeHours, settlingTol);
 totalInputVariation = compute_total_input_variation(inputTrajectory);
 [IAEByState, ~] = compute_integral_abs_error(stateTrajectory, setpointTrajectory, sampleTimeHours);
-[decodedTheta, thetaOk] = decode_theta_weights(outStruct);
-% Empirical contraction check: d_{k+1} <= d_k where d_k = ||x_k-r_k||_2.
-if thetaOk
-    approxValue = compute_approx_value_function(stateTrajectory, setpointTrajectory, inputTrajectory, decodedTheta);
-    valueDiff = diff(approxValue.V);
-    finiteValueDiff = valueDiff(isfinite(valueDiff));
-    if isempty(finiteValueDiff)
-        valueNonIncRatio = NaN;
-        isValueCaseStable = false;
-    else
-        valueNonIncRatio = mean(finiteValueDiff <= 0);
-        isValueCaseStable = all(finiteValueDiff <= 0);
-    end
-    valueV1 = approxValue.V(1);
-    valueVN = approxValue.V(end);
-    stageCostSum = sum(approxValue.stage_cost, "omitnan");
-else
-    valueV1 = NaN;
-    valueVN = NaN;
-    stageCostSum = NaN;
-    valueNonIncRatio = NaN;
-    isValueCaseStable = false;
-end
 
 metrics = struct();
 metrics.settling_times_h = settlingTimes_h;
@@ -294,11 +240,6 @@ metrics.final_error_pct = finalErrPct;
 metrics.peak_error_pct = peakErrPct;
 metrics.IAE_by_state = IAEByState;
 metrics.total_input_variation = totalInputVariation;
-metrics.value_V1 = valueV1;
-metrics.value_VN = valueVN;
-metrics.stage_cost_sum = stageCostSum;
-metrics.value_noninc_ratio = valueNonIncRatio;
-metrics.value_case_stable = isValueCaseStable;
 end
 
 
@@ -361,48 +302,6 @@ IAEByState = sum(absError, 1) * sampleTimeHours;
 end
 
 
-function controllerStability = compute_controller_stability(caseTable)
-% Controller is stable only if all its case rows are stable.
-grouped = groupsummary(caseTable, ["run_label","timestamp"], "all", "value_case_stable");
-controllerStability = table();
-controllerStability.run_label = grouped.run_label;
-controllerStability.timestamp = grouped.timestamp;
-controllerStability.case_count = grouped.GroupCount;
-controllerStability.stable_case_count = grouped.sum_value_case_stable;
-controllerStability.all_cases_stable = (grouped.sum_value_case_stable == grouped.GroupCount);
-end
-
-
-function stableLowQ = select_stable_low_quartile(controllerStability, controllerTable)
-if isempty(controllerStability) || isempty(controllerTable)
-    stableLowQ = table();
-    return
-end
-
-% Quartile thresholds are computed on finite controller-level costs.
-validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
-validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
-if isempty(validSSE) || isempty(validSSdU)
-    stableLowQ = table();
-    return
-end
-trackingCostQ1 = prctile(validSSE, 25);
-inputUseCostQ1 = prctile(validSSdU, 25);
-
-% Keep controllers that are stable and sit in the lower quartile for BOTH objectives.
-joined = innerjoin(controllerStability, controllerTable, "Keys", ["run_label","timestamp"]);
-isStable = joined.all_cases_stable;
-isLowSSE = joined.SSE <= trackingCostQ1;
-isLowSSdU = joined.SSdU <= inputUseCostQ1;
-keepMask = isStable & isLowSSE & isLowSSdU;
-
-stableLowQ = joined(keepMask, :);
-if ~isempty(stableLowQ)
-    stableLowQ = sortrows(stableLowQ, ["SSE","SSdU"], ["ascend","ascend"]);
-end
-end
-
-
 function print_full_run_report(diagnostics, cfg)
 caseTable = diagnostics.per_case;
 controllerTable = diagnostics.per_controller;
@@ -417,7 +316,7 @@ else
     allControllersBothCases = sort_table_by_sse(allControllersBothCases);
     allCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"];
     settleBothCols = allControllersBothCases.Properties.VariableNames(startsWith(allControllersBothCases.Properties.VariableNames, "settle_"));
-    allCols = [allCols, settleBothCols, "value_case_stable_c1", "value_case_stable_c2"];
+    allCols = [allCols, settleBothCols];
     allCols = allCols(ismember(allCols, allControllersBothCases.Properties.VariableNames));
     disp(allControllersBothCases(:, allCols));
 end
@@ -447,57 +346,12 @@ if ~isempty(settlingColumns)
     end
 end
 
-% Value-based stability counts for all case rows and controller rows.
-controllerStability = diagnostics.controller_stability;
-stableCaseCount = nnz(caseTable.value_case_stable);
-stableControllerCount = nnz(controllerStability.all_cases_stable);
-fprintf("Possibly stable cases (value nonincreasing): %d/%d\n", stableCaseCount, height(caseTable));
-fprintf("Possibly stable controllers (all cases stable): %d/%d\n", stableControllerCount, height(controllerStability));
-
-% Stability counts split by scenario/case id.
-case1Mask = (caseTable.case_id == 1);
-case2Mask = (caseTable.case_id == 2);
-fprintf("Possibly stable case 1 rows: %d/%d\n", nnz(caseTable.value_case_stable & case1Mask), nnz(case1Mask));
-fprintf("Possibly stable case 2 rows: %d/%d\n", nnz(caseTable.value_case_stable & case2Mask), nnz(case2Mask));
-
 if ~isempty(diagnostics.missing_pareto_timestamps)
     fprintf("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
 end
 
 if isempty(controllerTable)
     return
-end
-
-% Quartile thresholds used for "stable + low-cost" shortlist.
-validSSE = controllerTable.SSE(isfinite(controllerTable.SSE));
-validSSdU = controllerTable.SSdU(isfinite(controllerTable.SSdU));
-if isempty(validSSE) || isempty(validSSdU)
-    fprintf("Lower quartiles: unavailable (non-finite controller costs)\n");
-    return
-end
-trackingCostQ1 = prctile(validSSE, 25);
-inputUseCostQ1 = prctile(validSSdU, 25);
-fprintf("Lower quartiles: SSE <= %.6g, SSdU <= %.6g\n", trackingCostQ1, inputUseCostQ1);
-
-stableControllerList = innerjoin( ...
-    controllerStability(controllerStability.all_cases_stable, :), ...
-    controllerTable, ...
-    "Keys", ["run_label","timestamp"]);
-if isempty(stableControllerList)
-    fprintf("Stable controllers: none\n");
-else
-    fprintf("Stable controllers:\n");
-    stableControllerList = sort_table_by_sse(stableControllerList);
-    disp(stableControllerList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
-end
-
-stableLowQuartileList = diagnostics.stable_low_quartile;
-if isempty(stableLowQuartileList)
-    fprintf("Stable + lower-quartile (SSE and SSdU): none\n");
-else
-    fprintf("Stable + lower-quartile (SSE and SSdU):\n");
-    stableLowQuartileList = sort_table_by_sse(stableLowQuartileList);
-    disp(stableLowQuartileList(:, ["run_label","timestamp","SSE","SSdU","J","case_count"]));
 end
 
 % Controller-level IAE table: one row per controller, with case-1/case-2 columns.
@@ -536,9 +390,7 @@ if ~isempty(settlingColumns)
         bothCasesTable = sort_table_by_sse(bothCasesTable);
         settlingBothCols = bothCasesTable.Properties.VariableNames(startsWith(bothCasesTable.Properties.VariableNames, "settle_"));
         fprintf("Controllers table (both case 1 and case 2, excluding any NaN settling time):\n");
-        reportCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag", ...
-            "value_V1_c1","value_VN_c1","value_V1_c2","value_VN_c2", ...
-            settlingBothCols,"value_case_stable_c1","value_case_stable_c2"];
+        reportCols = ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag",settlingBothCols];
         reportCols = reportCols(ismember(reportCols, bothCasesTable.Properties.VariableNames));
         disp(bothCasesTable(:, reportCols));
     end
@@ -562,18 +414,16 @@ if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
     return
 end
 
-case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns,"value_case_stable","value_V1","value_VN"]);
-case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns,"value_case_stable","value_V1","value_VN"]);
+case1Table = caseTable(caseTable.case_id == 1, ["run_label","timestamp",settlingColumns]);
+case2Table = caseTable(caseTable.case_id == 2, ["run_label","timestamp",settlingColumns]);
 if isempty(case1Table) || isempty(case2Table)
     controllerCaseTable = table();
     return
 end
 
 % Suffix columns by case id to make the merged table explicit.
-case1Table = renamevars(case1Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
-    [settlingColumns + "_c1", "value_case_stable_c1","value_V1_c1","value_VN_c1"]);
-case2Table = renamevars(case2Table, [settlingColumns, "value_case_stable","value_V1","value_VN"], ...
-    [settlingColumns + "_c2", "value_case_stable_c2","value_V1_c2","value_VN_c2"]);
+case1Table = renamevars(case1Table, settlingColumns, settlingColumns + "_c1");
+case2Table = renamevars(case2Table, settlingColumns, settlingColumns + "_c2");
 
 controllerCaseTable = innerjoin(case1Table, case2Table, "Keys", ["run_label","timestamp"]);
 controllerCaseTable = innerjoin( ...
@@ -628,11 +478,15 @@ if ~isempty(inputVariationColumns)
 end
 
 subplot(2, 3, 3);
-boxplot([caseTable.value_V1, caseTable.value_VN, caseTable.value_noninc_ratio], ...
-    "Labels", {'V(1)','V(N)','ratio(DeltaV<=0)'});
+errorColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "final_err_x"));
+if ~isempty(errorColumns)
+    boxplot(table2array(caseTable(:, errorColumns)), "Labels", cellstr(errorColumns));
+else
+    boxplot(zeros(height(caseTable),1), "Labels", {'n/a'});
+end
 xlabel("Metric");
 ylabel("Value");
-title("Approximate Value Metrics");
+title("Final Relative Error (%)");
 grid off; box off;
 
 if ~isempty(controllerTable)
