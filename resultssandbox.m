@@ -22,69 +22,7 @@
 %   `J_track = SSE` and `J_TV = SSdU`, sorted by `SSE` (descending).
 % - `isPareto`: logical mask identifying Pareto points in `T`.
 %
-% Generated figures
-% - Per run (`results/runX/`):
-%   `sse_vs_ssdu.png`, `runtime_vs_iteration.png`,
-%   `runtime_cumulative_vs_iteration.png`,
-%   `f_vs_iteration.png`
-% - Combined (`results/`):
-%   `pareto_curves_run1_run2_final.png`
-%   `runtime_cumulative_run1_run2.png`
-%   (Run 1 Pareto, Run 2 Pareto, and final Pareto from all points).
 
-% RULES FOR PLOTTING AND ANALYSIS
-% Grid off, box off, time in hours for aggregate runtime, log scale for objectives, LaTeX interpreter, colorblind-friendly palettes, do not write text on the figure, do not use titles.
-
-%% Important analysis to consider
-% The list below separates analyses that are feasible now from those that
-% require additional logs/artefacts beyond T and the current results folder.
-%
-% A) Directly available from T/results (ready now)
-% - Pareto frontier comparison: Run 1 vs Run 2 vs final combined frontier.
-% - Runtime decomposition by phase:
-%   DOE (`k <= 20`), optimisation (`k >= 21`), and total runtime.
-% - Runtime statistics per run:
-%   mean/median/std/min/max runtime per iteration and per phase.
-% - Efficiency metrics:
-%   Pareto-point count per run, Pareto density, and improvement per minute.
-% - Objective trade-off metrics:
-%   best `SSE`, best `SSdU`, knee-point candidates, dominated fraction.
-% - Hyperparameter interpretation:
-%   distributions of selected (`f`, `p`, `m`, Q, Ru, Rdu) on Pareto points.
-% - Run-to-run consistency:
-%   overlap distance between run-specific Pareto fronts in objective space.
-%
-% B) Strong paper results that need extra data (if T/results are insufficient)
-% - Closed-loop trajectory quality (state/reference tracking plots):
-%   Needs per-time-step logs for y, r, u, and disturbances/noise.
-% - Constraint handling and feasibility:
-%   Needs constraint signals/slacks and infeasibility counters per simulation.
-% - Control effort quality:
-%   Needs time-series of u and delta-u to report smoothness/chattering indices.
-% - Solver-level computational behavior:
-%   Needs NMPC solver iteration count, KKT residuals, exit flags, failures.
-% - Robustness/generalisation tests:
-%   Needs multi-scenario simulations (param mismatch, noise, disturbances).
-% - Statistical significance:
-%   Needs repeated seeds/runs with confidence intervals and hypothesis tests.
-% - Baseline controller comparison:
-%   Needs benchmark runs (e.g., hand-tuned MPC/PID/LQR) under identical scenarios.
-% - Ablation studies (design choices):
-%   Needs targeted runs removing/changing BO kernels, acquisition, horizon terms.
-% - Real-time feasibility on target hardware:
-%   Needs profiling on deployment CPU/PLC, jitter and worst-case solve-time logs.
-%
-% C) Minimum extra artefacts to collect when T is not enough
-% - `sim_trace_<id>.mat` per evaluated point:
-%   time, states, references, inputs, input increments, constraints, slack.
-% - `solver_trace_<id>.mat`:
-%   solve time per step, SQP/IPM iterations, convergence flags, residuals.
-% - `scenario_meta_<id>.json`:
-%   plant parameters, noise/disturbance seed, initial conditions, scenario labels.
-% - `run_config.yaml`:
-%   controller setup, horizons, bounds, sampling, objective definitions.
-% - Replicate index file:
-%   mapping run/seed/case IDs for statistical aggregation.
 
 %% Code
 clear; close all; clc
@@ -107,24 +45,19 @@ fontSize = 14;
 
 allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
-allTout = cell(numel(datasets), 1);
 
 for k = 1:numel(datasets)
     [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
     T = enrich_with_out_data(T, datasets(k).outDir);
     allT{k} = T;
     allTp{k} = Tp;
-    allTout{k} = T;
 
     create_analysis_plots(T, isPareto, datasets(k).outDir, fontSize);
     display_pareto_table(Tp);
     display_runtime_phase_summary(T, datasets(k).name, 20);
-    plot_out_runtime_vs_tuning(T, datasets(k).outDir, datasets(k).name, fontSize);
 end
 %%
 final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
-plot_available_paper_results(allT, allTp, datasets, rootFolder, 20, fontSize);
-plot_out_runtime_vs_tuning_combined(allTout, datasets, rootFolder, fontSize);
 plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize);
 
 % final_Tp.timestamp
