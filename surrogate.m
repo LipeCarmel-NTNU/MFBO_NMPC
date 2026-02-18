@@ -11,7 +11,7 @@ addpath(genpath("dependencies"));
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
-fontSize = 14;
+fontSize = 18;
 plotColors = good_colors(2);
 
 files = dir("surrogate_data_*.mat");
@@ -193,14 +193,20 @@ t_hat    = time_model(x, m, p, alfa, beta, cT); %#ok<NASGU>
 
 figure; plot(f, SSdU, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
 plot(f, SSdU_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
-xlabel('$f$'); ylabel('$SSdU$');
+xlim([0, 1]);
+ylim([0, 1.005]);
+xlabel('$z$'); ylabel('$J_{\mathrm{TV}}$');
+format_tick(1, 1);
 grid off; box off
 set_font_size(fontSize);
 set_fig_size(920, 520);
 
 figure; plot(f, SSE, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
 plot(f, SSE_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
-xlabel('$f$'); ylabel('$SSE$');
+xlim([0, 1]);
+ylim([0, 1.005]);
+xlabel('$z$'); ylabel('$J_{\mathrm{track}}$');
+format_tick(1, 1);
 grid off; box off
 set_font_size(fontSize);
 set_fig_size(920, 520);
