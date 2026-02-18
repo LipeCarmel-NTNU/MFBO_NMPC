@@ -6,6 +6,13 @@
 
 clear; close all; clc
 rng(1)
+addpath(genpath("dependencies"));
+
+set(groot, "defaultTextInterpreter", "latex");
+set(groot, "defaultAxesTickLabelInterpreter", "latex");
+set(groot, "defaultLegendInterpreter", "latex");
+fontSize = 14;
+plotColors = good_colors(2);
 
 files = dir("surrogate_data_*.mat");
 if isempty(files)
@@ -142,6 +149,26 @@ fprintf('\nR^2 on aggregated fit data:\n');
 fprintf('R^2(SSdU) = %.6f\n', R2_SSdU);
 fprintf('R^2(SSE)  = %.6f\n', R2_SSE);
 
+% Export numerical summary for SSdU/SSE surrogate coefficients.
+numDir = "numerical results";
+if ~isfolder(numDir)
+    mkdir(numDir);
+end
+numTxtPath = fullfile(numDir, "surrogate_cheb_coeffs.txt");
+fid = fopen(numTxtPath, "w");
+if fid == -1
+    error("Unable to open file for writing: %s", numTxtPath);
+end
+cleanupObj = onCleanup(@() fclose(fid));
+fprintf(fid, "=== Surrogate Coefficients (Cheb5) ===\n");
+fprintf(fid, "SSdU c0..c5:\n");
+fprintf(fid, "% .10e\n", c_SSdU);
+fprintf(fid, "\nSSE c0..c5:\n");
+fprintf(fid, "% .10e\n", c_SSE);
+fprintf(fid, "\nR^2:\n");
+fprintf(fid, "R^2(SSdU) = %.10f\n", R2_SSdU);
+fprintf(fid, "R^2(SSE)  = %.10f\n", R2_SSE);
+
 %% -----------------------------
 % Quick diagnostics plots (optional)
 % -----------------------------
@@ -162,25 +189,29 @@ SSE  = SSE / SSE(end);
 
 SSdU_hat = clamp01(Cheb5(x, c_SSdU));
 SSE_hat  = clamp01(Cheb5(x, c_SSE));
-t_hat    = time_model(x, m, p, alfa, beta, cT);
+t_hat    = time_model(x, m, p, alfa, beta, cT); %#ok<NASGU>
 
-figure; plot(f, SSdU, 'LineWidth', 1.5); hold on
-plot(f, SSdU_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('SSdU'); grid on
-legend('Data','Cheb5 fit','Location','southeast')
+figure; plot(f, SSdU, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
+plot(f, SSdU_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
+xlabel('$f$'); ylabel('$SSdU$');
+grid off; box off
+set_font_size(fontSize);
+set_fig_size(920, 520);
 
-figure; plot(f, SSE, 'LineWidth', 1.5); hold on
-plot(f, SSE_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('SSE'); grid on
-legend('Data','Cheb5 fit','Location','southeast')
+figure; plot(f, SSE, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
+plot(f, SSE_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
+xlabel('$f$'); ylabel('$SSE$');
+grid off; box off
+set_font_size(fontSize);
+set_fig_size(920, 520);
 
-figure; plot(f, time, 'LineWidth', 1.5); hold on
-plot(f, t_hat, '--', 'LineWidth', 1.5)
-xlabel('f'); ylabel('Time'); grid on
-legend('Data','Time model','Location','best')
+% figure; plot(f, time, 'LineWidth', 1.5); hold on
+% plot(f, t_hat, '--', 'LineWidth', 1.5)
+% xlabel('f'); ylabel('Time'); grid on
+% legend('Data','Time model','Location','best')
 
-figure; plot(f, time./t_hat); grid on
-xlabel('f'); ylabel('time / time_hat')
+% figure; plot(f, time./t_hat); grid on
+% xlabel('f'); ylabel('time / time_hat')
 
 % =============================
 % Objectives
