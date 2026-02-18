@@ -437,37 +437,6 @@ disp(summaryTbl);
 end
 
 
-function Tpf = plot_combined_pareto_curves(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
-% Final frontier from all points (run1 + run2)
-Tall = [T1; T2];
-finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
-Tpf = Tall(finalMask, :);
-
-x1 = double(Tp1.SSdU); y1 = double(Tp1.SSE);
-x2 = double(Tp2.SSdU); y2 = double(Tp2.SSE);
-xf = double(Tpf.SSdU); yf = double(Tpf.SSE);
-
-[~, o1] = sort(x1, "ascend");
-[~, o2] = sort(x2, "ascend");
-[~, of] = sort(xf, "ascend");
-
-fig = figure("Color", "w");
-ax = axes(fig); hold(ax, "on");
-
-plot(ax, x1(o1), y1(o1), "-o", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(1,:), "DisplayName", "Case 1 Pareto");
-plot(ax, x2(o2), y2(o2), "-s", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(2,:), "DisplayName", "Case 2 Pareto");
-plot(ax, xf(of), yf(of), "-d", "LineWidth", 2.0, "MarkerSize", 7, "DisplayName", "Final Pareto (Case 1+2)");
-
-set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
-xlim(ax, [1e-2, 2e0]);
-ylim(ax, [1e4, 3.5e4]);
-xlabel(ax, "$J_{\mathrm{TV}}$");
-ylabel(ax, "$J_{\mathrm{track}}$");
-grid(ax, "off");
-box(ax, "off");
-
-exportgraphics(fig, outPath, "Resolution", 300);
-end
 
 
 function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
@@ -503,8 +472,8 @@ scatter(ax, double(Tf.SSdU), double(Tf.SSE), 112, plotColors(3,:), ...
     "LineWidth", 1.1);
 
 set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
-xlim(ax, [1e-2, 1e2]);
-ylim(ax, [1e4, 1.3e5]);
+xlim(ax, [1e-2, 2e0]);
+ylim(ax, [1e4, 3.5e4]);
 xlabel(ax, "$J_{\mathrm{TV}}$");
 ylabel(ax, "$J_{\mathrm{track}}$");
 grid(ax, "off");
