@@ -31,8 +31,8 @@ addpath(genpath("dependencies"));
 %% Paths
 rootFolder = "results";
 datasets = [
-    struct("name","run1", "csvPath", fullfile(rootFolder, "run1", "results.csv"), "outDir", fullfile(rootFolder, "run1"));
-    struct("name","run2", "csvPath", fullfile(rootFolder, "run2", "results.csv"), "outDir", fullfile(rootFolder, "run2"))
+    struct("name","Case 1", "csvPath", fullfile(rootFolder, "run1", "results.csv"), "outDir", fullfile(rootFolder, "run1"));
+    struct("name","Case 2", "csvPath", fullfile(rootFolder, "run2", "results.csv"), "outDir", fullfile(rootFolder, "run2"))
 ];
 
 if ~isfolder(rootFolder)
@@ -69,19 +69,22 @@ plotColors(4, :) = [];
 %% 
 allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
+allPareto = cell(numel(datasets), 1);
 
 for k = 1:numel(datasets)
     [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
     T = enrich_with_out_data(T, datasets(k).outDir);
     allT{k} = T;
     allTp{k} = Tp;
-
-    create_analysis_plots(T, isPareto, datasets(k).outDir, fontSize, plotColors, k);
+    allPareto{k} = isPareto;
     display_pareto_table(Tp);
     display_runtime_phase_summary(T, datasets(k).name, 20);
 end
+
+create_analysis_plots_side_by_side(allT, allPareto, datasets, rootFolder, fontSize, plotColors);
 %% Combined Pareto
 final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize, plotColors);
+plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize, plotColors);
 
 % final_Tp.timestamp
@@ -253,7 +256,6 @@ end
 outScatterPath = fullfile(outDir, "sse_vs_ssdu.png");
 outRuntimePath = fullfile(outDir, "runtime_vs_iteration.png");
 outCumRuntimePath = fullfile(outDir, "runtime_cumulative_vs_iteration.png");
-outFvsIterPath = fullfile(outDir, "f_vs_iteration.png");
 
 J_track = double(T.SSE);
 J_TV = double(T.SSdU);
@@ -269,6 +271,8 @@ grid(ax1, "off");
 box(ax1, "off");
 cb = colorbar(ax1);
 cb.Label.String = "$J$";
+cb.Label.Interpreter = "latex";
+cb.TickLabelInterpreter = "latex";
 cb.FontSize = fontSize;
 exportgraphics(fig1, outScatterPath, "Resolution", 300);
 
@@ -283,7 +287,7 @@ xlabel(ax2, "$k$ (iteration)");
 ylabel(ax2, "$t_{\mathrm{iter}}$ (h)");
 
 yyaxis(ax2, "right");
-plot(ax2, T.iteration, double(T.f), "-o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
+plot(ax2, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
 ax2.YColor = plotColors(3, :);
 ylabel(ax2, "$z$");
 
@@ -304,18 +308,68 @@ set(ax3, "FontSize", fontSize);
 grid(ax3, "off");
 box(ax3, "off");
 exportgraphics(fig3, outCumRuntimePath, "Resolution", 300);
+end
 
-fig4 = figure("Color", "w");
-ax4 = axes(fig4); hold(ax4, "on");
-plot(ax4, T.iteration, double(T.f), "-o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
-xline(ax4, 20.5, "--", "LineWidth", 2.0);
-xlabel(ax4, "$k$ (iteration)");
-ylabel(ax4, "$z$");
-xlim(ax4, [1, max(1, height(T))]);
-set(ax4, "FontSize", fontSize);
-grid(ax4, "off");
-box(ax4, "off");
-exportgraphics(fig4, outFvsIterPath, "Resolution", 300);
+
+function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors)
+if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
+    return
+end
+if ~isfolder(outDir)
+    mkdir(outDir);
+end
+
+% SSE vs SSdU (side-by-side)
+fig1 = figure("Color", "w");
+tiledlayout(fig1, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    isPareto = allPareto{k};
+    ax = nexttile; hold(ax, "on");
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.J), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 150, "MarkerEdgeColor", "r", "MarkerFaceColor", "none", "LineWidth", 1.2);
+    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+    xlim(ax, [1e-2, 1e2]);
+    ylim(ax, [1e4, 1.3e5]);
+    xlabel(ax, "$J_{\mathrm{TV}}$");
+    ylabel(ax, "$J_{\mathrm{track}}$");
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    grid(ax, "off");
+    box(ax, "off");
+    cb = colorbar(ax);
+    cb.Label.String = "$J$";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+end
+exportgraphics(fig1, fullfile(outDir, "sse_vs_ssdu_side_by_side.png"), "Resolution", 300);
+
+% Iteration runtime + z (side-by-side)
+fig2 = figure("Color", "w");
+tiledlayout(fig2, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    runtime_h = double(T.runtime_min) / 60;
+    ax = nexttile; hold(ax, "on");
+    yyaxis(ax, "left");
+    plot(ax, T.iteration, runtime_h, "-", "LineWidth", 2.0, "Color", plotColors(k, :));
+    ax.YColor = plotColors(k, :);
+    ylim(ax, [0, 4]);
+    xline(ax, 20.5, "--", "LineWidth", 2.0);
+    ylabel(ax, "$t_{\mathrm{iter}}$ (h)");
+    yyaxis(ax, "right");
+    plot(ax, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
+    ax.YColor = plotColors(3, :);
+    ylim(ax, [0, 1]);
+    ylabel(ax, "$z$");
+    xlabel(ax, "$k$ (iteration)");
+    xlim(ax, [1, max(1, height(T))]);
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    set(ax, "FontSize", fontSize);
+    grid(ax, "off");
+    box(ax, "off");
+end
+exportgraphics(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), "Resolution", 300);
 end
 
 
@@ -391,17 +445,94 @@ xf = double(Tpf.SSdU); yf = double(Tpf.SSE);
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
-plot(ax, x1(o1), y1(o1), "-o", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(1,:), "DisplayName", "Run 1 Pareto");
-plot(ax, x2(o2), y2(o2), "-s", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(2,:), "DisplayName", "Run 2 Pareto");
-plot(ax, xf(of), yf(of), "-d", "LineWidth", 2.0, "MarkerSize", 7, "DisplayName", "Final Pareto (Run 1+2)");
+plot(ax, x1(o1), y1(o1), "-o", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(1,:), "DisplayName", "Case 1 Pareto");
+plot(ax, x2(o2), y2(o2), "-s", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(2,:), "DisplayName", "Case 2 Pareto");
+plot(ax, xf(of), yf(of), "-d", "LineWidth", 2.0, "MarkerSize", 7, "DisplayName", "Final Pareto (Case 1+2)");
 
 set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+xlim(ax, [1e-2, 1e2]);
+ylim(ax, [1e4, 1.3e5]);
 xlabel(ax, "$J_{\mathrm{TV}}$");
 ylabel(ax, "$J_{\mathrm{track}}$");
 grid(ax, "off");
 box(ax, "off");
 
 exportgraphics(fig, outPath, "Resolution", 300);
+end
+
+
+function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
+fig = figure("Color", "w");
+ax = axes(fig); hold(ax, "on");
+
+% All evaluated points as small grey dots
+Tall = [T1; T2];
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, [0.65 0.65 0.65], ...
+    "filled", "MarkerEdgeColor", "none", "DisplayName", "All samples");
+
+% One smooth curve through the final (combined) Pareto points.
+finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
+Tf = Tall(finalMask, :);
+hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2]);
+try
+    hCurve.Color = [plotColors(3, :) 0.45];
+catch
+    hCurve.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
+end
+
+% Pareto points per case (filled markers) drawn after curve to stay on top.
+scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 56, plotColors(1,:), ...
+    "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
+    "LineWidth", 1.4);
+scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 64, plotColors(2,:), ...
+    "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
+    "LineWidth", 1.4);
+
+set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+xlim(ax, [1e-2, 1e2]);
+ylim(ax, [1e4, 1.3e5]);
+xlabel(ax, "$J_{\mathrm{TV}}$");
+ylabel(ax, "$J_{\mathrm{track}}$");
+grid(ax, "off");
+box(ax, "off");
+
+exportgraphics(fig, outPath, "Resolution", 300);
+end
+
+
+function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds)
+[xSort, ord] = sort(x(:), "ascend");
+ySort = y(ord);
+
+if numel(xSort) < 3
+    h = plot(ax, xSort, ySort, "-", "Color", curveColor, "LineWidth", 2.0);
+    return;
+end
+
+% Interpolate in log-log domain for a smooth non-segmented visual guide.
+lx = log10(xSort);
+ly = log10(ySort);
+if nargin < 5 || isempty(xBounds)
+    lxq = linspace(min(lx), max(lx), 200);
+else
+    lxq = linspace(log10(xBounds(1)), log10(xBounds(2)), 260);
+end
+
+lyq = pchip(lx, ly, lxq);
+
+% Extrapolate with endpoint slopes in log-log space outside sampled range.
+leftMask = lxq < lx(1);
+rightMask = lxq > lx(end);
+if any(leftMask)
+    mLeft = (ly(2) - ly(1)) / max(lx(2) - lx(1), eps);
+    lyq(leftMask) = ly(1) + mLeft * (lxq(leftMask) - lx(1));
+end
+if any(rightMask)
+    mRight = (ly(end) - ly(end-1)) / max(lx(end) - lx(end-1), eps);
+    lyq(rightMask) = ly(end) + mRight * (lxq(rightMask) - lx(end));
+end
+
+h = plot(ax, 10.^lxq, 10.^lyq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
