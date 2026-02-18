@@ -473,7 +473,7 @@ scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, [0.65 0.65 0.65], ...
 % One smooth curve through the final (combined) Pareto points.
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
 Tf = Tall(finalMask, :);
-hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2]);
+hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
 try
     hCurve.Color = [plotColors(3, :) 0.45];
 catch
@@ -481,12 +481,17 @@ catch
 end
 
 % Pareto points per case (filled markers) drawn after curve to stay on top.
-scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 56, plotColors(1,:), ...
+scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 40, plotColors(1,:), ...
     "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
     "LineWidth", 1.4);
-scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 64, plotColors(2,:), ...
+scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 40, plotColors(2,:), ...
     "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
     "LineWidth", 1.4);
+
+% Circle only final (combined) Pareto points with a visible gap.
+scatter(ax, double(Tf.SSdU), double(Tf.SSE), 112, plotColors(3,:), ...
+    "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), ...
+    "LineWidth", 1.1);
 
 set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
 xlim(ax, [1e-2, 1e2]);
@@ -500,7 +505,7 @@ exportgraphics(fig, outPath, "Resolution", 300);
 end
 
 
-function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds)
+function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds, yBounds)
 [xSort, ord] = sort(x(:), "ascend");
 ySort = y(ord);
 
@@ -512,27 +517,30 @@ end
 % Interpolate in log-log domain for a smooth non-segmented visual guide.
 lx = log10(xSort);
 ly = log10(ySort);
-if nargin < 5 || isempty(xBounds)
-    lxq = linspace(min(lx), max(lx), 200);
-else
-    lxq = linspace(log10(xBounds(1)), log10(xBounds(2)), 260);
+lxqIn = linspace(min(lx), max(lx), 220);
+lyqIn = pchip(lx, ly, lxqIn);
+xq = (10.^lxqIn).';
+yq = (10.^lyqIn).';
+
+% Left extension: vertical at the leftmost Pareto point.
+if nargin >= 6 && ~isempty(yBounds)
+    yTop = max(yBounds);
+    if yTop > yq(1)
+        xq = [xq(1); xq];
+        yq = [yTop; yq];
+    end
 end
 
-lyq = pchip(lx, ly, lxq);
-
-% Extrapolate with endpoint slopes in log-log space outside sampled range.
-leftMask = lxq < lx(1);
-rightMask = lxq > lx(end);
-if any(leftMask)
-    mLeft = (ly(2) - ly(1)) / max(lx(2) - lx(1), eps);
-    lyq(leftMask) = ly(1) + mLeft * (lxq(leftMask) - lx(1));
-end
-if any(rightMask)
-    mRight = (ly(end) - ly(end-1)) / max(lx(end) - lx(end-1), eps);
-    lyq(rightMask) = ly(end) + mRight * (lxq(rightMask) - lx(end));
+% Right extension: horizontal from the rightmost Pareto point.
+if nargin >= 5 && ~isempty(xBounds)
+    xRight = max(xBounds);
+    if xRight > xq(end)
+        xq = [xq; xRight];
+        yq = [yq; yq(end)];
+    end
 end
 
-h = plot(ax, 10.^lxq, 10.^lyq, "-", "Color", curveColor, "LineWidth", 2.0);
+h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
