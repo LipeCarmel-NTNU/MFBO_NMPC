@@ -150,7 +150,7 @@ fprintf('R^2(SSdU) = %.6f\n', R2_SSdU);
 fprintf('R^2(SSE)  = %.6f\n', R2_SSE);
 
 % Export numerical summary for SSdU/SSE surrogate coefficients.
-numDir = "numerical results";
+numDir = fullfile("results", "numerical results");
 if ~isfolder(numDir)
     mkdir(numDir);
 end
@@ -196,20 +196,21 @@ plot(f, SSdU_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
 xlim([0, 1]);
 ylim([0, 1.005]);
 xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{TV}}$');
-format_tick(1, 1);
+
 grid off; box off
 set_font_size(fontSize);
 set_fig_size(920, 520);
+format_tick(1, 1);
 
 figure; plot(f, SSE, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
 plot(f, SSE_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
 xlim([0, 1]);
 ylim([0, 1.005]);
 xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{track}}$');
-format_tick(1, 1);
 grid off; box off
 set_font_size(fontSize);
 set_fig_size(920, 520);
+format_tick(1, 1);
 
 % figure; plot(f, time, 'LineWidth', 1.5); hold on
 % plot(f, t_hat, '--', 'LineWidth', 1.5)

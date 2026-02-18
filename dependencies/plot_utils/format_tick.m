@@ -11,12 +11,15 @@ function format_tick(X_decimals, Y_decimals)
     ax = gca;
     holdState = ishold(ax);
     hold(ax, "on");
+    drawnow; % Ensure auto ticks are settled before formatting.
 
     if ~isempty(X_decimals)
+        ax.XTickMode = "manual";
         ax.XTickLabel = make_labels(ax.XTick, ax.XScale, X_decimals);
     end
 
     if ~isempty(Y_decimals)
+        ax.YTickMode = "manual";
         ax.YTickLabel = make_labels(ax.YTick, ax.YScale, Y_decimals);
     end
 
