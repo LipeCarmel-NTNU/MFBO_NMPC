@@ -7,14 +7,14 @@
 %   t_s,i is the earliest time where e_rel_i(t) <= tol for ALL future t.
 %   If final relative error is > tol, settling time is NaN.
 %
-clear; clc;
+clear; close all; clc;
 
 % User-level configuration for input folders and analysis scope.
 cfg = struct();
 cfg.test_run_root = fullfile("results", "test_run");
 cfg.run_folders = [
-    struct("label","run1","subfolder","run1_full_f1_no_noise");
-    struct("label","run2","subfolder","run2_full_f1_no_noise")
+    struct("label","Case 1","subfolder","run1_full_f1_no_noise");
+    struct("label","Case 2","subfolder","run2_full_f1_no_noise")
 ];
 cfg.final_pareto_timestamps = [
     "20260131_151035";
@@ -29,14 +29,12 @@ cfg.final_pareto_timestamps = [
     "20260211_122653";
     "20260211_134235"
 ];
-cfg.settling_tol = 0.05;
+cfg.settling_tol = 0.02;
 
 diagnostics = run_full_run_diagnostics(cfg);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
 plot_summary_boxplots(diagnostics);
-plot_pareto_r1_vs_p(diagnostics);
-plot_p_distribution_by_run(diagnostics);
 plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
 %% FUNCTIONS
@@ -446,19 +444,17 @@ end
 
 function plot_summary_boxplots(diagnostics)
 caseTable = diagnostics.per_case;
-controllerTable = diagnostics.per_controller;
 if isempty(caseTable)
     return
 end
 
-% Compact multi-panel diagnostic summary.
+% Compact diagnostic summary focused on settling time and final error.
 figure("Color","w","Name","test_run_metric_summary");
-sgtitle("NMPC Test-Run Diagnostics");
 
 settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
 if ~isempty(settlingColumns)
-    subplot(2, 3, 1);
-    stateLabels = regexprep(cellstr(settlingColumns), "^settle_(x\\d+)_h$", "$1");
+    subplot(1, 2, 1);
+    stateLabels = get_state_display_labels(numel(settlingColumns));
     boxplot(table2array(caseTable(:, settlingColumns)), "Labels", stateLabels);
     xlabel("State");
     ylabel("Settling time (h)");
@@ -466,166 +462,18 @@ if ~isempty(settlingColumns)
     grid off; box off;
 end
 
-inputVariationColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "tot_dU_u"));
-if ~isempty(inputVariationColumns)
-    subplot(2, 3, 2);
-    inputLabels = regexprep(cellstr(inputVariationColumns), "^tot_dU_(u\\d+)$", "$1");
-    boxplot(table2array(caseTable(:, inputVariationColumns)), "Labels", inputLabels);
-    xlabel("Input");
-    ylabel("Total variation (sum |du|)");
-    title("Input Variation");
-    grid off; box off;
-end
-
-subplot(2, 3, 3);
+subplot(1, 2, 2);
 errorColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "final_err_x"));
 if ~isempty(errorColumns)
-    boxplot(table2array(caseTable(:, errorColumns)), "Labels", cellstr(errorColumns));
+    errorLabels = get_state_display_labels(numel(errorColumns));
+    boxplot(table2array(caseTable(:, errorColumns)), "Labels", errorLabels);
 else
     boxplot(zeros(height(caseTable),1), "Labels", {'n/a'});
 end
-xlabel("Metric");
-ylabel("Value");
+xlabel("State");
+ylabel("Final relative error (%)");
 title("Final Relative Error (%)");
 grid off; box off;
-
-if ~isempty(controllerTable)
-    % Costs are separated into different subplots due to different scales.
-    subplot(2, 3, 4);
-    boxplot(controllerTable.SSE, "Labels", {'SSE'});
-    set(gca, "YScale", "log");
-    ylabel("SSE (log scale)");
-    title("Tracking Cost SSE");
-    grid off; box off;
-
-    subplot(2, 3, 5);
-    boxplot(controllerTable.SSdU, "Labels", {'SSdU'});
-    set(gca, "YScale", "log");
-    ylabel("SSdU (log scale)");
-    title("Input-Use Cost SSdU");
-    grid off; box off;
-
-    subplot(2, 3, 6);
-    boxplot(controllerTable.J, "Labels", {'J'});
-    set(gca, "YScale", "log");
-    ylabel("J (log scale)");
-    title("Combined Cost J");
-    grid off; box off;
-end
-end
-
-
-function plot_pareto_r1_vs_p(diagnostics)
-caseTable = diagnostics.per_case;
-controllerTable = diagnostics.per_controller;
-if isempty(caseTable) || isempty(controllerTable)
-    return
-end
-
-% Use the same "both cases, no removals" population as the report table.
-settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
-allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
-if isempty(allControllersBothCases)
-    fprintf("p-vs-R1 plot: no controllers found in both-case table.\n");
-    return
-end
-
-hasP = isfinite(allControllersBothCases.p);
-hasR1 = cellfun(@(x) isnumeric(x) && all(isfinite(x(:))), allControllersBothCases.R1_diag);
-allControllersBothCases = allControllersBothCases(hasP & hasR1, :);
-if isempty(allControllersBothCases)
-    fprintf("p-vs-R1 plot: missing valid p or R1 values.\n");
-    return
-end
-
-r1Norm = cellfun(@(x) norm(x(:), 2), allControllersBothCases.R1_diag);
-pVals = allControllersBothCases.p;
-sseVals = allControllersBothCases.SSE;
-
-% Marker size proportional to SSE (normalized for readability).
-sizeMin = 30;
-sizeMax = 180;
-sseMin = min(sseVals);
-sseMax = max(sseVals);
-if isfinite(sseMin) && isfinite(sseMax) && (sseMax > sseMin)
-    markerSizes = sizeMin + (sseVals - sseMin) .* (sizeMax - sizeMin) ./ (sseMax - sseMin);
-else
-    markerSizes = repmat((sizeMin + sizeMax) / 2, size(sseVals));
-end
-
-figure("Color","w","Name","pareto_p_vs_r1_norm");
-scatter(pVals, r1Norm, markerSizes, "filled");
-xlabel("Prediction horizon p");
-ylabel("||R1||_2");
-title("All Controllers (Both Cases): ||R1||_2 vs p");
-grid off; box off;
-
-if numel(pVals) >= 2
-    trendCoeff = polyfit(pVals, r1Norm, 1);
-    xFit = linspace(min(pVals), max(pVals), 100);
-    yFit = polyval(trendCoeff, xFit);
-    hold on;
-    plot(xFit, yFit, "k--", "LineWidth", 1.2);
-    legend("Controllers (size ~ SSE)", sprintf("Linear trend (slope=%.3g)", trendCoeff(1)), "Location","best");
-end
-end
-
-
-function plot_p_distribution_by_run(diagnostics)
-caseTable = diagnostics.per_case;
-controllerTable = diagnostics.per_controller;
-if isempty(caseTable) || isempty(controllerTable)
-    return
-end
-
-% Compare p between runs using all controllers (both-case table, no removals).
-settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
-allControllersBothCases = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, false);
-if isempty(allControllersBothCases) || ~ismember("p", string(allControllersBothCases.Properties.VariableNames))
-    fprintf("Run comparison plot (p): insufficient data.\n");
-    return
-end
-
-hasValidP = isfinite(allControllersBothCases.p);
-plotTable = allControllersBothCases(hasValidP, :);
-if isempty(plotTable)
-    fprintf("Run comparison plot (p): no finite p values.\n");
-    return
-end
-
-runGroup = categorical(plotTable.run_label);
-pVals = plotTable.p;
-
-figure("Color","w","Name","p_distribution_by_run_all_controllers");
-
-subplot(1, 2, 1);
-boxplot(pVals, runGroup);
-xlabel("Run");
-ylabel("Prediction horizon p");
-title("All Controllers (Both Cases): p by run - boxplot");
-grid off; box off;
-
-subplot(1, 2, 2); hold on;
-% Jitter points horizontally for visibility on overlapping integer p values.
-runNames = categories(runGroup);
-for i = 1:numel(runNames)
-    mask = (runGroup == runNames{i});
-    x = i + 0.12 * (rand(nnz(mask), 1) - 0.5);
-    scatter(x, pVals(mask), 35, "filled", "MarkerFaceAlpha", 0.75);
-    yMed = median(pVals(mask), "omitnan");
-    plot([i-0.22, i+0.22], [yMed, yMed], "k-", "LineWidth", 1.6);
-end
-set(gca, "XTick", 1:numel(runNames), "XTickLabel", runNames);
-xlabel("Run");
-ylabel("Prediction horizon p");
-title("All Controllers (Both Cases): p by run - points + median");
-grid off; box off;
-
-fprintf("Run-wise median p (all controllers in both-case table):\n");
-for i = 1:numel(runNames)
-    mask = (runGroup == runNames{i});
-    fprintf("  %s: %.4g\n", string(runNames{i}), median(pVals(mask), "omitnan"));
-end
 end
 
 
@@ -658,31 +506,27 @@ pVals = plotTable.p;
 
 figure("Color","w","Name","p_distribution_by_run_final_pareto");
 
-subplot(1, 2, 1);
 boxplot(pVals, runGroup);
-xlabel("Run");
-ylabel("Prediction horizon p");
-title("Final Pareto Controllers: p by run - boxplot");
+xlabel("Case");
+ylabel("Prediction horizon $N_p$");
+title("Final Pareto Controllers: $N_p$ by case");
 grid off; box off;
-
-subplot(1, 2, 2); hold on;
 runNames = categories(runGroup);
-for i = 1:numel(runNames)
-    mask = (runGroup == runNames{i});
-    x = i + 0.12 * (rand(nnz(mask), 1) - 0.5);
-    scatter(x, pVals(mask), 35, "filled", "MarkerFaceAlpha", 0.75);
-    yMed = median(pVals(mask), "omitnan");
-    plot([i-0.22, i+0.22], [yMed, yMed], "k-", "LineWidth", 1.6);
-end
-set(gca, "XTick", 1:numel(runNames), "XTickLabel", runNames);
-xlabel("Run");
-ylabel("Prediction horizon p");
-title("Final Pareto Controllers: p by run - points + median");
-grid off; box off;
 
 fprintf("Run-wise median p (final Pareto controllers):\n");
 for i = 1:numel(runNames)
     mask = (runGroup == runNames{i});
     fprintf("  %s: %.4g\n", string(runNames{i}), median(pVals(mask), "omitnan"));
+end
+end
+
+
+function labels = get_state_display_labels(nStates)
+baseLabels = {'V (L)', 'X (g/L)', 'S (g/L)'};
+if nStates <= numel(baseLabels)
+    labels = baseLabels(1:nStates);
+else
+    extraLabels = arrayfun(@(k) sprintf("x%d", k), 4:nStates, "UniformOutput", false);
+    labels = [baseLabels, extraLabels];
 end
 end
