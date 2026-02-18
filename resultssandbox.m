@@ -83,7 +83,6 @@ end
 
 create_analysis_plots_side_by_side(allT, allPareto, datasets, rootFolder, fontSize, plotColors);
 %% Combined Pareto
-final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize, plotColors);
 plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize, plotColors);
 
@@ -343,6 +342,108 @@ for k = 1:2
     cb.FontSize = fontSize;
 end
 exportgraphics(fig1, fullfile(outDir, "sse_vs_ssdu_side_by_side.png"), "Resolution", 300);
+
+% SSE vs SSdU (side-by-side), color mapped by z
+fig1z = figure("Color", "w");
+tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    isPareto = allPareto{k};
+    ax = nexttile; hold(ax, "on");
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 150, "MarkerEdgeColor", "r", "MarkerFaceColor", "none", "LineWidth", 1.2);
+    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+    xlim(ax, [1e-2, 1e2]);
+    ylim(ax, [1e4, 1.3e5]);
+    caxis(ax, [0, 1]);
+    xlabel(ax, "$J_{\mathrm{TV}}$");
+    ylabel(ax, "$J_{\mathrm{track}}$");
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    grid(ax, "off");
+    box(ax, "off");
+    cb = colorbar(ax);
+    cb.Label.String = "$z$";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+end
+exportgraphics(fig1z, fullfile(outDir, "sse_vs_ssdu_side_by_side_z.png"), "Resolution", 300);
+
+% SSE vs SSdU (side-by-side), color mapped by per-iteration runtime (h)
+fig1t = figure("Color", "w");
+tiledlayout(fig1t, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    isPareto = allPareto{k};
+    ax = nexttile; hold(ax, "on");
+    runtime_h = double(T.runtime_min) / 60;
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, runtime_h, "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 150, "MarkerEdgeColor", "r", "MarkerFaceColor", "none", "LineWidth", 1.2);
+    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+    xlim(ax, [1e-2, 1e2]);
+    ylim(ax, [1e4, 1.3e5]);
+    xlabel(ax, "$J_{\mathrm{TV}}$");
+    ylabel(ax, "$J_{\mathrm{track}}$");
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    grid(ax, "off");
+    box(ax, "off");
+    cb = colorbar(ax);
+    cb.Label.String = "$t_{\mathrm{iter}}$ (h)";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+end
+exportgraphics(fig1t, fullfile(outDir, "sse_vs_ssdu_side_by_side_runtime_h.png"), "Resolution", 300);
+
+% SSE vs SSdU (side-by-side), color mapped by p
+fig1p = figure("Color", "w");
+tiledlayout(fig1p, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    isPareto = allPareto{k};
+    ax = nexttile; hold(ax, "on");
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.p), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 150, "MarkerEdgeColor", "r", "MarkerFaceColor", "none", "LineWidth", 1.2);
+    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+    xlim(ax, [1e-2, 1e2]);
+    ylim(ax, [1e4, 1.3e5]);
+    xlabel(ax, "$J_{\mathrm{TV}}$");
+    ylabel(ax, "$J_{\mathrm{track}}$");
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    grid(ax, "off");
+    box(ax, "off");
+    cb = colorbar(ax);
+    cb.Label.String = "$p$";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+end
+exportgraphics(fig1p, fullfile(outDir, "sse_vs_ssdu_side_by_side_p.png"), "Resolution", 300);
+
+% SSE vs SSdU (side-by-side), color mapped by m
+fig1m = figure("Color", "w");
+tiledlayout(fig1m, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+for k = 1:2
+    T = allT{k};
+    isPareto = allPareto{k};
+    ax = nexttile; hold(ax, "on");
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.m), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 150, "MarkerEdgeColor", "r", "MarkerFaceColor", "none", "LineWidth", 1.2);
+    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+    xlim(ax, [1e-2, 1e2]);
+    ylim(ax, [1e4, 1.3e5]);
+    xlabel(ax, "$J_{\mathrm{TV}}$");
+    ylabel(ax, "$J_{\mathrm{track}}$");
+    title(ax, string(datasets(k).name), "Interpreter", "none");
+    grid(ax, "off");
+    box(ax, "off");
+    cb = colorbar(ax);
+    cb.Label.String = "$m$";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+end
+exportgraphics(fig1m, fullfile(outDir, "sse_vs_ssdu_side_by_side_m.png"), "Resolution", 300);
 
 % Iteration runtime + z (side-by-side)
 fig2 = figure("Color", "w");
