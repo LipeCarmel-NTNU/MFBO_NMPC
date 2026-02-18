@@ -195,7 +195,7 @@ figure; plot(f, SSdU, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
 plot(f, SSdU_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
 xlim([0, 1]);
 ylim([0, 1.005]);
-xlabel('$z$'); ylabel('$J_{\mathrm{TV}}$');
+xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{TV}}$');
 format_tick(1, 1);
 grid off; box off
 set_font_size(fontSize);
@@ -205,7 +205,7 @@ figure; plot(f, SSE, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
 plot(f, SSE_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
 xlim([0, 1]);
 ylim([0, 1.005]);
-xlabel('$z$'); ylabel('$J_{\mathrm{track}}$');
+xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{track}}$');
 format_tick(1, 1);
 grid off; box off
 set_font_size(fontSize);

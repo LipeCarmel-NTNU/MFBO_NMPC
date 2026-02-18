@@ -272,7 +272,7 @@ for k = 1:2
     grid(ax, "off");
     box(ax, "off");
     cb = colorbar(ax);
-    cb.Label.String = "$z$";
+    cb.Label.String = "$z$ (dimensionless)";
     cb.Label.Interpreter = "latex";
     cb.TickLabelInterpreter = "latex";
     cb.FontSize = fontSize;
@@ -296,7 +296,7 @@ for k = 1:2
     plot(ax, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
     ax.YColor = plotColors(3, :);
     ylim(ax, [0, 1]);
-    ylabel(ax, "$z$");
+    ylabel(ax, "$z$ (dimensionless)");
     xlabel(ax, "$k$ (iteration)");
     xlim(ax, [1, max(1, height(T))]);
     title(ax, "$\mathbf{" + panelLabels(k) + "}$", "Interpreter", "latex");
