@@ -46,6 +46,7 @@ fontSize = 14;
 
 %% Colors
 plotColors = good_colors(4);
+
 figColors = figure("Color", "w");
 axColors = axes(figColors); hold(axColors, "on");
 xColor = 1:size(plotColors, 1);
@@ -62,6 +63,8 @@ set(axColors, "FontSize", fontSize);
 grid(axColors, "off");
 box(axColors, "off");
 
+% Trimming
+plotColors(4, :) = [];
 
 %% 
 allT = cell(numel(datasets), 1);
@@ -280,9 +283,9 @@ xlabel(ax2, "$k$ (iteration)");
 ylabel(ax2, "$t_{\mathrm{iter}}$ (h)");
 
 yyaxis(ax2, "right");
-plot(ax2, T.iteration, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(4, :));
-ax2.YColor = plotColors(4, :);
-ylabel(ax2, "$f$");
+plot(ax2, T.iteration, double(T.f), "-o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
+ax2.YColor = plotColors(3, :);
+ylabel(ax2, "$z$");
 
 xlim(ax2, [1, max(1, height(T))]);
 set(ax2, "FontSize", fontSize);
@@ -304,10 +307,10 @@ exportgraphics(fig3, outCumRuntimePath, "Resolution", 300);
 
 fig4 = figure("Color", "w");
 ax4 = axes(fig4); hold(ax4, "on");
-plot(ax4, T.iteration, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(4, :));
+plot(ax4, T.iteration, double(T.f), "-o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
 xline(ax4, 20.5, "--", "LineWidth", 2.0);
 xlabel(ax4, "$k$ (iteration)");
-ylabel(ax4, "$f$");
+ylabel(ax4, "$z$");
 xlim(ax4, [1, max(1, height(T))]);
 set(ax4, "FontSize", fontSize);
 grid(ax4, "off");
