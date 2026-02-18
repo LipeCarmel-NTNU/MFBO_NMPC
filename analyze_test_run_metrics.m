@@ -29,11 +29,12 @@ cfg.final_pareto_timestamps = [
     "20260211_122653";
     "20260211_134235"
 ];
-cfg.settling_tol = 0.02;
+cfg.settling_tol = 0.05;
 
 diagnostics = run_full_run_diagnostics(cfg);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
+write_numerical_results(diagnostics, cfg.settling_tol);
 plot_summary_boxplots(diagnostics);
 plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
@@ -528,5 +529,40 @@ if nStates <= numel(baseLabels)
 else
     extraLabels = arrayfun(@(k) sprintf("x%d", k), 4:nStates, "UniformOutput", false);
     labels = [baseLabels, extraLabels];
+end
+end
+
+
+function write_numerical_results(diagnostics, settlingTol)
+caseTable = diagnostics.per_case;
+if isempty(caseTable)
+    return
+end
+
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+if isempty(settlingColumns)
+    return
+end
+
+outDir = fullfile("results", "numerical results");
+if ~isfolder(outDir)
+    mkdir(outDir);
+end
+outPath = fullfile(outDir, "analyze_test_run_metrics_summary.txt");
+fid = fopen(outPath, "w");
+if fid == -1
+    warning("Unable to write numerical summary: %s", outPath);
+    return
+end
+cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+
+for i = 1:numel(settlingColumns)
+    col = settlingColumns{i};
+    nanCount = nnz(isnan(caseTable.(col)));
+    totalCount = height(caseTable);
+    pct = 100 * nanCount / max(totalCount, 1);
+    fprintf(fid, "NaN settling times %s: %d/%d\n", col, nanCount, totalCount);
+    fprintf(fid, "Interpretation: %.2f%% of runs had final error > %.2f%% for %s.\n", ...
+        pct, 100 * settlingTol, col);
 end
 end

@@ -31,6 +31,7 @@ addpath(genpath("dependencies"));
 %% Paths
 rootFolder = "results";
 graphicsFolder = fullfile(rootFolder, "graphial_results");
+numericalFolder = fullfile(rootFolder, "numerical results");
 datasets = [
     struct("name","Case 1", "csvPath", fullfile(rootFolder, "run1", "results.csv"), "outDir", fullfile(rootFolder, "run1"));
     struct("name","Case 2", "csvPath", fullfile(rootFolder, "run2", "results.csv"), "outDir", fullfile(rootFolder, "run2"))
@@ -41,6 +42,9 @@ if ~isfolder(rootFolder)
 end
 if ~isfolder(graphicsFolder)
     mkdir(graphicsFolder);
+end
+if ~isfolder(numericalFolder)
+    mkdir(numericalFolder);
 end
 
 set(groot, "defaultTextInterpreter", "latex");
@@ -74,6 +78,7 @@ plotColors(4, :) = [];
 allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
 allPareto = cell(numel(datasets), 1);
+runtimeSummaryTables = cell(numel(datasets), 1);
 
 for k = 1:numel(datasets)
     [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
@@ -82,8 +87,12 @@ for k = 1:numel(datasets)
     allTp{k} = Tp;
     allPareto{k} = isPareto;
     display_pareto_table(Tp);
-    display_runtime_phase_summary(T, datasets(k).name, 20);
+    runtimeSummaryTables{k} = display_runtime_phase_summary(T, datasets(k).name, 20);
 end
+
+TallCombined = [allT{1}; allT{2}];
+runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", 20);
+write_runtime_and_parameter_summary(allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder);
 
 create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
 %% Combined Pareto
@@ -329,7 +338,7 @@ disp(ParetoTuningTable);
 end
 
 
-function display_runtime_phase_summary(T, runName, optimizationStartIter)
+function summaryTbl = display_runtime_phase_summary(T, runName, optimizationStartIter)
 arguments
     T table
     runName
@@ -476,6 +485,57 @@ for j = 1:3
     cmap(:, j) = interp1(tAnch, anchors(:, j), t, "pchip");
 end
 cmap = min(max(cmap, 0), 1);
+end
+
+
+function write_runtime_and_parameter_summary(allTp, datasets, runSummaryTables, combinedSummaryTable, outDir)
+outPath = fullfile(outDir, "resultssandbox_runtime_and_params.txt");
+fid = fopen(outPath, "w");
+if fid == -1
+    warning("Unable to write numerical summary: %s", outPath);
+    return
+end
+cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+
+for k = 1:numel(datasets)
+    fprintf(fid, "Runtime phase summary - %s:\n", char(string(datasets(k).name)));
+    write_runtime_table(fid, runSummaryTables{k});
+    fprintf(fid, "\n");
+end
+
+fprintf(fid, "Runtime phase summary - Case 1 + Case 2 (combined):\n");
+write_runtime_table(fid, combinedSummaryTable);
+fprintf(fid, "\n");
+
+for k = 1:numel(allTp)
+    T = allTp{k};
+    validM = isfinite(T.m);
+    validP = isfinite(T.p);
+    nRows = height(T);
+    countM1 = nnz(T.m(validM) == 1);
+    countP1 = nnz(T.p(validP) == 1);
+
+    fprintf(fid, "%s Pareto counts:\n", char(string(datasets(k).name)));
+    fprintf(fid, "  m = 1: %d/%d\n", countM1, nRows);
+    fprintf(fid, "  p = 1: %d/%d\n", countP1, nRows);
+
+    ssdU = double(T.SSdU);
+    minSSdU = min(ssdU, [], "omitnan");
+    topMask = abs(ssdU - minSSdU) <= 10 * eps(max(1, abs(minSSdU)));
+    topCount = nnz(topMask);
+    topPM1 = nnz(topMask & T.p == 1 & T.m == 1);
+    fprintf(fid, "  Top (lowest SSdU) rows: %d\n", topCount);
+    fprintf(fid, "  Top (lowest SSdU) with p = 1 and m = 1: %d\n\n", topPM1);
+end
+end
+
+
+function write_runtime_table(fid, summaryTbl)
+for i = 1:height(summaryTbl)
+    fprintf(fid, "  %s | iterations=%d | runtime_min=%.6g | runtime_pct_total=%.6g\n", ...
+        char(string(summaryTbl.phase{i})), summaryTbl.iterations(i), ...
+        summaryTbl.runtime_min(i), summaryTbl.runtime_pct_total(i));
+end
 end
 
 
