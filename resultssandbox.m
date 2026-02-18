@@ -24,8 +24,9 @@
 %
 
 
-%% Code
+%% Dependencies
 clear; close all; clc
+addpath(genpath("dependencies"));
 
 %% Paths
 rootFolder = "results";
@@ -43,6 +44,26 @@ set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 14;
 
+%% Colors
+plotColors = good_colors(4);
+figColors = figure("Color", "w");
+axColors = axes(figColors); hold(axColors, "on");
+xColor = 1:size(plotColors, 1);
+for i = 1:size(plotColors, 1)
+    scatter(axColors, xColor(i), 1, 1200, plotColors(i, :), "filled", ...
+        "MarkerEdgeColor", "k", "LineWidth", 0.8);
+end
+xlim(axColors, [0.5, size(plotColors, 1) + 0.5]);
+ylim(axColors, [0.7, 1.3]);
+xticks(axColors, xColor);
+yticks(axColors, []);
+xlabel(axColors, "Color index");
+set(axColors, "FontSize", fontSize);
+grid(axColors, "off");
+box(axColors, "off");
+
+
+%% 
 allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
 
@@ -52,13 +73,13 @@ for k = 1:numel(datasets)
     allT{k} = T;
     allTp{k} = Tp;
 
-    create_analysis_plots(T, isPareto, datasets(k).outDir, fontSize);
+    create_analysis_plots(T, isPareto, datasets(k).outDir, fontSize, plotColors, k);
     display_pareto_table(Tp);
     display_runtime_phase_summary(T, datasets(k).name, 20);
 end
-%%
-final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize);
-plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize);
+%% Combined Pareto
+final_Tp = plot_combined_pareto_curves(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_curves_run1_run2_final.png"), fontSize, plotColors);
+plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize, plotColors);
 
 % final_Tp.timestamp
 % 
@@ -221,7 +242,7 @@ end
 end
 
 
-function create_analysis_plots(T, isPareto, outDir, fontSize)
+function create_analysis_plots(T, isPareto, outDir, fontSize, plotColors, runIdx)
 if ~isfolder(outDir)
     mkdir(outDir);
 end
@@ -251,10 +272,18 @@ exportgraphics(fig1, outScatterPath, "Resolution", 300);
 fig2 = figure("Color", "w");
 ax2 = axes(fig2); hold(ax2, "on");
 runtime_h = double(T.runtime_min) / 60;
-plot(ax2, T.iteration, runtime_h, "-", "LineWidth", 1.5);
-xline(ax2, 20.5, "--", "LineWidth", 1.3);
+yyaxis(ax2, "left");
+plot(ax2, T.iteration, runtime_h, "-", "LineWidth", 2.0, "Color", plotColors(runIdx, :));
+ax2.YColor = plotColors(runIdx, :);
+xline(ax2, 20.5, "--", "LineWidth", 2.0);
 xlabel(ax2, "$k$ (iteration)");
 ylabel(ax2, "$t_{\mathrm{iter}}$ (h)");
+
+yyaxis(ax2, "right");
+plot(ax2, T.iteration, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(4, :));
+ax2.YColor = plotColors(4, :);
+ylabel(ax2, "$f$");
+
 xlim(ax2, [1, max(1, height(T))]);
 set(ax2, "FontSize", fontSize);
 grid(ax2, "off");
@@ -263,8 +292,8 @@ exportgraphics(fig2, outRuntimePath, "Resolution", 300);
 
 fig3 = figure("Color", "w");
 ax3 = axes(fig3); hold(ax3, "on");
-plot(ax3, T.iteration, cumsum(runtime_h, "omitnan"), "-", "LineWidth", 1.5);
-xline(ax3, 20.5, "--", "LineWidth", 1.3);
+plot(ax3, T.iteration, cumsum(runtime_h, "omitnan"), "-", "LineWidth", 2.0, "Color", plotColors(runIdx, :));
+xline(ax3, 20.5, "--", "LineWidth", 2.0);
 xlabel(ax3, "$k$ (iteration)");
 ylabel(ax3, "$t_{\mathrm{run}}$ (h)");
 xlim(ax3, [1, max(1, height(T))]);
@@ -275,8 +304,8 @@ exportgraphics(fig3, outCumRuntimePath, "Resolution", 300);
 
 fig4 = figure("Color", "w");
 ax4 = axes(fig4); hold(ax4, "on");
-plot(ax4, T.iteration, double(T.f), "-", "LineWidth", 1.5);
-xline(ax4, 20.5, "--", "LineWidth", 1.3);
+plot(ax4, T.iteration, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(4, :));
+xline(ax4, 20.5, "--", "LineWidth", 2.0);
 xlabel(ax4, "$k$ (iteration)");
 ylabel(ax4, "$f$");
 xlim(ax4, [1, max(1, height(T))]);
@@ -342,7 +371,7 @@ disp(summaryTbl);
 end
 
 
-function Tpf = plot_combined_pareto_curves(T1, Tp1, T2, Tp2, outPath, fontSize)
+function Tpf = plot_combined_pareto_curves(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
 % Final frontier from all points (run1 + run2)
 Tall = [T1; T2];
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
@@ -359,9 +388,9 @@ xf = double(Tpf.SSdU); yf = double(Tpf.SSE);
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
-plot(ax, x1(o1), y1(o1), "-o", "LineWidth", 1.8, "MarkerSize", 6, "DisplayName", "Run 1 Pareto");
-plot(ax, x2(o2), y2(o2), "-s", "LineWidth", 1.8, "MarkerSize", 6, "DisplayName", "Run 2 Pareto");
-plot(ax, xf(of), yf(of), "-d", "LineWidth", 2.4, "MarkerSize", 7, "DisplayName", "Final Pareto (Run 1+2)");
+plot(ax, x1(o1), y1(o1), "-o", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(1,:), "DisplayName", "Run 1 Pareto");
+plot(ax, x2(o2), y2(o2), "-s", "LineWidth", 2.0, "MarkerSize", 6, "Color", plotColors(2,:), "DisplayName", "Run 2 Pareto");
+plot(ax, xf(of), yf(of), "-d", "LineWidth", 2.0, "MarkerSize", 7, "DisplayName", "Final Pareto (Run 1+2)");
 
 set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
 xlabel(ax, "$J_{\mathrm{TV}}$");
@@ -503,7 +532,7 @@ for v = 1:numel(keyVars)
         if ismember(varName, string(allTp{i}.Properties.VariableNames))
             vals = double(allTp{i}.(varName));
             histogram(ax, vals, "DisplayStyle","stairs", "Normalization","probability", ...
-                "NumBins", 12, "LineWidth",1.6, ...
+                "NumBins", 12, "LineWidth",2.0, ...
                 "EdgeColor", colors(i,:), "DisplayName", runNames(i));
         end
     end
@@ -591,7 +620,7 @@ exportgraphics(fig, fullfile(outDir, "out_mean_step_runtime_vs_objectives.png"),
 end
 
 
-function plot_cumulative_runtime_combined(allT, datasets, outDir, fontSize)
+function plot_cumulative_runtime_combined(allT, datasets, outDir, fontSize, plotColors)
 if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
     return
 end
@@ -602,11 +631,13 @@ ax = axes(fig); hold(ax, "on");
 runtime_h_1 = double(allT{1}.runtime_min) / 60;
 runtime_h_2 = double(allT{2}.runtime_min) / 60;
 
-plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWidth", 1.5, ...
+plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWidth", 2.0, ...
+    "Color", plotColors(1,:), ...
     "DisplayName", string(datasets(1).name));
-plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 1.5, ...
+plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
+    "Color", plotColors(2,:), ...
     "DisplayName", string(datasets(2).name));
-xline(ax, 20.5, "--", "LineWidth", 1.3);
+xline(ax, 20.5, "--", "LineWidth", 2.0);
 
 xlabel(ax, "$k$ (iteration)");
 ylabel(ax, "$t_{\mathrm{run}}$ (h)");
