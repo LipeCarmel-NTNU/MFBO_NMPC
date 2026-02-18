@@ -30,6 +30,7 @@ addpath(genpath("dependencies"));
 
 %% Paths
 rootFolder = "results";
+graphicsFolder = fullfile(rootFolder, "graphial_results");
 datasets = [
     struct("name","Case 1", "csvPath", fullfile(rootFolder, "run1", "results.csv"), "outDir", fullfile(rootFolder, "run1"));
     struct("name","Case 2", "csvPath", fullfile(rootFolder, "run2", "results.csv"), "outDir", fullfile(rootFolder, "run2"))
@@ -38,30 +39,33 @@ datasets = [
 if ~isfolder(rootFolder)
     mkdir(rootFolder);
 end
+if ~isfolder(graphicsFolder)
+    mkdir(graphicsFolder);
+end
 
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
-fontSize = 14;
+fontSize = 18;
 
 %% Colors
 plotColors = good_colors(4);
 
-figColors = figure("Color", "w");
-axColors = axes(figColors); hold(axColors, "on");
-xColor = 1:size(plotColors, 1);
-for i = 1:size(plotColors, 1)
-    scatter(axColors, xColor(i), 1, 1200, plotColors(i, :), "filled", ...
-        "MarkerEdgeColor", "k", "LineWidth", 0.8);
-end
-xlim(axColors, [0.5, size(plotColors, 1) + 0.5]);
-ylim(axColors, [0.7, 1.3]);
-xticks(axColors, xColor);
-yticks(axColors, []);
-xlabel(axColors, "Color index");
-set(axColors, "FontSize", fontSize);
-grid(axColors, "off");
-box(axColors, "off");
+% figColors = figure("Color", "w");
+% axColors = axes(figColors); hold(axColors, "on");
+% xColor = 1:size(plotColors, 1);
+% for i = 1:size(plotColors, 1)
+%     scatter(axColors, xColor(i), 1, 1200, plotColors(i, :), "filled", ...
+%         "MarkerEdgeColor", "k", "LineWidth", 0.8);
+% end
+% xlim(axColors, [0.5, size(plotColors, 1) + 0.5]);
+% ylim(axColors, [0.7, 1.3]);
+% xticks(axColors, xColor);
+% yticks(axColors, []);
+% xlabel(axColors, "Color index");
+% set(axColors, "FontSize", fontSize);
+% grid(axColors, "off");
+% box(axColors, "off");
 
 % Keep three palette entries: Case 1, Case 2, and z/guideline.
 plotColors(4, :) = [];
@@ -81,10 +85,10 @@ for k = 1:numel(datasets)
     display_runtime_phase_summary(T, datasets(k).name, 20);
 end
 
-create_analysis_plots_side_by_side(allT, allPareto, datasets, rootFolder, fontSize, plotColors);
+create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
 %% Combined Pareto
-plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(rootFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
-plot_cumulative_runtime_combined(allT, datasets, rootFolder, fontSize, plotColors);
+plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
+plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
 
 function [T, Tp, isPareto] = load_results_table(csvPath)
@@ -241,11 +245,11 @@ end
 fig1z = figure("Color", "w");
 tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
 viridisMap = make_viridis_like(256);
+panelLabels = ["a", "b"];
 for k = 1:2
     T = allT{k};
     isPareto = allPareto{k};
     ax = nexttile; hold(ax, "on");
-    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
     hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
         plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
     try
@@ -253,6 +257,7 @@ for k = 1:2
     catch
         hGuide.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
     end
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
     scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
         "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
     set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
@@ -262,7 +267,8 @@ for k = 1:2
     caxis(ax, [0, 1]);
     xlabel(ax, "$J_{\mathrm{TV}}$");
     ylabel(ax, "$J_{\mathrm{track}}$");
-    title(ax, string(datasets(k).name), "Interpreter", "none");
+    title(ax, "$\mathbf{" + panelLabels(k) + "}$", "Interpreter", "latex");
+    ax.TitleHorizontalAlignment = "left";
     grid(ax, "off");
     box(ax, "off");
     cb = colorbar(ax);
@@ -271,7 +277,7 @@ for k = 1:2
     cb.TickLabelInterpreter = "latex";
     cb.FontSize = fontSize;
 end
-exportgraphics(fig1z, fullfile(outDir, "sse_vs_ssdu_side_by_side_z.png"), "Resolution", 300);
+save_plot_outputs(fig1z, fullfile(outDir, "sse_vs_ssdu_side_by_side_z.png"), fontSize, 1200, 460);
 
 % Iteration runtime + z (side-by-side)
 fig2 = figure("Color", "w");
@@ -293,12 +299,18 @@ for k = 1:2
     ylabel(ax, "$z$");
     xlabel(ax, "$k$ (iteration)");
     xlim(ax, [1, max(1, height(T))]);
-    title(ax, string(datasets(k).name), "Interpreter", "none");
+    title(ax, "$\mathbf{" + panelLabels(k) + "}$", "Interpreter", "latex");
+    ax.TitleHorizontalAlignment = "left";
     set(ax, "FontSize", fontSize);
     grid(ax, "off");
     box(ax, "off");
+    axes(ax);
+    yyaxis(ax, "left");
+    format_tick(0, 1);
+    yyaxis(ax, "right");
+    format_tick(0, 1);
 end
-exportgraphics(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), "Resolution", 300);
+save_plot_outputs(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), fontSize, 1200, 460);
 end
 
 
@@ -318,8 +330,10 @@ end
 
 
 function display_runtime_phase_summary(T, runName, optimizationStartIter)
-if nargin < 3
-    optimizationStartIter = 20; % last DOE iteration (1-based)
+arguments
+    T table
+    runName
+    optimizationStartIter (1,1) double = 20 % last DOE iteration (1-based)
 end
 
 iter = double(T.iteration);
@@ -398,8 +412,10 @@ xlabel(ax, "$J_{\mathrm{TV}}$");
 ylabel(ax, "$J_{\mathrm{track}}$");
 grid(ax, "off");
 box(ax, "off");
+axes(ax);
+format_tick(1, 1);
 
-exportgraphics(fig, outPath, "Resolution", 300);
+save_plot_outputs(fig, outPath, fontSize, 920, 520);
 end
 
 
@@ -489,6 +505,27 @@ set(ax, "FontSize", fontSize);
 grid(ax, "off");
 box(ax, "off");
 
-exportgraphics(fig, fullfile(outDir, "runtime_cumulative_run1_run2.png"), "Resolution", 300);
+save_plot_outputs(fig, fullfile(outDir, "runtime_cumulative_run1_run2.png"), fontSize, 920, 520);
 end
 
+
+function save_plot_outputs(figHandle, pngPath, fontSize, figWidthPx, figHeightPx)
+arguments
+    figHandle
+    pngPath
+    fontSize (1,1) double = 14
+    figWidthPx (1,1) double = 900
+    figHeightPx (1,1) double = 500
+end
+
+% Apply consistent figure size and font before exporting.
+figure(figHandle);
+set_fig_size(figWidthPx, figHeightPx);
+set_font_size(fontSize);
+exportgraphics(figHandle, pngPath, "Resolution", 300);
+
+% Save a vector PDF with the same base filename.
+[folderPath, fileStem] = fileparts(pngPath);
+pdfPath = fullfile(folderPath, strcat(fileStem, ".pdf"));
+save_figure(pdfPath, NaN, false);
+end
