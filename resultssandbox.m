@@ -318,40 +318,45 @@ if ~isfolder(outDir)
     mkdir(outDir);
 end
 
-% SSE vs SSdU (side-by-side), color mapped by z
-fig1z = figure("Color", "w");
-tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
-for k = 1:2
-    T = allT{k};
-    isPareto = allPareto{k};
-    ax = nexttile; hold(ax, "on");
-    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
-    hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
-        plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
-    try
-        hGuide.Color = [plotColors(3, :) 0.45];
-    catch
-        hGuide.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
+% SSE vs SSdU (side-by-side), color mapped by z; export multiple colormap variants.
+cmapList = build_colormap_variants(256);
+for ic = 1:numel(cmapList)
+    fig1z = figure("Color", "w");
+    tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+    for k = 1:2
+        T = allT{k};
+        isPareto = allPareto{k};
+        ax = nexttile; hold(ax, "on");
+        scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+        hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
+            plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
+        try
+            hGuide.Color = [plotColors(3, :) 0.45];
+        catch
+            hGuide.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
+        end
+        scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
+            "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
+        set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+        xlim(ax, [1e-2, 1e2]);
+        ylim(ax, [1e4, 1.3e5]);
+        colormap(ax, cmapList(ic).map);
+        caxis(ax, [0, 1]);
+        xlabel(ax, "$J_{\mathrm{TV}}$");
+        ylabel(ax, "$J_{\mathrm{track}}$");
+        title(ax, string(datasets(k).name), "Interpreter", "none");
+        grid(ax, "off");
+        box(ax, "off");
+        cb = colorbar(ax);
+        cb.Label.String = "$z$";
+        cb.Label.Interpreter = "latex";
+        cb.TickLabelInterpreter = "latex";
+        cb.FontSize = fontSize;
     end
-    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
-        "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
-    set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
-    xlim(ax, [1e-2, 1e2]);
-    ylim(ax, [1e4, 1.3e5]);
-    colormap(ax, turbo(256));
-    caxis(ax, [0, 1]);
-    xlabel(ax, "$J_{\mathrm{TV}}$");
-    ylabel(ax, "$J_{\mathrm{track}}$");
-    title(ax, string(datasets(k).name), "Interpreter", "none");
-    grid(ax, "off");
-    box(ax, "off");
-    cb = colorbar(ax);
-    cb.Label.String = "$z$";
-    cb.Label.Interpreter = "latex";
-    cb.TickLabelInterpreter = "latex";
-    cb.FontSize = fontSize;
+    sgtitle(fig1z, "Colormap: " + cmapList(ic).name, "Interpreter", "none");
+    fileTag = regexprep(lower(char(cmapList(ic).name)), "[^a-z0-9]+", "_");
+    exportgraphics(fig1z, fullfile(outDir, "sse_vs_ssdu_side_by_side_z_" + fileTag + ".png"), "Resolution", 300);
 end
-exportgraphics(fig1z, fullfile(outDir, "sse_vs_ssdu_side_by_side_z.png"), "Resolution", 300);
 
 % Iteration runtime + z (side-by-side)
 fig2 = figure("Color", "w");
@@ -519,6 +524,39 @@ if nargin >= 5 && ~isempty(xBounds)
 end
 
 h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
+end
+
+
+function cmapList = build_colormap_variants(n)
+% Curated colormaps: readable, publication-friendly, and colorblind-aware.
+cmapList = struct("name", {}, "map", {});
+
+% Three-color smooth map (dark blue -> teal -> yellow).
+anchorsBlueTealYellow = [
+    0.08 0.12 0.55
+    0.13 0.55 0.57
+    0.98 0.90 0.20
+];
+cmapList(end+1) = struct("name", "blue_teal_yellow", "map", interpolate_anchors(anchorsBlueTealYellow, n));
+
+% Viridis-like (purple/blue -> green -> yellow), widely used in papers.
+anchorsViridisLike = [
+    0.27 0.00 0.33
+    0.13 0.56 0.55
+    0.99 0.91 0.14
+];
+cmapList(end+1) = struct("name", "viridis_like", "map", interpolate_anchors(anchorsViridisLike, n));
+end
+
+
+function cmap = interpolate_anchors(anchors, n)
+tAnch = linspace(0, 1, size(anchors, 1));
+t = linspace(0, 1, n);
+cmap = zeros(n, 3);
+for j = 1:3
+    cmap(:, j) = interp1(tAnch, anchors(:, j), t, "pchip");
+end
+cmap = min(max(cmap, 0), 1);
 end
 
 
