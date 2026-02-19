@@ -25,9 +25,10 @@ import matplotlib.pyplot as plt
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
     "panel_b": "Prediction horizon N_p by case",
-    "case_1_color_hex": "#FF1F5B",
-    "case_2_color_hex": "#009ADE",
+    "case_1_color_hex": "#1f77b4",
+    "case_2_color_hex": "#1f77b4",
     "guideline_color_hex": "#AF58BA",
+    "scatter_color_hex": "#d62728",
 }
 
 REFERENCE_TIME_H = 8.09603
@@ -194,16 +195,16 @@ def scattered_boxplot(
     )
 
     for patch in bp["boxes"]:
-        patch.set(facecolor=box_color, alpha=0.25, edgecolor=box_color, linewidth=1)
+        patch.set(facecolor=box_color, alpha=0.25, edgecolor=box_color, linewidth=1, zorder=3)
 
     for median in bp["medians"]:
-        median.set(color=box_color, linewidth=1.5)
+        median.set(color=box_color, linewidth=1.5, zorder=4)
 
     for whisker in bp["whiskers"]:
-        whisker.set(color=box_color, linewidth=1)
+        whisker.set(color=box_color, linewidth=1, zorder=3)
 
     for cap in bp["caps"]:
-        cap.set(color=box_color, linewidth=1)
+        cap.set(color=box_color, linewidth=1, zorder=3)
 
     # Overlay scattered raw data
     rng = np.random.default_rng(0)
@@ -217,6 +218,7 @@ def scattered_boxplot(
             alpha=0.6,
             color=scatter_color,
             edgecolors="none",
+            zorder=2,
         )
 
     ax.set_xticks(positions)
@@ -253,15 +255,18 @@ def plot_settling_time(df: pd.DataFrame):
         data_groups=data_groups,
         labels=state_labels,
         box_color=PLOT_CONVENTION["case_1_color_hex"],
-        scatter_color=PLOT_CONVENTION["case_1_color_hex"],
+        scatter_color=PLOT_CONVENTION["scatter_color_hex"],
         ylabel="Settling time (h)",
     )
 
     ax.axhline(
         REFERENCE_TIME_H,
         color=PLOT_CONVENTION["guideline_color_hex"],
-        linewidth=1,
+        linewidth=2.6,
+        alpha=0.45,
+        zorder=1,
     )
+    ax.set_ylim(bottom=0)
 
     fig.tight_layout()
     return fig
@@ -336,13 +341,15 @@ def plot_np_by_case(df: pd.DataFrame):
             y,
             s=20,
             alpha=0.6,
-            color=color,
+            color=PLOT_CONVENTION["scatter_color_hex"],
             edgecolors="none",
+            zorder=2,
         )
 
     ax.set_xticks(positions)
     ax.set_xticklabels(labels)
-    ax.set_ylabel("Prediction horizon $N_p$ (–)")
+    ax.set_ylabel("Prediction horizon $N_p$")
+    ax.set_ylim(bottom=0)
     ax.grid(False)
 
     fig.tight_layout()
