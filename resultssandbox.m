@@ -79,6 +79,7 @@ allT = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
 allPareto = cell(numel(datasets), 1);
 runtimeSummaryTables = cell(numel(datasets), 1);
+optStartIter = 20;
 
 for k = 1:numel(datasets)
     [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
@@ -87,12 +88,12 @@ for k = 1:numel(datasets)
     allTp{k} = Tp;
     allPareto{k} = isPareto;
     display_pareto_table(Tp);
-    runtimeSummaryTables{k} = display_runtime_phase_summary(T, datasets(k).name, 20);
+    runtimeSummaryTables{k} = display_runtime_phase_summary(T, datasets(k).name, optStartIter);
 end
 
 TallCombined = [allT{1}; allT{2}];
-runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", 20);
-write_runtime_and_parameter_summary(allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder);
+runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", optStartIter);
+write_runtime_and_parameter_summary(allT, allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder, optStartIter);
 
 create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
 %% Combined Pareto
@@ -488,7 +489,7 @@ cmap = min(max(cmap, 0), 1);
 end
 
 
-function write_runtime_and_parameter_summary(allTp, datasets, runSummaryTables, combinedSummaryTable, outDir)
+function write_runtime_and_parameter_summary(allT, allTp, datasets, runSummaryTables, combinedSummaryTable, outDir, optimizationStartIter)
 outPath = fullfile(outDir, "resultssandbox_runtime_and_params.txt");
 fid = fopen(outPath, "w");
 if fid == -1
@@ -506,6 +507,25 @@ end
 fprintf(fid, "Runtime phase summary - Case 1 + Case 2 (combined):\n");
 write_runtime_table(fid, combinedSummaryTable);
 fprintf(fid, "\n");
+
+meanZCase = NaN(numel(allT), 1);
+for k = 1:numel(allT)
+    meanZCase(k) = compute_mean_z_optimization(allT{k}, optimizationStartIter);
+end
+Tall = vertcat(allT{:});
+meanZCombined = compute_mean_z_optimization(Tall, optimizationStartIter);
+
+fprintf("Mean Fidelity z during optimization iterations:\n");
+for k = 1:numel(datasets)
+    fprintf("  %s: %.6g\n", string(datasets(k).name), meanZCase(k));
+end
+fprintf("  Case 1 + Case 2 (combined): %.6g\n", meanZCombined);
+
+fprintf(fid, "Mean Fidelity z during optimization iterations:\n");
+for k = 1:numel(datasets)
+    fprintf(fid, "  %s: %.6g\n", char(string(datasets(k).name)), meanZCase(k));
+end
+fprintf(fid, "  Case 1 + Case 2 (combined): %.6g\n\n", meanZCombined);
 
 for k = 1:numel(allTp)
     T = allTp{k};
@@ -527,6 +547,16 @@ for k = 1:numel(allTp)
     fprintf(fid, "  Top (lowest SSdU) rows: %d\n", topCount);
     fprintf(fid, "  Top (lowest SSdU) with p = 1 and m = 1: %d\n\n", topPM1);
 end
+end
+
+
+function meanZ = compute_mean_z_optimization(T, optimizationStartIter)
+if isempty(T) || ~ismember("f", string(T.Properties.VariableNames))
+    meanZ = NaN;
+    return
+end
+mask = double(T.iteration) > optimizationStartIter;
+meanZ = mean(double(T.f(mask)), "omitnan");
 end
 
 
