@@ -21,15 +21,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-plt.rcParams.update(
-    {
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman", "CMU Serif", "DejaVu Serif"],
-        "mathtext.fontset": "cm",
-        "axes.unicode_minus": False,
-    }
-)
-
 
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
@@ -358,7 +349,7 @@ def plot_np_by_case(df: pd.DataFrame):
     ax.set_xticks(positions)
     ax.set_xticklabels(labels)
     ax.set_ylabel("Prediction horizon $N_p$")
-    ax.set_ylim(bottom=1)
+    ax.set_ylim(bottom=0)
     ax.grid(False)
 
     fig.tight_layout()
