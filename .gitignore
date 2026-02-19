@@ -2,3 +2,7 @@
 /gptips2
 /__pycache__
 *.txt
+*.lock
+*.png
+*.pdf
+/results/graphical_results/*
