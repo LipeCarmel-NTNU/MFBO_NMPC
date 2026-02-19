@@ -21,14 +21,23 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+plt.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman", "CMU Serif", "DejaVu Serif"],
+        "mathtext.fontset": "cm",
+        "axes.unicode_minus": False,
+    }
+)
+
 
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
     "panel_b": "Prediction horizon N_p by case",
     "case_1_color_hex": "#1f77b4",
-    "case_2_color_hex": "#1f77b4",
-    "guideline_color_hex": "#AF58BA",
-    "scatter_color_hex": "#d62728",
+    "case_2_color_hex": "#d62728",
+    "guideline_color_hex": "#7f7f7f",
+    "scatter_color_hex": "#7f7f7f",
 }
 
 REFERENCE_TIME_H = 8.09603
@@ -266,7 +275,6 @@ def plot_settling_time(df: pd.DataFrame):
         alpha=0.45,
         zorder=1,
     )
-    ax.set_ylim(bottom=0)
 
     fig.tight_layout()
     return fig
@@ -364,6 +372,11 @@ if __name__ == "__main__":
 
     fig_a = plot_settling_time(settling_df)
     fig_b = plot_np_by_case(np_df)
+
+    out_dir = Path(__file__).resolve().parent.parent / "results" / "graphial_results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig_a.savefig(out_dir / "python_settling_time_boxplot.png", dpi=300, bbox_inches="tight")
+    fig_b.savefig(out_dir / "python_np_by_case_boxplot.png", dpi=300, bbox_inches="tight")
 
     plt.show()
     print('Done')
