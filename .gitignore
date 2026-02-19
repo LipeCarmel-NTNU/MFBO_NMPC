@@ -4,3 +4,4 @@
 *.txt
 /results/graphical_results
 *.png
+.vscode
