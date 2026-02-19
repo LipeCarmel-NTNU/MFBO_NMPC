@@ -6,3 +6,4 @@
 *.png
 *.pdf
 /results/graphical_results/*
+.vscode
