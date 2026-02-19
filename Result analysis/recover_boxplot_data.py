@@ -403,8 +403,11 @@ if __name__ == "__main__":
 
     out_dir = Path(__file__).resolve().parent.parent / "results" / "graphial_results"
     out_dir.mkdir(parents=True, exist_ok=True)
+    export_dpi = 600
     fig_a.savefig(out_dir / "python_settling_time_boxplot.png", dpi=300, bbox_inches="tight")
     fig_b.savefig(out_dir / "python_np_by_case_boxplot.png", dpi=300, bbox_inches="tight")
+    fig_a.savefig(out_dir / "python_settling_time_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
+    fig_b.savefig(out_dir / "python_np_by_case_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
 
     plt.show()
     print('Done')
