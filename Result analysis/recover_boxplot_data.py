@@ -1,4 +1,4 @@
-"""Load and document boxplot data exported by ``analyze_test_run_metrics.m``.
+"""Load, document, and plot boxplot data exported by ``analyze_test_run_metrics.m``.
 
 Figure description (focused subset used in Python workflows):
 - Layout: 1x2 panels.
@@ -8,48 +8,55 @@ Figure description (focused subset used in Python workflows):
   - includes a horizontal reference line at ``t = 8.09603 h``.
 - Panel ``b`` (separate figure): prediction horizon ``N_p`` boxplot by case.
 
-Color convention used across result-analysis figures:
-- Case 1 / panel ``a``: color index 1 from the active palette
-  (hex ``#FF1F5B``, RGB ``(255, 31, 91)``).
-- Case 2 / panel ``b``: color index 2 from the active palette
-  (hex ``#009ADE``, RGB ``(0, 154, 222)``).
-- Guideline / fidelity overlays use color index 3
-  (hex ``#AF58BA``, RGB ``(175, 88, 186)``).
-
-Note:
-- In ``resultssandbox.m``, colors are generated via ``good_colors(4)`` and
-  then the 4th row is removed. This leaves ``[red, blue, purple]``.
+Boxplots follow a “scattered boxplot” style:
+- Standard box (median, IQR, whiskers at 1.5 IQR)
+- Overlaid raw data points with horizontal jitter
+- Semi-transparent markers
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
-    "panel_b": "Final relative error by state (V, X, S)",
+    "panel_b": "Prediction horizon N_p by case",
     "case_1_color_hex": "#FF1F5B",
     "case_2_color_hex": "#009ADE",
     "guideline_color_hex": "#AF58BA",
 }
 
+REFERENCE_TIME_H = 8.09603
+FINAL_PARETO_TIMESTAMPS = {
+    "20260131_151035",
+    "20260201_111557",
+    "20260201_111928",
+    "20260201_192807",
+    "20260201_223337",
+    "20260201_232106",
+    "20260210_151703",
+    "20260210_171107",
+    "20260210_180826",
+    "20260211_122653",
+    "20260211_134235",
+}
+
 
 def load_boxplot_data(analysis_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
-    """Return exported boxplot data as pandas DataFrames.
-
-    Parameters
-    ----------
-    analysis_dir:
-        Folder containing:
-        - boxplot_settling_time_data.csv
-        - boxplot_final_error_data.csv
-        Defaults to the directory of this script.
-    """
     base = Path(analysis_dir) if analysis_dir is not None else Path(__file__).resolve().parent
-
-    settling_path = base / "boxplot_settling_time_data.csv"
-    final_err_path = base / "boxplot_final_error_data.csv"
+    project_root = base.parent
+    settling_path = _first_existing(
+        [base / "boxplot_settling_time_data.csv", project_root / "Result analysis" / "boxplot_settling_time_data.csv"]
+    )
+    final_err_path = _first_existing(
+        [base / "boxplot_final_error_data.csv", project_root / "Result analysis" / "boxplot_final_error_data.csv"]
+    )
+    if settling_path is None or final_err_path is None:
+        raise FileNotFoundError("Boxplot CSV files were not found. Run analyze_test_run_metrics.m first.")
 
     settling_df = pd.read_csv(settling_path)
     final_error_df = pd.read_csv(final_err_path)
@@ -60,26 +67,7 @@ def load_boxplot_data(analysis_dir: str | Path | None = None) -> dict[str, pd.Da
     }
 
 
-def load_settling_and_np_data(analysis_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
-    """Return only settling-time and N_p dataframes.
-
-    - settling_time: from ``boxplot_settling_time_data.csv``
-    - np_by_case: inferred from per-controller table in
-      ``analyze_test_run_metrics_summary.txt`` (both-case, no removals)
-    """
-    data = load_boxplot_data(analysis_dir)
-    base = Path(analysis_dir) if analysis_dir is not None else Path(__file__).resolve().parent
-    summary_txt = base / "analyze_test_run_metrics_summary.txt"
-    np_df = parse_np_from_summary(summary_txt)
-    return {"settling_time": data["settling_time"], "np_by_case": np_df}
-
-
 def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
-    """Parse N_p by case from analyze_test_run_metrics_summary.txt.
-
-    Expected source section:
-    'Controllers table (both case 1 and case 2, no removals):'
-    """
     path = Path(summary_txt_path)
     if not path.exists():
         return pd.DataFrame(columns=["run_label", "timestamp", "N_p"])
@@ -103,9 +91,6 @@ def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
         if '"' not in s:
             continue
 
-        # Minimal robust parse: run_label and timestamp are quoted, then numeric columns.
-        # Example:
-        # "Case 1"  "2026..."  1  1  ...
         parts = s.split('"')
         if len(parts) < 5:
             continue
@@ -113,7 +98,7 @@ def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
         timestamp = parts[3].strip()
         tail = parts[4].strip()
         nums = tail.split()
-        if len(nums) < 2:
+        if len(nums) < 1:
             continue
         try:
             n_p = float(nums[0])
@@ -124,16 +109,254 @@ def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
-def get_plot_convention() -> dict[str, str]:
-    """Return textual plotting convention used in the MATLAB analysis figures."""
-    return dict(PLOT_CONVENTION)
+def load_settling_and_np_data(analysis_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
+    data = load_boxplot_data(analysis_dir)
+    base = Path(analysis_dir) if analysis_dir is not None else Path(__file__).resolve().parent
+    project_root = base.parent
+
+    summary_txt = _first_existing(
+        [
+            base / "analyze_test_run_metrics_summary.txt",
+            project_root / "results" / "numerical results" / "analyze_test_run_metrics_summary.txt",
+        ]
+    )
+    np_csv = _first_existing(
+        [
+            base / "boxplot_np_data.csv",
+            project_root / "Result analysis" / "boxplot_np_data.csv",
+        ]
+    )
+
+    if np_csv is not None:
+        np_df = pd.read_csv(np_csv)
+    elif summary_txt is not None:
+        np_df = parse_np_from_summary(summary_txt)
+    else:
+        np_df = pd.DataFrame()
+
+    if np_df.empty:
+        np_df = build_np_from_results_csv(project_root)
+    return {"settling_time": data["settling_time"], "np_by_case": np_df}
+
+
+def build_np_from_results_csv(project_root: Path) -> pd.DataFrame:
+    """Fallback: reconstruct N_p from run1/run2 results.csv and final Pareto timestamps."""
+    records: list[dict[str, object]] = []
+    for run_name, label in [("run1", "Case 1"), ("run2", "Case 2")]:
+        csv_path = project_root / "results" / run_name / "results.csv"
+        if not csv_path.exists():
+            continue
+        df = pd.read_csv(csv_path)
+        if not {"timestamp", "theta_2", "theta_3"}.issubset(df.columns):
+            continue
+
+        df["timestamp"] = df["timestamp"].astype(str)
+        df = df[df["timestamp"].isin(FINAL_PARETO_TIMESTAMPS)].copy()
+        if df.empty:
+            continue
+
+        theta_p = np.rint(pd.to_numeric(df["theta_2"], errors="coerce"))
+        theta_m = np.rint(pd.to_numeric(df["theta_3"], errors="coerce"))
+        m = theta_m + 1
+        n_p = theta_p + m
+
+        for ts, val in zip(df["timestamp"].tolist(), n_p.tolist()):
+            if pd.notna(val):
+                records.append({"run_label": label, "timestamp": ts, "N_p": float(val)})
+
+    return pd.DataFrame.from_records(records, columns=["run_label", "timestamp", "N_p"])
+
+
+def _first_existing(paths: list[Path]) -> Path | None:
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
+def scattered_boxplot(
+    ax,
+    data_groups: list[np.ndarray],
+    labels: list[str],
+    box_color: str,
+    scatter_color: str,
+    ylabel: str,
+):
+    positions = np.arange(1, len(data_groups) + 1)
+
+    bp = ax.boxplot(
+        data_groups,
+        positions=positions,
+        widths=0.5,
+        patch_artist=True,
+        showfliers=False,
+        whis=1.5,
+    )
+
+    for patch in bp["boxes"]:
+        patch.set(facecolor=box_color, alpha=0.25, edgecolor=box_color, linewidth=1)
+
+    for median in bp["medians"]:
+        median.set(color=box_color, linewidth=1.5)
+
+    for whisker in bp["whiskers"]:
+        whisker.set(color=box_color, linewidth=1)
+
+    for cap in bp["caps"]:
+        cap.set(color=box_color, linewidth=1)
+
+    # Overlay scattered raw data
+    rng = np.random.default_rng(0)
+    for i, y in enumerate(data_groups):
+        x = np.full_like(y, positions[i], dtype=float)
+        jitter = rng.uniform(-0.15, 0.15, size=len(y))
+        ax.scatter(
+            x + jitter,
+            y,
+            s=20,
+            alpha=0.6,
+            color=scatter_color,
+            edgecolors="none",
+        )
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(ylabel)
+    ax.grid(False)
+
+
+def plot_settling_time(df: pd.DataFrame):
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    state_labels = ["V (L)", "X (g/L)", "S (g/L)"]
+    data_groups: list[np.ndarray] = []
+
+    # Expected CSV schema from MATLAB export is long-format:
+    # run_label, timestamp, case_id, metric, state, state_label, value
+    if {"state_label", "value"}.issubset(df.columns):
+        for label in state_labels:
+            vals = df.loc[df["state_label"] == label, "value"].dropna().to_numpy()
+            data_groups.append(vals)
+    elif {"state", "value"}.issubset(df.columns):
+        state_ids = ["x1", "x2", "x3"]
+        for sid in state_ids:
+            vals = df.loc[df["state"] == sid, "value"].dropna().to_numpy()
+            data_groups.append(vals)
+    else:
+        raise ValueError(
+            "Unsupported settling dataframe schema. "
+            "Expected long-format columns with state/state_label and value."
+        )
+
+    scattered_boxplot(
+        ax=ax,
+        data_groups=data_groups,
+        labels=state_labels,
+        box_color=PLOT_CONVENTION["case_1_color_hex"],
+        scatter_color=PLOT_CONVENTION["case_1_color_hex"],
+        ylabel="Settling time (h)",
+    )
+
+    ax.axhline(
+        REFERENCE_TIME_H,
+        color=PLOT_CONVENTION["guideline_color_hex"],
+        linewidth=1,
+    )
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_np_by_case(df: pd.DataFrame):
+    fig, ax = plt.subplots(figsize=(5, 4))
+
+    if df is None or df.empty or "N_p" not in df.columns:
+        ax.text(0.5, 0.5, "No $N_p$ data available", ha="center", va="center")
+        ax.set_axis_off()
+        fig.tight_layout()
+        return fig
+
+    df_local = df.copy()
+    if "run_label" in df_local.columns:
+        # Normalize common label variants from text parsing.
+        df_local["run_label"] = (
+            df_local["run_label"]
+            .astype(str)
+            .str.strip()
+            .replace({"run1": "Case 1", "run2": "Case 2"})
+        )
+    else:
+        df_local["run_label"] = "Case 1"
+
+    df_local["N_p"] = pd.to_numeric(df_local["N_p"], errors="coerce")
+
+    groups = []
+    labels = []
+    colors = []
+
+    for case_label, color_key in [
+        ("Case 1", "case_1_color_hex"),
+        ("Case 2", "case_2_color_hex"),
+    ]:
+        subset = df_local[df_local["run_label"] == case_label]["N_p"].dropna().to_numpy()
+        if len(subset) > 0:
+            groups.append(subset)
+            labels.append(case_label)
+            colors.append(PLOT_CONVENTION[color_key])
+
+    if len(groups) == 0:
+        ax.text(0.5, 0.5, "No $N_p$ data available", ha="center", va="center")
+        ax.set_axis_off()
+        fig.tight_layout()
+        return fig
+
+    positions = np.arange(1, len(groups) + 1)
+
+    bp = ax.boxplot(
+        groups,
+        positions=positions,
+        widths=0.5,
+        patch_artist=True,
+        showfliers=False,
+        whis=1.5,
+    )
+
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set(facecolor=color, alpha=0.25, edgecolor=color, linewidth=1)
+
+    for median, color in zip(bp["medians"], colors):
+        median.set(color=color, linewidth=1.5)
+
+    rng = np.random.default_rng(0)
+    for i, (y, color) in enumerate(zip(groups, colors)):
+        x = np.full_like(y, positions[i], dtype=float)
+        jitter = rng.uniform(-0.15, 0.15, size=len(y))
+        ax.scatter(
+            x + jitter,
+            y,
+            s=20,
+            alpha=0.6,
+            color=color,
+            edgecolors="none",
+        )
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Prediction horizon $N_p$ (–)")
+    ax.grid(False)
+
+    fig.tight_layout()
+    return fig
 
 
 if __name__ == "__main__":
     data = load_settling_and_np_data()
-    print("Loaded DataFrames (focused set):")
-    for name, df in data.items():
-        print(f"- {name}: {df.shape[0]} rows x {df.shape[1]} cols")
-    print("\nPlot convention:")
-    for k, v in get_plot_convention().items():
-        print(f"- {k}: {v}")
+
+    settling_df = data["settling_time"]
+    np_df = data["np_by_case"]
+
+    fig_a = plot_settling_time(settling_df)
+    fig_b = plot_np_by_case(np_df)
+
+    plt.show()
+    print('Done')
