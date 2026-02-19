@@ -2,7 +2,6 @@
 % Fit on all surrogate_data_<i>.mat files:
 %   SSdU: Cheb5 in x on grid f = (1:N)/N  (length N)
 %   SSE : Cheb5 in x on grid f = (1:N)/N  (length N)
-%   time: t = (m/10)^alfa*(p/30)^beta*softmax(cheb3(x,c)), on grid f (length N)
 
 clear; close all; clc
 rng(1)
@@ -25,10 +24,10 @@ end
 x_all     = [];
 SSdU_all  = [];
 SSE_all   = [];
-t_all     = [];
-m_all     = [];
-p_all     = [];
 file_id   = [];
+f_cases    = {};
+SSdU_cases = {};
+SSE_cases  = {};
 
 for kf = 1:numel(files)
     S = load(fullfile(files(kf).folder, files(kf).name));
@@ -42,13 +41,7 @@ for kf = 1:numel(files)
     f  = (1:N).'/N;
     x  = 2*f - 1;
 
-    % Decode m,p
-    m = out.theta(3) + 1;
-    p = out.theta(2) + m;
-
     % Signals
-    time = cumsum(out.case(1).RUNTIME) + cumsum(out.case(2).RUNTIME);
-
     SSdU = [0; cumsum(out.case(1).SSdU)] + [0; cumsum(out.case(2).SSdU)];
     SSdU = SSdU / SSdU(end);
 
@@ -59,19 +52,19 @@ for kf = 1:numel(files)
     if numel(SSdU) ~= N
         error("File %s: expected SSdU length N, got %d (N=%d).", files(kf).name, numel(SSdU), N);
     end
-    if numel(SSE) ~= N || numel(time) ~= N
-        error("File %s: expected SSE and time length N, got SSE=%d, time=%d (N=%d).", ...
-            files(kf).name, numel(SSE), numel(time), N);
+    if numel(SSE) ~= N
+        error("File %s: expected SSE length N, got %d (N=%d).", files(kf).name, numel(SSE), N);
     end
 
     % Append
     x_all    = [x_all;    x];
     SSdU_all = [SSdU_all; SSdU];
     SSE_all  = [SSE_all;  SSE];
-    t_all    = [t_all;    time];
-    m_all    = [m_all;    repmat(m, N, 1)];
-    p_all    = [p_all;    repmat(p, N, 1)];
     file_id  = [file_id;  repmat(kf, N, 1)];
+
+    f_cases{end+1} = f;
+    SSdU_cases{end+1} = SSdU;
+    SSE_cases{end+1} = SSE;
 end
 
 % -----------------------------
@@ -119,19 +112,6 @@ else
 end
 
 % -----------------------------
-% Fit time model
-%   t = (m/10)^alfa * (p/30)^beta * softmax(cheb3(x,c))
-% theta = [alfa; beta; c0; c1; c2; c3]
-% -----------------------------
-theta0_time = [1.0; 1.7; 1e3; 1e3; 1e2; 1e1];
-
-theta_time = fminunc(@(th) obj_time(th, x_all, m_all, p_all, t_all), theta0_time, opts);
-
-alfa = theta_time(1);
-beta = theta_time(2);
-cT   = theta_time(3:6);
-
-% -----------------------------
 % Print coefficients
 % -----------------------------
 fprintf('Cheb5 coeffs SSdU (c0..c5):\n');
@@ -139,11 +119,6 @@ fprintf('% .6e  ', c_SSdU); fprintf('\n\n');
 
 fprintf('Cheb5 coeffs SSE  (c0..c5):\n');
 fprintf('% .6e  ', c_SSE); fprintf('\n\n');
-
-fprintf('Time params:\n');
-fprintf('alfa = %.6g, beta = %.6g\n', alfa, beta);
-fprintf('c_time (c0..c3):\n');
-fprintf('% .6e  ', cT); fprintf('\n');
 
 fprintf('\nR^2 on aggregated fit data:\n');
 fprintf('R^2(SSdU) = %.6f\n', R2_SSdU);
@@ -172,71 +147,57 @@ fprintf(fid, "R^2(SSE)  = %.10f\n", R2_SSE);
 %% -----------------------------
 % Quick diagnostics plots (optional)
 % -----------------------------
-S = load(fullfile(files(1).folder, files(1).name));
-out = S.out;
-N   = length(out.case(1).SSE);
+[f_ref, SSdU_mat, SSE_mat] = build_case_matrices(f_cases, SSdU_cases, SSE_cases);
+x_ref = 2*f_ref - 1;
+SSdU_hat_ref = clamp01(Cheb5(x_ref, c_SSdU));
+SSE_hat_ref  = clamp01(Cheb5(x_ref, c_SSE));
 
-f   = (1:N).'/N;  x = 2*f - 1;
+SSdU_min = min(SSdU_mat, [], 2);
+SSdU_max = max(SSdU_mat, [], 2);
+SSdU_mean = mean(SSdU_mat, 2);
 
-m = out.theta(3) + 1;
-p = out.theta(2) + m;
+SSE_min = min(SSE_mat, [], 2);
+SSE_max = max(SSE_mat, [], 2);
+SSE_mean = mean(SSE_mat, 2);
 
-time = cumsum(out.case(1).RUNTIME) + cumsum(out.case(2).RUNTIME);
-SSdU = [0; cumsum(out.case(1).SSdU)] + [0; cumsum(out.case(2).SSdU)];
-SSdU = SSdU / SSdU(end);
-SSE  = cumsum(out.case(1).SSE) + cumsum(out.case(2).SSE);
-SSE  = SSE / SSE(end);
+fig_side = figure;
+subplot(1,2,1);
+plot_case_envelope_with_fit(f_ref, SSdU_min, SSdU_max, SSdU_mean, SSdU_hat_ref, ...
+    'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{TV}}(z)}{\left.J_{\mathrm{TV}}\right|_{z=1}}$', ...
+    'a', plotColors, fontSize, true);
 
-SSdU_hat = clamp01(Cheb5(x, c_SSdU));
-SSE_hat  = clamp01(Cheb5(x, c_SSE));
-t_hat    = time_model(x, m, p, alfa, beta, cT); %#ok<NASGU>
+subplot(1,2,2);
+plot_case_envelope_with_fit(f_ref, SSE_min, SSE_max, SSE_mean, SSE_hat_ref, ...
+    'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{track}}(z)}{\left.J_{\mathrm{track}}\right|_{z=1}}$', ...
+    'b', plotColors, fontSize, true);
+set_fig_size(1300, 520);
 
-figure; plot(f, SSdU, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
-plot(f, SSdU_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
-xlim([0, 1]);
-ylim([0, 1.005]);
-xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{TV}}$');
+fig_stack = figure;
+subplot(2,1,1);
+plot_case_envelope_with_fit(f_ref, SSdU_min, SSdU_max, SSdU_mean, SSdU_hat_ref, ...
+    'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{TV}}(z)}{\left.J_{\mathrm{TV}}\right|_{z=1}}$', ...
+    'a', plotColors, fontSize, false);
 
-grid off; box off
-set_font_size(fontSize);
-set_fig_size(920, 520);
-format_tick(1, 1);
+subplot(2,1,2);
+plot_case_envelope_with_fit(f_ref, SSE_min, SSE_max, SSE_mean, SSE_hat_ref, ...
+    'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{track}}(z)}{\left.J_{\mathrm{track}}\right|_{z=1}}$', ...
+    'b', plotColors, fontSize, true);
+set_fig_size(920, 900);
 
-figure; plot(f, SSE, '-', 'LineWidth', 2.0, 'Color', plotColors(1,:)); hold on
-plot(f, SSE_hat, '--', 'LineWidth', 2.0, 'Color', plotColors(2,:))
-xlim([0, 1]);
-ylim([0, 1.005]);
-xlabel('Fidelity $z$ (dimensionless)'); ylabel('$J_{\mathrm{track}}$');
-grid off; box off
-set_font_size(fontSize);
-set_fig_size(920, 520);
-format_tick(1, 1);
-
-% figure; plot(f, time, 'LineWidth', 1.5); hold on
-% plot(f, t_hat, '--', 'LineWidth', 1.5)
-% xlabel('f'); ylabel('Time'); grid on
-% legend('Data','Time model','Location','best')
-
-% figure; plot(f, time./t_hat); grid on
-% xlabel('f'); ylabel('time / time_hat')
+plotDir = fullfile("results", "graphial_results");
+if ~isfolder(plotDir)
+    mkdir(plotDir);
+end
+print(fig_side, fullfile(plotDir, "surrogate_diagnostics_side_by_side.png"), "-dpng", "-r300");
+print(fig_side, fullfile(plotDir, "surrogate_diagnostics_side_by_side.pdf"), "-dpdf", "-bestfit");
+print(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked.png"), "-dpng", "-r300");
+print(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked.pdf"), "-dpdf", "-bestfit");
 
 % =============================
 % Objectives
 % =============================
 function J = obj_Cheb5(c, x, y)
     r = y - Cheb5(x, c);
-    J = r.'*r;
-    if ~isfinite(J); J = realmax; end
-end
-
-function J = obj_time(th, x, m, p, t)
-    alfa = th(1);
-    beta = th(2);
-    cT   = th(3:6);
-
-    t_hat = time_model(x, m, p, alfa, beta, cT);
-
-    r = log(t) - log(t_hat);
     J = r.'*r;
     if ~isfinite(J); J = realmax; end
 end
@@ -259,32 +220,6 @@ function y = Cheb5(x, c)
     y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3 + c(5)*T4 + c(6)*T5;
 end
 
-function y = Cheb3(x, c)
-    c = c(:);
-    if numel(c) ~= 4
-        error('Cheb3 expects 4 coefficients (c0..c3).');
-    end
-    T0 = ones(size(x));
-    T1 = x;
-    T2 = 2*x.^2 - 1;
-    T3 = 4*x.^3 - 3*x;
-
-    y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3;
-end
-
-function t_hat = time_model(x, m, p, alfa, beta, cT)
-    k = 20;
-    softplus = @(z) log1p(exp(k*z)) / k;
-
-    g = Cheb3(x, cT);
-    s = 1 + softplus(g - 1);
-
-    scale = (m/10).^alfa .* (p/30).^beta;
-    t_hat = scale .* s;
-
-    t_hat = max(t_hat, 1);
-end
-
 function y = clamp01(y)
     y = min(max(y, 0), 1);
 end
@@ -299,4 +234,57 @@ function r2 = compute_r2(y, y_hat)
     else
         r2 = 1 - sse_res / sse_tot;
     end
+end
+
+function [f_ref, SSdU_mat, SSE_mat] = build_case_matrices(f_cases, SSdU_cases, SSE_cases)
+    K = numel(f_cases);
+    if K == 0
+        error('No cases available for diagnostics plotting.');
+    end
+
+    f_ref = f_cases{1}(:);
+    Nref = numel(f_ref);
+    SSdU_mat = nan(Nref, K);
+    SSE_mat = nan(Nref, K);
+
+    for k = 1:K
+        fk = f_cases{k}(:);
+        SSdUk = SSdU_cases{k}(:);
+        SSEk = SSE_cases{k}(:);
+
+        if numel(fk) == Nref && max(abs(fk - f_ref)) < 1e-12
+            SSdU_mat(:, k) = SSdUk;
+            SSE_mat(:, k) = SSEk;
+        else
+            SSdU_mat(:, k) = interp1(fk, SSdUk, f_ref, 'linear', 'extrap');
+            SSE_mat(:, k) = interp1(fk, SSEk, f_ref, 'linear', 'extrap');
+        end
+    end
+end
+
+function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab, titleLabel, plotColors, fontSize, showXLabel)
+    if nargin < 11
+        showXLabel = true;
+    end
+
+    fill([f; flipud(f)], [y_min; flipud(y_max)], plotColors(1,:), ...
+        'FaceAlpha', 0.20, 'EdgeColor', 'none'); hold on
+    plot(f, y_mean, '-', 'LineWidth', 2.2, 'Color', plotColors(1,:));
+    plot(f, y_hat, '--', 'LineWidth', 2.2, 'Color', plotColors(2,:));
+
+    xlim([0, 1]);
+    ylim([0, 1.005]);
+    if showXLabel
+        xlabel(xlab);
+    else
+        xlabel("");
+    end
+    ylabel(ylab);
+    t = title(sprintf('\\textbf{%s}', titleLabel), 'Interpreter', 'latex');
+    t.Units = 'normalized';
+    t.Position(1) = 0;
+    t.HorizontalAlignment = 'left';
+    grid off; box off
+    set_font_size(fontSize);
+    format_tick(1, 1);
 end
