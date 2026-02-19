@@ -26,10 +26,12 @@
 
 %% Dependencies
 clear; close all; clc
-addpath(genpath("dependencies"));
+scriptDir = fileparts(mfilename("fullpath"));
+projectRoot = fileparts(scriptDir);
+addpath(genpath(fullfile(projectRoot, "dependencies")));
 
 %% Paths
-rootFolder = "results";
+rootFolder = fullfile(projectRoot, "results");
 graphicsFolder = fullfile(rootFolder, "graphial_results");
 numericalFolder = fullfile(rootFolder, "numerical results");
 datasets = [

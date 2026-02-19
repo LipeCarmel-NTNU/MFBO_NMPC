@@ -11,7 +11,11 @@ clear; close all; clc;
 
 % User-level configuration for input folders and analysis scope.
 cfg = struct();
-cfg.test_run_root = fullfile("results", "test_run");
+scriptDir = fileparts(mfilename("fullpath"));
+cfg.project_root = fileparts(scriptDir);
+cfg.results_root = fullfile(cfg.project_root, "results");
+cfg.test_run_root = fullfile(cfg.results_root, "test_run");
+cfg.analysis_dir = scriptDir;
 cfg.run_folders = [
     struct("label","Case 1","subfolder","run1_full_f1_no_noise");
     struct("label","Case 2","subfolder","run2_full_f1_no_noise")
@@ -35,7 +39,8 @@ cfg.optim_mean_sim_time_h = 8.09603;
 diagnostics = run_full_run_diagnostics(cfg);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
-write_numerical_results(diagnostics, cfg.settling_tol, cfg.optim_mean_sim_time_h);
+write_numerical_results(diagnostics, cfg.settling_tol, cfg.optim_mean_sim_time_h, cfg.results_root);
+export_boxplot_data_csv(diagnostics, cfg.analysis_dir);
 plot_summary_boxplots(diagnostics, cfg.optim_mean_sim_time_h);
 plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
@@ -546,7 +551,57 @@ end
 end
 
 
-function write_numerical_results(diagnostics, settlingTol, settlingTimeRefH)
+function export_boxplot_data_csv(diagnostics, analysisDir)
+caseTable = diagnostics.per_case;
+if isempty(caseTable)
+    return
+end
+if ~isfolder(analysisDir)
+    mkdir(analysisDir);
+end
+
+settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+errorColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "final_err_x"));
+
+settlingLong = stack(caseTable(:, ["run_label","timestamp","case_id",settlingColumns]), ...
+    settlingColumns, "NewDataVariableName", "value", "IndexVariableName", "source_col");
+settlingLong.metric = repmat("settling_time_h", height(settlingLong), 1);
+settlingLong.state = extractBetween(string(settlingLong.source_col), "settle_", "_h");
+settlingLong.state_label = map_state_labels_from_id(settlingLong.state);
+settlingLong = movevars(settlingLong, ["metric","state","state_label","value"], "After", "case_id");
+settlingLong = removevars(settlingLong, "source_col");
+
+errorLong = stack(caseTable(:, ["run_label","timestamp","case_id",errorColumns]), ...
+    errorColumns, "NewDataVariableName", "value", "IndexVariableName", "source_col");
+errorLong.metric = repmat("final_relative_error_pct", height(errorLong), 1);
+errorLong.state = extractBetween(string(errorLong.source_col), "final_err_", "_pct");
+errorLong.state_label = map_state_labels_from_id(errorLong.state);
+errorLong = movevars(errorLong, ["metric","state","state_label","value"], "After", "case_id");
+errorLong = removevars(errorLong, "source_col");
+
+writetable(settlingLong, fullfile(analysisDir, "boxplot_settling_time_data.csv"));
+writetable(errorLong, fullfile(analysisDir, "boxplot_final_error_data.csv"));
+end
+
+
+function stateLabels = map_state_labels_from_id(stateId)
+stateLabels = strings(numel(stateId), 1);
+for i = 1:numel(stateId)
+    switch string(stateId(i))
+        case "x1"
+            stateLabels(i) = "V (L)";
+        case "x2"
+            stateLabels(i) = "X (g/L)";
+        case "x3"
+            stateLabels(i) = "S (g/L)";
+        otherwise
+            stateLabels(i) = string(stateId(i));
+    end
+end
+end
+
+
+function write_numerical_results(diagnostics, settlingTol, settlingTimeRefH, resultsRoot)
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -557,7 +612,7 @@ if isempty(settlingColumns)
     return
 end
 
-outDir = fullfile("results", "numerical results");
+outDir = fullfile(resultsRoot, "numerical results");
 if ~isfolder(outDir)
     mkdir(outDir);
 end
