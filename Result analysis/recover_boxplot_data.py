@@ -36,7 +36,7 @@ PLOT_CONVENTION = {
     "panel_b": "Prediction horizon N_p by case",
     "case_1_color_hex": "#1f77b4",
     "case_2_color_hex": "#d62728",
-    "guideline_color_hex": "#7f7f7f",
+    "guideline_color_hex": "#AF58BA",
     "scatter_color_hex": "#7f7f7f",
 }
 
@@ -236,6 +236,30 @@ def scattered_boxplot(
     ax.grid(False)
 
 
+def draw_guideline_behind_boxes(
+    ax,
+    y: float,
+    positions: np.ndarray,
+    box_width: float = 0.5,
+    pad: float = 0.02,
+    blocked_positions: list[float] | None = None,
+    **line_kwargs,
+):
+    """Draw a horizontal guideline behind/around box bodies, not through them."""
+    x_min, x_max = ax.get_xlim()
+    half_w = box_width / 2.0 + pad
+    blocked_src = positions if blocked_positions is None else blocked_positions
+    blocked = sorted((float(p - half_w), float(p + half_w)) for p in blocked_src)
+
+    cursor = x_min
+    for left, right in blocked:
+        if left > cursor:
+            ax.hlines(y, cursor, left, **line_kwargs)
+        cursor = max(cursor, right)
+    if cursor < x_max:
+        ax.hlines(y, cursor, x_max, **line_kwargs)
+
+
 def plot_settling_time(df: pd.DataFrame):
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -268,8 +292,12 @@ def plot_settling_time(df: pd.DataFrame):
         ylabel="Settling time (h)",
     )
 
-    ax.axhline(
-        REFERENCE_TIME_H,
+    draw_guideline_behind_boxes(
+        ax=ax,
+        y=REFERENCE_TIME_H,
+        positions=np.arange(1, len(state_labels) + 1),
+        blocked_positions=[3],
+        box_width=0.5,
         color=PLOT_CONVENTION["guideline_color_hex"],
         linewidth=2.6,
         alpha=0.45,
