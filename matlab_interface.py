@@ -86,13 +86,14 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> list[float]:
                 f"theta[{3 + i}]: q[{i}] must be in [-3, 3], got {q_value}"
             )
 
-    # Validate r^(u) values: in [-3, 3]
-    for i in range(3):
-        r_u_value = values[6 + i]
-        if not _is_in_range(r_u_value, -3, 3):
-            raise ValueError(
-                f"theta[{6 + i}]: r^(u)[{i}] must be in [-3, 3], got {r_u_value}"
-            )
+    # Validate r^(u) values: intentionally disabled.
+    # We allow very negative exponents (e.g., -1000) so 10^r_u is effectively zero in MATLAB.
+    # for i in range(3):
+    #     r_u_value = values[6 + i]
+    #     if not _is_in_range(r_u_value, -3, 3):
+    #         raise ValueError(
+    #             f"theta[{6 + i}]: r^(u)[{i}] must be in [-3, 3], got {r_u_value}"
+    #         )
 
     # Validate r^(Delta u) values: in [-3, 3]
     for i in range(3):
@@ -115,6 +116,7 @@ def send_theta(theta: Sequence[float] | Iterable[float]) -> None:
 def write_theta(theta: Sequence[float]) -> None:
     """Write theta values to ``inbox/theta.txt`` after lock negotiation."""
 
+    wait_start = time.time()
     while LOCK_FILE.exists():
         time.sleep(5)
 
@@ -127,6 +129,7 @@ def write_theta(theta: Sequence[float]) -> None:
 def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
     """Read optimization results ensuring lock coordination."""
 
+    wait_start = time.time()
     while LOCK_FILE.exists():
         time.sleep(5)
 
@@ -185,5 +188,7 @@ if __name__ == "__main__":
     dummy_theta = [f, theta_p, theta_m] + q + r_u + r_delta_u
     
     send_theta(dummy_theta)
+
+
 
 
