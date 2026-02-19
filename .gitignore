@@ -4,5 +4,5 @@
 *.txt
 *.lock
 *.png
-*.png
-/results/graphial_results
+*.pdf
+/results/graphical_results/*
