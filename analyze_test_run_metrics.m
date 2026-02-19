@@ -30,12 +30,13 @@ cfg.final_pareto_timestamps = [
     "20260211_134235"
 ];
 cfg.settling_tol = 0.05;
+cfg.optim_mean_sim_time_h = 8.09603;
 
 diagnostics = run_full_run_diagnostics(cfg);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
-write_numerical_results(diagnostics, cfg.settling_tol);
-plot_summary_boxplots(diagnostics);
+write_numerical_results(diagnostics, cfg.settling_tol, cfg.optim_mean_sim_time_h);
+plot_summary_boxplots(diagnostics, cfg.optim_mean_sim_time_h);
 plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
 %% FUNCTIONS
@@ -343,6 +344,17 @@ if ~isempty(settlingColumns)
     for i = 1:numel(settlingColumns)
         fprintf("  %s: %.6g\n", settlingColumns{i}, medianSettling(i));
     end
+
+    timeLimitH = cfg.optim_mean_sim_time_h;
+    fprintf("Fraction settled before %.6g h:\n", timeLimitH);
+    for i = 1:numel(settlingColumns)
+        settledBefore = isfinite(caseTable.(settlingColumns{i})) & (caseTable.(settlingColumns{i}) <= timeLimitH);
+        frac = nnz(settledBefore) / height(caseTable);
+        fprintf("  %s: %.2f%% (%d/%d)\n", settlingColumns{i}, 100*frac, nnz(settledBefore), height(caseTable));
+    end
+    settledAllBefore = all(isfinite(settlingData) & (settlingData <= timeLimitH), 2);
+    fracAll = nnz(settledAllBefore) / height(caseTable);
+    fprintf("  all states: %.2f%% (%d/%d)\n", 100*fracAll, nnz(settledAllBefore), height(caseTable));
 end
 
 if ~isempty(diagnostics.missing_pareto_timestamps)
@@ -443,7 +455,7 @@ end
 end
 
 
-function plot_summary_boxplots(diagnostics)
+function plot_summary_boxplots(diagnostics, settlingTimeRefH)
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -457,6 +469,7 @@ if ~isempty(settlingColumns)
     subplot(1, 2, 1);
     stateLabels = get_state_display_labels(numel(settlingColumns));
     boxplot(table2array(caseTable(:, settlingColumns)), "Labels", stateLabels);
+    yline(settlingTimeRefH, "-", "LineWidth", 1.2, "Color", [0.2 0.2 0.2]);
     xlabel("State");
     ylabel("Settling time (h)");
     title("Settling Time");
@@ -533,7 +546,7 @@ end
 end
 
 
-function write_numerical_results(diagnostics, settlingTol)
+function write_numerical_results(diagnostics, settlingTol, settlingTimeRefH)
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -565,4 +578,16 @@ for i = 1:numel(settlingColumns)
     fprintf(fid, "Interpretation: %.2f%% of runs had final error > %.2f%% for %s.\n", ...
         pct, 100 * settlingTol, col);
 end
+
+fprintf(fid, "\nFraction settled before %.6g h:\n", settlingTimeRefH);
+for i = 1:numel(settlingColumns)
+    col = settlingColumns{i};
+    settledBefore = isfinite(caseTable.(col)) & (caseTable.(col) <= settlingTimeRefH);
+    frac = nnz(settledBefore) / height(caseTable);
+    fprintf(fid, "  %s: %.2f%% (%d/%d)\n", col, 100*frac, nnz(settledBefore), height(caseTable));
+end
+settlingData = table2array(caseTable(:, settlingColumns));
+settledAllBefore = all(isfinite(settlingData) & (settlingData <= settlingTimeRefH), 2);
+fracAll = nnz(settledAllBefore) / height(caseTable);
+fprintf(fid, "  all states: %.2f%% (%d/%d)\n", 100*fracAll, nnz(settledAllBefore), height(caseTable));
 end
