@@ -24,7 +24,7 @@ This file defines the current project-wide plotting conventions used in analysis
 
 ## Export policy
 - Save figures as PNG (raster) and PDF (vector) through shared helpers.
-- Place exported graphics under `results/graphial_results/`.
+- Place exported graphics under `results/graphical_results/`.
 
 ## Pareto plots
 - Use log-log axes when plotting `J_{TV}` vs `J_{track}`.

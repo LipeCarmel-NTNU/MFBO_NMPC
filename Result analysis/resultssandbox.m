@@ -32,7 +32,7 @@ addpath(genpath(fullfile(projectRoot, "dependencies")));
 
 %% Paths
 rootFolder = fullfile(projectRoot, "results");
-graphicsFolder = fullfile(rootFolder, "graphial_results");
+graphicsFolder = fullfile(rootFolder, "graphical_results");
 numericalFolder = fullfile(rootFolder, "numerical results");
 datasets = [
     struct("name","Case 1", "csvPath", fullfile(rootFolder, "run1", "results.csv"), "outDir", fullfile(rootFolder, "run1"));

@@ -401,7 +401,7 @@ if __name__ == "__main__":
     fig_a = plot_settling_time(settling_df)
     fig_b = plot_np_by_case(np_df)
 
-    out_dir = Path(__file__).resolve().parent.parent / "results" / "graphial_results"
+    out_dir = Path(__file__).resolve().parent.parent / "results" / "graphical_results"
     out_dir.mkdir(parents=True, exist_ok=True)
     export_dpi = 600
     fig_a.savefig(out_dir / "python_settling_time_boxplot.png", dpi=300, bbox_inches="tight")

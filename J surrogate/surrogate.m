@@ -5,7 +5,9 @@
 
 clear; close all; clc
 rng(1)
-addpath(genpath("dependencies"));
+scriptDir = fileparts(mfilename("fullpath"));
+projectRoot = fileparts(scriptDir);
+addpath(genpath(fullfile(projectRoot, "dependencies")));
 
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
@@ -13,7 +15,7 @@ set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 18;
 plotColors = good_colors(2);
 
-files = dir("surrogate_data_*.mat");
+files = dir(fullfile(scriptDir, "surrogate_data_*.mat"));
 if isempty(files)
     error('No files matching surrogate_data_*.mat in the current folder.');
 end
@@ -125,7 +127,7 @@ fprintf('R^2(SSdU) = %.6f\n', R2_SSdU);
 fprintf('R^2(SSE)  = %.6f\n', R2_SSE);
 
 % Export numerical summary for SSdU/SSE surrogate coefficients.
-numDir = fullfile("results", "numerical results");
+numDir = fullfile(projectRoot, "results", "numerical results");
 if ~isfolder(numDir)
     mkdir(numDir);
 end
@@ -184,7 +186,7 @@ plot_case_envelope_with_fit(f_ref, SSE_min, SSE_max, SSE_mean, SSE_hat_ref, ...
     'b', plotColors, fontSize, true);
 set_fig_size(920, 900);
 
-plotDir = fullfile("results", "graphial_results");
+plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir)
     mkdir(plotDir);
 end
