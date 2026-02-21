@@ -191,6 +191,7 @@ def scattered_boxplot(
     box_color: str,
     scatter_color: str,
     ylabel: str,
+    show_scatter: bool = True,
 ):
     positions = np.arange(1, len(data_groups) + 1)
 
@@ -215,20 +216,21 @@ def scattered_boxplot(
     for cap in bp["caps"]:
         cap.set(color=box_color, linewidth=1, zorder=3)
 
-    # Overlay scattered raw data
-    rng = np.random.default_rng(0)
-    for i, y in enumerate(data_groups):
-        x = np.full_like(y, positions[i], dtype=float)
-        jitter = rng.uniform(-0.15, 0.15, size=len(y))
-        ax.scatter(
-            x + jitter,
-            y,
-            s=20,
-            alpha=0.6,
-            color=scatter_color,
-            edgecolors="none",
-            zorder=2,
-        )
+    if show_scatter:
+        # Overlay scattered raw data
+        rng = np.random.default_rng(0)
+        for i, y in enumerate(data_groups):
+            x = np.full_like(y, positions[i], dtype=float)
+            jitter = rng.uniform(-0.15, 0.15, size=len(y))
+            ax.scatter(
+                x + jitter,
+                y,
+                s=20,
+                alpha=0.6,
+                color=scatter_color,
+                edgecolors="none",
+                zorder=2,
+            )
 
     ax.set_xticks(positions)
     ax.set_xticklabels(labels)
@@ -290,6 +292,7 @@ def plot_settling_time(df: pd.DataFrame):
         box_color=PLOT_CONVENTION["case_1_color_hex"],
         scatter_color=PLOT_CONVENTION["scatter_color_hex"],
         ylabel="Settling time (h)",
+        show_scatter=True,
     )
 
     draw_guideline_behind_boxes(
@@ -369,13 +372,16 @@ def plot_np_by_case(df: pd.DataFrame):
         median.set(color=color, linewidth=1.5)
 
     rng = np.random.default_rng(0)
-    for i, (y, color) in enumerate(zip(groups, colors)):
+    for i, (y, color, case_label) in enumerate(zip(groups, colors, labels)):
         x = np.full_like(y, positions[i], dtype=float)
         jitter = rng.uniform(-0.15, 0.15, size=len(y))
+        marker = "o"
+        size = 36
         ax.scatter(
             x + jitter,
             y,
-            s=20,
+            s=size,
+            marker=marker,
             alpha=0.6,
             color=PLOT_CONVENTION["scatter_color_hex"],
             edgecolors="none",
@@ -390,6 +396,33 @@ def plot_np_by_case(df: pd.DataFrame):
 
     fig.tight_layout()
     return fig
+
+
+def print_np_points_by_case(df: pd.DataFrame):
+    print("\nN_p points used in boxplot:")
+    if df is None or df.empty or "N_p" not in df.columns:
+        print("No N_p data available")
+        return
+
+    df_local = df.copy()
+    if "run_label" in df_local.columns:
+        df_local["run_label"] = (
+            df_local["run_label"]
+            .astype(str)
+            .str.strip()
+            .replace({"run1": "Case 1", "run2": "Case 2"})
+        )
+    else:
+        df_local["run_label"] = "Case 1"
+
+    df_local["N_p"] = pd.to_numeric(df_local["N_p"], errors="coerce")
+
+    for case_label in ["Case 1", "Case 2"]:
+        vals = df_local.loc[df_local["run_label"] == case_label, "N_p"].dropna().to_list()
+        if vals:
+            print(f"{case_label} ({len(vals)}): {vals}")
+        else:
+            print(f"{case_label} (0): []")
 
 
 if __name__ == "__main__":
@@ -409,5 +442,6 @@ if __name__ == "__main__":
     fig_a.savefig(out_dir / "python_settling_time_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
     fig_b.savefig(out_dir / "python_np_by_case_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
 
+    print_np_points_by_case(np_df)
     plt.show()
     print('Done')
