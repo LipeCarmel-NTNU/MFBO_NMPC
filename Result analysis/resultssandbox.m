@@ -59,7 +59,7 @@ end
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
-fontSize = 18;
+fontSize = 20;
 
 %% Colors
 plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
@@ -529,17 +529,17 @@ hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3
 hCurve.Color = plotColors(3, :);
 
 % Pareto points per case (filled markers) drawn after curve to stay on top.
-scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 40, plotColors(1,:), ...
+scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 80, plotColors(1,:), ...
     "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
     "LineWidth", 1.4);
-scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 40, plotColors(2,:), ...
+scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 90, plotColors(2,:), ...
     "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
     "LineWidth", 1.4);
 
 % Circle only final (combined) Pareto points with a visible gap.
-scatter(ax, double(Tf.SSdU), double(Tf.SSE), 112, plotColors(3,:), ...
+scatter(ax, double(Tf.SSdU), double(Tf.SSE), 300, plotColors(3,:), ...
     "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), ...
-    "LineWidth", 1.1);
+    "LineWidth", 2);
 
 set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
 xlim(ax, [1e-2, 2e0]);

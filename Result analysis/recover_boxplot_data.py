@@ -31,6 +31,7 @@ plt.rcParams.update(
         "font.serif": ["Computer Modern Roman", "CMU Serif", "DejaVu Serif"],
         "mathtext.fontset": "cm",
         "axes.unicode_minus": False,
+        "font.size": 12,
     }
 )
 
