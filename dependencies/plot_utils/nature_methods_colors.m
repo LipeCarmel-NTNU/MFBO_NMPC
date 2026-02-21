@@ -2,7 +2,7 @@ function colors = nature_methods_colors(n)
 %NATURE_METHODS_COLORS Wong (2011) Nat Methods colorblind-safe palette.
 %   If called with no inputs, returns a struct of named colors (RGB in [0,1]).
 %   Otherwise returns an n-by-3 matrix in this sequence:
-%     blue, vermillion, orange, bluish green, reddish purple, sky blue, yellow
+%     blue, bluish green, reddish purple, vermillion, orange, sky blue, yellow
 %
 % Source: Wong, B. Points of view: Color blindness. Nat Methods 8, 441 (2011).
 % https://doi.org/10.1038/nmeth.1618
@@ -30,8 +30,8 @@ function colors = nature_methods_colors(n)
         error('n must be an integer scalar.');
     end
 
-    order = {'Blue', 'Vermillion', 'Orange', 'BluishGreen', ...
-             'ReddishPurple', 'SkyBlue', 'Yellow'};
+    order = {'Blue', 'BluishGreen', 'ReddishPurple', 'Vermillion', ...
+             'Orange', 'SkyBlue', 'Yellow'};
 
     if n > numel(order)
         error('n must be <= %d.', numel(order));

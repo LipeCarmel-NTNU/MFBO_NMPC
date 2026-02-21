@@ -8,12 +8,14 @@
 %   If final relative error is > tol, settling time is NaN.
 %
 clear; close all; clc;
+scriptDir = fileparts(mfilename("fullpath"));
+projectRoot = fileparts(scriptDir);
+addpath(genpath(fullfile(projectRoot, "dependencies")));
 NATURE_COLOR = nature_methods_colors();
 
 % User-level configuration for input folders and analysis scope.
 cfg = struct();
-scriptDir = fileparts(mfilename("fullpath"));
-cfg.project_root = fileparts(scriptDir);
+cfg.project_root = projectRoot;
 cfg.results_root = fullfile(cfg.project_root, "results");
 cfg.test_run_root = fullfile(cfg.results_root, "test_run");
 cfg.analysis_dir = scriptDir;
@@ -42,7 +44,7 @@ diagnostics = run_full_run_diagnostics(cfg);
 print_full_run_report(diagnostics, cfg);
 write_numerical_results(diagnostics, cfg.settling_tol, cfg.optim_mean_sim_time_h, cfg.results_root);
 export_boxplot_data_csv(diagnostics, cfg.analysis_dir);
-plot_summary_boxplots(diagnostics, cfg.optim_mean_sim_time_h);
+plot_summary_boxplots(diagnostics, cfg.optim_mean_sim_time_h, NATURE_COLOR.Orange);
 plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
 %% FUNCTIONS
@@ -461,7 +463,7 @@ end
 end
 
 
-function plot_summary_boxplots(diagnostics, settlingTimeRefH)
+function plot_summary_boxplots(diagnostics, settlingTimeRefH, guidelineColor)
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -475,7 +477,7 @@ if ~isempty(settlingColumns)
     subplot(1, 2, 1);
     stateLabels = get_state_display_labels(numel(settlingColumns));
     boxplot(table2array(caseTable(:, settlingColumns)), "Labels", stateLabels);
-    yline(settlingTimeRefH, "-", "LineWidth", 1.2, "Color", NATURE_COLOR.Orange);
+    yline(settlingTimeRefH, "-", "LineWidth", 1.2, "Color", guidelineColor);
     xlabel("State");
     ylabel("Settling time (h)");
     title("Settling Time");
