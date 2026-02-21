@@ -322,6 +322,124 @@ for k = 1:2
     format_tick(0, 1);
 end
 save_plot_outputs(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), fontSize, 1200, 460);
+
+% z, N_p, N_c by iteration (3x2)
+fig3 = figure("Color", "w");
+tiledlayout(fig3, 3, 2, "Padding", "compact", "TileSpacing", "compact");
+panelLabels3x2 = ["a", "b", "c", "d", "e", "f"];
+
+for k = 1:2
+    T = allT{k};
+    iter = double(T.iteration);
+
+    % Row 1: z by k
+    ax1 = nexttile((1 - 1) * 2 + k); hold(ax1, "on");
+    plot(ax1, iter, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(3, :));
+    plot(ax1, iter, double(T.f), "o", "MarkerSize", 3.5, "Color", plotColors(3, :));
+    ylim(ax1, [0, 1]);
+    xlim(ax1, [1, max(1, height(T))]);
+    ylabel(ax1, "$z$");
+    xlabel(ax1, "");
+    title(ax1, "$\mathbf{" + panelLabels3x2((1 - 1) * 2 + k) + "}$", "Interpreter", "latex");
+    ax1.TitleHorizontalAlignment = "left";
+    set(ax1, "FontSize", fontSize);
+    grid(ax1, "off"); box(ax1, "off");
+    format_tick(0, 1);
+
+    % Row 2: N_p by k
+    ax2 = nexttile((2 - 1) * 2 + k); hold(ax2, "on");
+    plot(ax2, iter, double(T.p), "-", "LineWidth", 2.0, "Color", plotColors(k, :));
+    plot(ax2, iter, double(T.p), "o", "MarkerSize", 3.5, "Color", plotColors(k, :));
+    xlim(ax2, [1, max(1, height(T))]);
+    yminP = min(double(T.p), [], "omitnan");
+    ymaxP = max(double(T.p), [], "omitnan");
+    if isfinite(yminP) && isfinite(ymaxP)
+        ylim(ax2, [max(0, floor(yminP) - 1), ceil(ymaxP) + 1]);
+    end
+    ylabel(ax2, "$N_p$");
+    xlabel(ax2, "");
+    title(ax2, "$\mathbf{" + panelLabels3x2((2 - 1) * 2 + k) + "}$", "Interpreter", "latex");
+    ax2.TitleHorizontalAlignment = "left";
+    set(ax2, "FontSize", fontSize);
+    grid(ax2, "off"); box(ax2, "off");
+    format_tick(0, 0);
+
+    % Row 3: N_c by k (stored as m)
+    ax3 = nexttile((3 - 1) * 2 + k); hold(ax3, "on");
+    plot(ax3, iter, double(T.m), "-", "LineWidth", 2.0, "Color", plotColors(k, :));
+    plot(ax3, iter, double(T.m), "o", "MarkerSize", 3.5, "Color", plotColors(k, :));
+    xlim(ax3, [1, max(1, height(T))]);
+    yminM = min(double(T.m), [], "omitnan");
+    ymaxM = max(double(T.m), [], "omitnan");
+    if isfinite(yminM) && isfinite(ymaxM)
+        ylim(ax3, [max(0, floor(yminM) - 1), ceil(ymaxM) + 1]);
+    end
+    ylabel(ax3, "$N_c$");
+    xlabel(ax3, "$k$ (iteration)");
+    title(ax3, "$\mathbf{" + panelLabels3x2((3 - 1) * 2 + k) + "}$", "Interpreter", "latex");
+    ax3.TitleHorizontalAlignment = "left";
+    set(ax3, "FontSize", fontSize);
+    grid(ax3, "off"); box(ax3, "off");
+    format_tick(0, 0);
+end
+
+save_plot_outputs(fig3, fullfile(outDir, "z_np_nc_vs_iteration_3x2.png"), fontSize, 1200, 980);
+
+% N_c by N_p density maps (side-by-side)
+fig4 = figure("Color", "w");
+tiledlayout(fig4, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+panelLabelsNcNp = ["a", "b"];
+
+for k = 1:2
+    T = allT{k};
+    p = double(T.p);
+    m = double(T.m); % N_c
+    valid = isfinite(p) & isfinite(m);
+    p = p(valid);
+    m = m(valid);
+
+    ax = nexttile; hold(ax, "on");
+    if isempty(p)
+        text(ax, 0.5, 0.5, "No valid $(N_p, N_c)$ data", ...
+            "Units", "normalized", "HorizontalAlignment", "center", "Interpreter", "latex");
+        axis(ax, "off");
+        continue
+    end
+
+    pMin = floor(min(p)); pMax = ceil(max(p));
+    mMin = floor(min(m)); mMax = ceil(max(m));
+    xEdges = (pMin - 0.5):(pMax + 0.5);
+    yEdges = (mMin - 0.5):(mMax + 0.5);
+    counts = histcounts2(p, m, xEdges, yEdges);
+
+    xCenters = xEdges(1:end-1) + 0.5;
+    yCenters = yEdges(1:end-1) + 0.5;
+    imagesc(ax, xCenters, yCenters, counts.');
+    set(ax, "YDir", "normal");
+    colormap(ax, parula(256));
+    cb = colorbar(ax);
+    cb.Label.String = "Count";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+
+    % Overlay points to preserve discrete-location visibility.
+    scatter(ax, p, m, 26, "k", "filled", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
+
+    xlabel(ax, "$N_p$");
+    ylabel(ax, "$N_c$");
+    title(ax, "$\mathbf{" + panelLabelsNcNp(k) + "}$", "Interpreter", "latex");
+    ax.TitleHorizontalAlignment = "left";
+    set(ax, "FontSize", fontSize);
+    xlim(ax, [pMin - 0.5, pMax + 0.5]);
+    ylim(ax, [mMin - 0.5, mMax + 0.5]);
+    xticks(ax, pMin:pMax);
+    yticks(ax, mMin:mMax);
+    grid(ax, "off");
+    box(ax, "off");
+end
+
+save_plot_outputs(fig4, fullfile(outDir, "nc_by_np_density_side_by_side.png"), fontSize, 1100, 470);
 end
 
 

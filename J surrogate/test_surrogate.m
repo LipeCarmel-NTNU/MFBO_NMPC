@@ -18,7 +18,7 @@ plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
 % Configuration
 % %%%%%%%%%%
 fullHorizonHours = 10.0;  % T in tau = t / (z*T)
-maxFilesPerRun = 10;      % set [] to include all files
+maxFilesPerRun = [];      % set [] to include all files
 useCoeffFileIfPresent = false;
 
 cSSdU = [ ...
@@ -152,6 +152,41 @@ grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 set_fig_size(1200, 900);
 
+% Figure: ensemble-style 95% band (2.5th to 97.5th percentile)
+fig95 = figure;
+
+[fGridSSdU, YSSdU] = build_interpolated_ensemble(records, "tauSSdU", "ratioSSdU");
+[fGridSSE, YSSE] = build_interpolated_ensemble(records, "tauSSE", "ratioSSE");
+
+subplot(2,1,1); hold on
+plot_percentile_band(fGridSSdU, YSSdU, plotColors(1,:), 0.20);
+plot_median_from_matrix(fGridSSdU, YSSdU, plotColors(1,:));
+yline(1, "k--", "LineWidth", 1.8);
+xlabel("");
+ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
+t = title("\textbf{a}");
+t.Units = "normalized";
+t.Position(1) = 0;
+t.HorizontalAlignment = "left";
+xlim([0, 1]); ylim([0, 1.5]);
+grid off; box off
+set_font_size(fontSize); format_tick(2, 2);
+
+subplot(2,1,2); hold on
+plot_percentile_band(fGridSSE, YSSE, plotColors(2,:), 0.20);
+plot_median_from_matrix(fGridSSE, YSSE, plotColors(2,:));
+yline(1, "k--","LineWidth", 1.8);
+xlabel("Normalized time $\tau=t/(z\cdot T)$");
+ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
+t = title("\textbf{b}");
+t.Units = "normalized";
+t.Position(1) = 0;
+t.HorizontalAlignment = "left";
+xlim([0, 1]); ylim([0, 1.5]);
+grid off; box off
+set_font_size(fontSize); format_tick(2, 2);
+set_fig_size(1200, 900);
+
 % %%%%%%%%--
 % Save outputs
 % %%%%%%%%--
@@ -160,6 +195,8 @@ if ~isfolder(plotDir), mkdir(plotDir); end
 
 print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.png"), "-dpng", "-r300");
 print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.pdf"), "-dpdf", "-bestfit");
+print(fig95, fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.png"), "-dpng", "-r300");
+print(fig95, fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.pdf"), "-dpdf", "-bestfit");
 
 % Numeric summary
 numDir = fullfile(projectRoot, "results", "numerical results");
@@ -265,6 +302,11 @@ function y = Cheb5(x, c)
 end
 
 function plot_median_curve(records, xField, yField, color)
+    [fGrid, Y] = build_interpolated_ensemble(records, xField, yField);
+    plot_median_from_matrix(fGrid, Y, color);
+end
+
+function [fGrid, Y] = build_interpolated_ensemble(records, xField, yField)
     fGrid = linspace(0, 1, 120)';
     Y = nan(numel(fGrid), numel(records));
     for i = 1:numel(records)
@@ -276,8 +318,18 @@ function plot_median_curve(records, xField, yField, color)
             Y(:, i) = interp1(xU, yU, fGrid, "linear", "extrap");
         end
     end
+end
+
+function plot_median_from_matrix(fGrid, Y, color)
     yMed = median(Y, 2, "omitnan");
     plot(fGrid, yMed, "-", "Color", color, "LineWidth", 2.6);
+end
+
+function plot_percentile_band(fGrid, Y, color, faceAlpha)
+    yLo = prctile(Y, 2.5, 2);
+    yHi = prctile(Y, 97.5, 2);
+    fill([fGrid; flipud(fGrid)], [yLo; flipud(yHi)], color, ...
+        "FaceAlpha", faceAlpha, "EdgeColor", "none");
 end
 
 function filesOut = sort_struct_by_name(filesIn)
