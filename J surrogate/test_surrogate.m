@@ -124,10 +124,11 @@ for i = 1:nRec
     plot(records(i).tauSSdU, records(i).ratioSSdU, "-", "Color", [plotColors(1,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSdU", "ratioSSdU", plotColors(1,:));
-yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
+yline(1, "--", "Color", [0.2 0.2 0.2], "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 title("\textbf{a}");
+xlim([0, 1]); ylim([0, 1.5]);
 grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 
@@ -136,10 +137,11 @@ for i = 1:nRec
     plot(records(i).tauSSE, records(i).ratioSSE, "-", "Color", [plotColors(2,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSE", "ratioSSE", plotColors(2,:));
-yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
+yline(1, "--", "Color", [0.2 0.2 0.2], "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 title("\textbf{b}");
+xlim([0, 1]); ylim([0, 1.5]);
 grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 set_fig_size(1200, 900);
