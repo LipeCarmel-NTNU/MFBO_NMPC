@@ -13,7 +13,7 @@ set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 18;
-plotColors = good_colors(2);
+plotColors = nature_methods_colors(2); % Blue, Vermillion
 
 files = dir(fullfile(scriptDir, "surrogate_data_*.mat"));
 if isempty(files)

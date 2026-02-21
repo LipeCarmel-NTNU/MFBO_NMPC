@@ -12,7 +12,7 @@ set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 16;
-plotColors = good_colors(4);
+plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
 
 % %%%%%%%%%%
 % Configuration

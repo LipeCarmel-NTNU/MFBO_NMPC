@@ -8,6 +8,7 @@
 %   If final relative error is > tol, settling time is NaN.
 %
 clear; close all; clc;
+NATURE_COLOR = nature_methods_colors();
 
 % User-level configuration for input folders and analysis scope.
 cfg = struct();
@@ -474,7 +475,7 @@ if ~isempty(settlingColumns)
     subplot(1, 2, 1);
     stateLabels = get_state_display_labels(numel(settlingColumns));
     boxplot(table2array(caseTable(:, settlingColumns)), "Labels", stateLabels);
-    yline(settlingTimeRefH, "-", "LineWidth", 1.2, "Color", [0.2 0.2 0.2]);
+    yline(settlingTimeRefH, "-", "LineWidth", 1.2, "Color", NATURE_COLOR.Orange);
     xlabel("State");
     ylabel("Settling time (h)");
     title("Settling Time");

@@ -34,10 +34,10 @@ plt.rcParams.update(
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
     "panel_b": "Prediction horizon N_p by case",
-    "case_1_color_hex": "#1f77b4",
-    "case_2_color_hex": "#d62728",
-    "guideline_color_hex": "#AF58BA",
-    "scatter_color_hex": "#7f7f7f",
+    "case_1_color_hex": "#0072B2",  # Blue
+    "case_2_color_hex": "#D55E00",  # Vermillion
+    "guideline_color_hex": "#E69F00",  # Orange
+    "scatter_color_hex": "#000000",  # Black
 }
 
 REFERENCE_TIME_H = 8.09603

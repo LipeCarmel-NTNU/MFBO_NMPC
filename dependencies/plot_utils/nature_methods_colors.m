@@ -6,6 +6,8 @@ function colors = nature_methods_colors(n)
 %
 % Source: Wong, B. Points of view: Color blindness. Nat Methods 8, 441 (2011).
 % https://doi.org/10.1038/nmeth.1618
+% 
+% See Fig. 2: https://www.nature.com/articles/nmeth.1618/figures/2
 
     % ---- Define palette as a struct (paper order; RGB in [0,1]) ----
     % NATURE_COLOR.Black         = [  0,   0,   0] / 255;  % omitted

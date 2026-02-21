@@ -55,7 +55,7 @@ set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 18;
 
 %% Colors
-plotColors = good_colors(4);
+plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
 
 % figColors = figure("Color", "w");
 % axColors = axes(figColors); hold(axColors, "on");
@@ -73,8 +73,7 @@ plotColors = good_colors(4);
 % grid(axColors, "off");
 % box(axColors, "off");
 
-% Keep three palette entries: Case 1, Case 2, and z/guideline.
-plotColors(4, :) = [];
+% Palette entries: Case 1 (Blue), Case 2 (Vermillion), z/guideline (Orange).
 
 %% 
 allT = cell(numel(datasets), 1);
@@ -389,9 +388,9 @@ function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotC
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
-% All evaluated points as small grey dots
+% All evaluated points as small black dots
 Tall = [T1; T2];
-scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, [0.65 0.65 0.65], ...
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, [0 0 0], ...
     "filled", "MarkerEdgeColor", "none", "DisplayName", "All samples");
 
 % One smooth curve through the final (combined) Pareto points.
