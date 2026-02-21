@@ -14,9 +14,9 @@ set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 16;
 plotColors = good_colors(4);
 
-% ------------------------------------------------------------
+% %%%%%%%%%%
 % Configuration
-% ------------------------------------------------------------
+% %%%%%%%%%%
 fullHorizonHours = 10.0;  % T in tau = t / (z*T)
 maxFilesPerRun = 10;      % set [] to include all files
 useCoeffFileIfPresent = false;
@@ -48,9 +48,9 @@ if useCoeffFileIfPresent
     end
 end
 
-% ------------------------------------------------------------
+% %%%%%%%%
 % Load run files
-% ------------------------------------------------------------
+% %%%%%%%%%%
 runDirs = {
     fullfile(projectRoot, "results", "run1"), "Case 1";
     fullfile(projectRoot, "results", "run2"), "Case 2";
@@ -115,19 +115,22 @@ end
 
 nRec = numel(records);
 
-% ------------------------------------------------------------
+% %%%%%%%%%%
 % Figure: normalized predicted cost trajectories
-% ------------------------------------------------------------
+% %%%%%%%%%%
 fig = figure;
 subplot(2,1,1); hold on
 for i = 1:nRec
     plot(records(i).tauSSdU, records(i).ratioSSdU, "-", "Color", [plotColors(1,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSdU", "ratioSSdU", plotColors(1,:));
-yline(1, "--", "Color", [0.2 0.2 0.2], "LineWidth", 1.8);
-xlabel("Normalized time $\tau=t/(z\cdot T)$");
+yline(1, "k--", "LineWidth", 1.8);
+xlabel("");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
-title("\textbf{a}");
+t = title("\textbf{a}");
+t.Units = "normalized";
+t.Position(1) = 0;
+t.HorizontalAlignment = "left";
 xlim([0, 1]); ylim([0, 1.5]);
 grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
@@ -137,18 +140,21 @@ for i = 1:nRec
     plot(records(i).tauSSE, records(i).ratioSSE, "-", "Color", [plotColors(2,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSE", "ratioSSE", plotColors(2,:));
-yline(1, "--", "Color", [0.2 0.2 0.2], "LineWidth", 1.8);
+yline(1, "k--","LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
-title("\textbf{b}");
+t = title("\textbf{b}");
+t.Units = "normalized";
+t.Position(1) = 0;
+t.HorizontalAlignment = "left";
 xlim([0, 1]); ylim([0, 1.5]);
 grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 set_fig_size(1200, 900);
 
-% ------------------------------------------------------------
+% %%%%%%%%--
 % Save outputs
-% ------------------------------------------------------------
+% %%%%%%%%--
 plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir), mkdir(plotDir); end
 
@@ -179,9 +185,9 @@ end
 fprintf("Saved surrogate test plot to: %s\n", plotDir);
 fprintf("Saved summary to: %s\n", summaryTxt);
 
-% ------------------------------------------------------------
+% %%%%%%%%--
 % Helpers
-% ------------------------------------------------------------
+% %%%%%%%%--
 function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSSdU, cSSE, fullHorizonHours)
     ratioSSdU = [];
     ratioSSE = [];
@@ -272,36 +278,6 @@ function plot_median_curve(records, xField, yField, color)
     end
     yMed = median(Y, 2, "omitnan");
     plot(fGrid, yMed, "-", "Color", color, "LineWidth", 2.6);
-end
-
-function [ok, cSSdU, cSSE] = try_parse_coeff_txt(pathTxt)
-    ok = false;
-    cSSdU = [];
-    cSSE = [];
-    if ~isfile(pathTxt)
-        return
-    end
-
-    lines = splitlines(string(fileread(pathTxt)));
-    idxSSdU = find(contains(lines, "SSdU c0..c5:"), 1, "first");
-    idxSSE = find(contains(lines, "SSE c0..c5:"), 1, "first");
-    if isempty(idxSSdU) || isempty(idxSSE)
-        return
-    end
-
-    valsSSdU = nan(6,1);
-    valsSSE = nan(6,1);
-    for i = 1:6
-        valsSSdU(i) = str2double(strtrim(lines(idxSSdU + i)));
-        valsSSE(i) = str2double(strtrim(lines(idxSSE + i)));
-    end
-    if any(~isfinite(valsSSdU)) || any(~isfinite(valsSSE))
-        return
-    end
-
-    cSSdU = valsSSdU;
-    cSSE = valsSSE;
-    ok = true;
 end
 
 function filesOut = sort_struct_by_name(filesIn)

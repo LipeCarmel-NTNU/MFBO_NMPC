@@ -7,6 +7,8 @@ This file defines the current project-wide plotting conventions used in analysis
 - Default font size: `14`.
 - Disable axis grid and box (`grid off`, `box off`) unless a specific figure requires otherwise.
 - Use consistent figure dimensions via `set_fig_size(...)`.
+- For panel labels used as titles (for example, `\textbf{a}` and `\textbf{b}`), left-align the title inside each axes.
+- In vertically stacked panels with matching and explicit x-axes, omit the x-label on the top panel and keep it only on the bottom panel.
 
 ## Colors
 - Use `good_colors(n)` from `dependencies/plot_utils`.
