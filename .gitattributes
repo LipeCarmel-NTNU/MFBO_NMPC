@@ -1,0 +1,13 @@
+# Enforce LF for source scripts.
+*.m text eol=lf
+*.py text eol=lf
+
+# Keep binary assets as binary (no EOL normalization/diff-as-text).
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.tif binary
+*.tiff binary
+*.bmp binary
