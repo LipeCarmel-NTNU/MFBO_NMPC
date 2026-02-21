@@ -7,6 +7,13 @@
 %   t_s,i is the earliest time where e_rel_i(t) <= tol for ALL future t.
 %   If final relative error is > tol, settling time is NaN.
 %
+% Figure-generation method summary
+% - Load full-horizon replay MAT files from results/test_run.
+% - Compute settling/error/IAE/input-variation metrics per case.
+% - Build controller-level summaries (case 1 + case 2 joins).
+% - Plot settling/final-error boxplots and final-Pareto `N_p` distributions.
+% - Export CSV and text summaries used by downstream Python figure scripts.
+%
 clear; close all; clc;
 scriptDir = fileparts(mfilename("fullpath"));
 projectRoot = fileparts(scriptDir);
@@ -49,6 +56,7 @@ plot_p_distribution_by_run_pareto(diagnostics, cfg);
 
 %% FUNCTIONS
 function diagnostics = run_full_run_diagnostics(cfg)
+%RUN_FULL_RUN_DIAGNOSTICS Aggregate case/controller metrics from replay MAT files.
 arguments
     cfg struct
 end
@@ -170,6 +178,7 @@ end
 
 
 function x = get_struct_field_or_nan(S, fieldName)
+%GET_STRUCT_FIELD_OR_NAN Read optional struct field and return NaN if absent.
 % Defensive accessor for optional fields in saved replay structs.
 if isfield(S, fieldName)
     x = double(S.(fieldName));
@@ -180,6 +189,7 @@ end
 
 
 function [decodedTheta, isValid] = decode_theta_weights(outputStruct)
+%DECODE_THETA_WEIGHTS Decode theta vector into N_p/N_c and weight diagonals.
 % Decode theta = [f, theta_p, theta_m, q(1:nx), r1(1:nu), r2(1:nu)].
 decodedTheta = struct("p", NaN, "m", NaN, "Q_diag", [], "R1_diag", [], "R2_diag", []);
 isValid = false;
@@ -218,6 +228,7 @@ end
 
 
 function metrics = summarize_case_metrics(outStruct, caseStruct, settlingTol)
+%SUMMARIZE_CASE_METRICS Compute settling/error/input-variation metrics per case.
 arguments
     outStruct struct
     caseStruct struct
@@ -252,6 +263,7 @@ end
 
 
 function [settlingTimes_h, finalErrPct, peakErrPct] = compute_settling_times(stateTrajectory, setpointTrajectory, timeHours, tol)
+%COMPUTE_SETTLING_TIMES Compute per-state settling, final error, and peak error.
 arguments
     stateTrajectory double
     setpointTrajectory double
@@ -289,6 +301,7 @@ end
 
 
 function totalInputVariation = compute_total_input_variation(inputTrajectory)
+%COMPUTE_TOTAL_INPUT_VARIATION Sum absolute input increments per actuator.
 % Sum of absolute input increments per actuator.
 if isempty(inputTrajectory)
     totalInputVariation = [];
@@ -304,6 +317,7 @@ end
 
 
 function [IAEByState, absError] = compute_integral_abs_error(stateTrajectory, setpointTrajectory, sampleTimeHours)
+%COMPUTE_INTEGRAL_ABS_ERROR Compute IAE per state on uniform sample grid.
 % IAE per state with rectangular integration on uniform sampling.
 absError = abs(stateTrajectory - setpointTrajectory);
 IAEByState = sum(absError, 1) * sampleTimeHours;
@@ -311,6 +325,7 @@ end
 
 
 function print_full_run_report(diagnostics, cfg)
+%PRINT_FULL_RUN_REPORT Emit human-readable diagnostics summary to console.
 caseTable = diagnostics.per_case;
 controllerTable = diagnostics.per_controller;
 settlingColumns = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
@@ -418,6 +433,7 @@ end
 
 
 function T = sort_table_by_sse(T)
+%SORT_TABLE_BY_SSE Sort table rows by SSE ascending when column exists.
 % Standard print ordering for all tables in this script.
 if isempty(T) || ~ismember("SSE", string(T.Properties.VariableNames))
     return
@@ -427,6 +443,7 @@ end
 
 
 function controllerCaseTable = build_controller_both_case_table(caseTable, controllerTable, settlingColumns, removeNaNSettling)
+%BUILD_CONTROLLER_BOTH_CASE_TABLE Join case-1 and case-2 metrics per controller.
 % Build one row per controller by joining case 1 and case 2 side-by-side.
 if isempty(caseTable) || isempty(controllerTable) || isempty(settlingColumns)
     controllerCaseTable = table();
@@ -464,6 +481,7 @@ end
 
 
 function plot_summary_boxplots(diagnostics, settlingTimeRefH, guidelineColor)
+%PLOT_SUMMARY_BOXPLOTS Plot settling-time and final-error distribution summaries.
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -500,6 +518,7 @@ end
 
 
 function plot_p_distribution_by_run_pareto(diagnostics, cfg)
+%PLOT_P_DISTRIBUTION_BY_RUN_PARETO Plot N_p distribution for final Pareto set.
 caseTable = diagnostics.per_case;
 controllerTable = diagnostics.per_controller;
 if isempty(caseTable) || isempty(controllerTable)
@@ -544,6 +563,7 @@ end
 
 
 function labels = get_state_display_labels(nStates)
+%GET_STATE_DISPLAY_LABELS Map state index to publication labels.
 baseLabels = {'V (L)', 'X (g/L)', 'S (g/L)'};
 if nStates <= numel(baseLabels)
     labels = baseLabels(1:nStates);
@@ -555,6 +575,7 @@ end
 
 
 function export_boxplot_data_csv(diagnostics, analysisDir)
+%EXPORT_BOXPLOT_DATA_CSV Write long-form CSVs consumed by Python plotting script.
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return
@@ -588,6 +609,7 @@ end
 
 
 function stateLabels = map_state_labels_from_id(stateId)
+%MAP_STATE_LABELS_FROM_ID Convert state IDs (x1/x2/x3/...) to display labels.
 stateLabels = strings(numel(stateId), 1);
 for i = 1:numel(stateId)
     switch string(stateId(i))
@@ -605,6 +627,7 @@ end
 
 
 function write_numerical_results(diagnostics, settlingTol, settlingTimeRefH, resultsRoot)
+%WRITE_NUMERICAL_RESULTS Persist computed diagnostics and summary statistics.
 caseTable = diagnostics.per_case;
 if isempty(caseTable)
     return

@@ -11,10 +11,17 @@ This file defines the current project-wide plotting conventions used in analysis
 - In vertically stacked panels with matching and explicit x-axes, omit the x-label on the top panel and keep it only on the bottom panel.
 
 ## Colors
-- Use `good_colors(n)` from `dependencies/plot_utils`.
-- For paired line plots, use:
-  - color 1 for measured/data curve,
-  - color 2 for fitted/model curve.
+- Use `nature_methods_colors(...)` from `dependencies/plot_utils` as the default palette source.
+- Preferred categorical order (for first entries) is:
+  - color 1: Blue,
+  - color 2: BluishGreen,
+  - color 3: ReddishPurple,
+  - color 4: Vermillion,
+  - color 5: Orange.
+- When two contrasting series are needed, pick clearly separated hues (for example Blue vs BluishGreen, or Blue vs Vermillion).
+- Use black (`[0 0 0]` or `#000000`) for neutral points/guides; do not use gray tones.
+- For Python figures, use the hex equivalents of the same Nature palette entries.
+- Pass color selections into plotting helpers as function inputs rather than hardcoding inside helper bodies.
 
 ## Lines and markers
 - Prefer line width `2.0` for primary curves.

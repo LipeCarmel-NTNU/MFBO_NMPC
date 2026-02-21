@@ -22,6 +22,13 @@
 %   `J_track = SSE` and `J_TV = SSdU`, sorted by `SSE` (descending).
 % - `isPareto`: logical mask identifying Pareto points in `T`.
 %
+% Figure-generation method summary
+% - Build per-run and combined Pareto diagnostics from `results.csv`.
+% - Use non-dominated sorting on (`SSE`, `SSdU`) for Pareto masks.
+% - Produce side-by-side objective/runtime figures and 3x2 iteration trends.
+% - Produce discrete density maps for (`N_p`, `N_c`) frequency by run.
+% - Export PNG/PDF pairs to `results/graphical_results`.
+%
 
 
 %% Dependencies
@@ -56,6 +63,7 @@ fontSize = 18;
 
 %% Colors
 plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
+cBlack = [0 0 0];
 
 % figColors = figure("Color", "w");
 % axColors = axes(figColors); hold(axColors, "on");
@@ -96,13 +104,14 @@ TallCombined = [allT{1}; allT{2}];
 runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", optStartIter);
 write_runtime_and_parameter_summary(allT, allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder, optStartIter);
 
-create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
+create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors, cBlack);
 %% Combined Pareto
-plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
+plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors, cBlack);
 plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
 
 function [T, Tp, isPareto] = load_results_table(csvPath)
+%LOAD_RESULTS_TABLE Read one run CSV and construct derived tuning columns.
 if nargin < 1 || strlength(string(csvPath)) == 0
     error("You must provide csvPath.");
 end
@@ -176,6 +185,7 @@ end
 
 
 function T = enrich_with_out_data(T, runFolder)
+%ENRICH_WITH_OUT_DATA Attach per-run runtime diagnostics from out_*.mat files.
 % Load simulation-level outputs (`out_*.mat`) linked by timestamp and
 % append runtime metrics that are not present in CSV-only summaries.
 n = height(T);
@@ -231,6 +241,7 @@ end
 
 
 function isPareto = compute_pareto_mask(J_track, J_TV)
+%COMPUTE_PARETO_MASK Return non-dominated mask for minimization objectives.
 n = numel(J_track);
 isPareto = true(n,1);
 for i = 1:n
@@ -244,7 +255,8 @@ end
 end
 
 
-function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors)
+function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors, cBlack)
+%CREATE_ANALYSIS_PLOTS_SIDE_BY_SIDE Generate core side-by-side analysis figures.
 if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
     return
 end
@@ -255,7 +267,7 @@ end
 % SSE vs SSdU (side-by-side), color mapped by z.
 fig1z = figure("Color", "w");
 tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
-viridisMap = make_viridis_like(256);
+seqMap = make_nature_sequential(256);
 panelLabels = ["a", "b"];
 for k = 1:2
     T = allT{k};
@@ -263,18 +275,14 @@ for k = 1:2
     ax = nexttile; hold(ax, "on");
     hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
         plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
-    try
-        hGuide.Color = [plotColors(3, :) 0.45];
-    catch
-        hGuide.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
-    end
-    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    hGuide.Color = plotColors(3, :);
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", cBlack, "LineWidth", 0.7);
     scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
         "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
     set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
     xlim(ax, [1e-2, 1e2]);
     ylim(ax, [1e4, 1.3e5]);
-    colormap(ax, viridisMap);
+    colormap(ax, seqMap);
     caxis(ax, [0, 1]);
     xlabel(ax, "$J_{\mathrm{TV}}$");
     ylabel(ax, "$J_{\mathrm{track}}$");
@@ -424,7 +432,7 @@ for k = 1:2
     cb.FontSize = fontSize;
 
     % Overlay points to preserve discrete-location visibility.
-    scatter(ax, p, m, 26, "k", "filled", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
+    scatter(ax, p, m, 26, cBlack, "filled", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
 
     xlabel(ax, "$N_p$");
     ylabel(ax, "$N_c$");
@@ -444,6 +452,7 @@ end
 
 
 function display_pareto_table(Tp)
+%DISPLAY_PARETO_TABLE Print Pareto rows with decoded tuning parameters.
 tuningCols = ["timestamp","SSE","SSdU","J","p","m","f", ...
     "runtime_min","runtime_per_f", ...
     "Q_x1","Q_x2","Q_x3", ...
@@ -459,6 +468,7 @@ end
 
 
 function summaryTbl = display_runtime_phase_summary(T, runName, optimizationStartIter)
+%DISPLAY_RUNTIME_PHASE_SUMMARY Summarize DOE vs optimization runtime split.
 arguments
     T table
     runName
@@ -502,24 +512,21 @@ end
 
 
 
-function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
+function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors, cBlack)
+%PLOT_COMBINED_PARETO_SAMPLES Plot all samples and final combined Pareto front.
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
 % All evaluated points as small black dots
 Tall = [T1; T2];
-scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, [0 0 0], ...
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, cBlack, ...
     "filled", "MarkerEdgeColor", "none", "DisplayName", "All samples");
 
 % One smooth curve through the final (combined) Pareto points.
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
 Tf = Tall(finalMask, :);
 hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
-try
-    hCurve.Color = [plotColors(3, :) 0.45];
-catch
-    hCurve.Color = 0.55 * plotColors(3, :) + 0.45 * [1 1 1];
-end
+hCurve.Color = plotColors(3, :);
 
 % Pareto points per case (filled markers) drawn after curve to stay on top.
 scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 40, plotColors(1,:), ...
@@ -549,6 +556,7 @@ end
 
 
 function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds, yBounds)
+%PLOT_PARETO_CONTINUUM Build smooth monotone visual guide through Pareto points.
 [xSort, ord] = sort(x(:), "ascend");
 ySort = y(ord);
 
@@ -587,17 +595,22 @@ h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
-function cmap = make_viridis_like(n)
-anchorsViridisLike = [
-    0.27 0.00 0.33
-    0.13 0.56 0.55
-    0.99 0.91 0.14
+function cmap = make_nature_sequential(n)
+%MAKE_NATURE_SEQUENTIAL Sequential map using Nature palette anchor colors.
+% Anchors chosen for monotone-like progression in perceptual lightness:
+% Blue -> SkyBlue -> Yellow.
+NATURE_COLOR = nature_methods_colors();
+anchorsNature = [
+    NATURE_COLOR.Blue
+    NATURE_COLOR.SkyBlue
+    NATURE_COLOR.Yellow
 ];
-cmap = interpolate_anchors(anchorsViridisLike, n);
+cmap = interpolate_anchors(anchorsNature, n);
 end
 
 
 function cmap = interpolate_anchors(anchors, n)
+%INTERPOLATE_ANCHORS Smoothly interpolate RGB anchors into n-color map.
 tAnch = linspace(0, 1, size(anchors, 1));
 t = linspace(0, 1, n);
 cmap = zeros(n, 3);
@@ -609,6 +622,7 @@ end
 
 
 function write_runtime_and_parameter_summary(allT, allTp, datasets, runSummaryTables, combinedSummaryTable, outDir, optimizationStartIter)
+%WRITE_RUNTIME_AND_PARAMETER_SUMMARY Export runtime and tuning diagnostics.
 outPath = fullfile(outDir, "resultssandbox_runtime_and_params.txt");
 fid = fopen(outPath, "w");
 if fid == -1
@@ -670,6 +684,7 @@ end
 
 
 function meanZ = compute_mean_z_optimization(T, optimizationStartIter)
+%COMPUTE_MEAN_Z_OPTIMIZATION Mean fidelity over iterations after DOE phase.
 if isempty(T) || ~ismember("f", string(T.Properties.VariableNames))
     meanZ = NaN;
     return
@@ -680,6 +695,7 @@ end
 
 
 function write_runtime_table(fid, summaryTbl)
+%WRITE_RUNTIME_TABLE Emit runtime summary table to open text file handle.
 for i = 1:height(summaryTbl)
     fprintf(fid, "  %s | iterations=%d | runtime_min=%.6g | runtime_pct_total=%.6g\n", ...
         char(string(summaryTbl.phase{i})), summaryTbl.iterations(i), ...
@@ -689,6 +705,7 @@ end
 
 
 function plot_cumulative_runtime_combined(allT, datasets, outDir, fontSize, plotColors)
+%PLOT_CUMULATIVE_RUNTIME_COMBINED Plot cumulative runtime for run1 vs run2.
 if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
     return
 end
@@ -719,6 +736,7 @@ end
 
 
 function save_plot_outputs(figHandle, pngPath, fontSize, figWidthPx, figHeightPx)
+%SAVE_PLOT_OUTPUTS Export paired PNG/PDF outputs with consistent sizing.
 arguments
     figHandle
     pngPath

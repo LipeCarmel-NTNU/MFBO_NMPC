@@ -12,6 +12,10 @@ Boxplots follow a “scattered boxplot” style:
 - Standard box (median, IQR, whiskers at 1.5 IQR)
 - Overlaid raw data points with horizontal jitter
 - Semi-transparent markers
+
+Color policy:
+- Use Wong (2011) Nature Methods palette entries via ``NATURE_HEX``.
+- Use black for neutral scatter overlays.
 """
 
 from __future__ import annotations
@@ -34,11 +38,28 @@ plt.rcParams.update(
 PLOT_CONVENTION = {
     "panel_a": "Settling time by state (V, X, S)",
     "panel_b": "Prediction horizon N_p by case",
-    "case_1_color_hex": "#0072B2",  # Blue
-    "case_2_color_hex": "#D55E00",  # Vermillion
-    "guideline_color_hex": "#E69F00",  # Orange
-    "scatter_color_hex": "#000000",  # Black
 }
+
+# Wong (2011) Nature Methods palette (hex forms for matplotlib use).
+NATURE_HEX = {
+    "Blue": "#0072B2",
+    "BluishGreen": "#009E73",
+    "ReddishPurple": "#CC79A7",
+    "Vermillion": "#D55E00",
+    "Orange": "#E69F00",
+    "SkyBlue": "#56B4E9",
+    "Yellow": "#F0E442",
+    "Black": "#000000",
+}
+
+PLOT_CONVENTION.update(
+    {
+        "case_1_color_hex": NATURE_HEX["Blue"],
+        "case_2_color_hex": NATURE_HEX["BluishGreen"],
+        "guideline_color_hex": NATURE_HEX["ReddishPurple"],
+        "scatter_color_hex": NATURE_HEX["Black"],
+    }
+)
 
 REFERENCE_TIME_H = 8.09603
 FINAL_PARETO_TIMESTAMPS = {
@@ -57,6 +78,7 @@ FINAL_PARETO_TIMESTAMPS = {
 
 
 def load_boxplot_data(analysis_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
+    """Load settling-time and final-error boxplot CSV exports."""
     base = Path(analysis_dir) if analysis_dir is not None else Path(__file__).resolve().parent
     project_root = base.parent
     settling_path = _first_existing(
@@ -78,6 +100,7 @@ def load_boxplot_data(analysis_dir: str | Path | None = None) -> dict[str, pd.Da
 
 
 def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
+    """Parse N_p rows from MATLAB text summary when CSV is unavailable."""
     path = Path(summary_txt_path)
     if not path.exists():
         return pd.DataFrame(columns=["run_label", "timestamp", "N_p"])
@@ -120,6 +143,7 @@ def parse_np_from_summary(summary_txt_path: str | Path) -> pd.DataFrame:
 
 
 def load_settling_and_np_data(analysis_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
+    """Load settling-time data and N_p-by-case data with fallback logic."""
     data = load_boxplot_data(analysis_dir)
     base = Path(analysis_dir) if analysis_dir is not None else Path(__file__).resolve().parent
     project_root = base.parent
@@ -205,6 +229,7 @@ def build_nc_from_results_csv(project_root: Path) -> pd.DataFrame:
 
 
 def _first_existing(paths: list[Path]) -> Path | None:
+    """Return the first path that exists, else None."""
     for p in paths:
         if p.exists():
             return p
@@ -220,6 +245,7 @@ def scattered_boxplot(
     ylabel: str,
     show_scatter: bool = True,
 ):
+    """Draw boxplot with optional jittered raw-point overlay."""
     positions = np.arange(1, len(data_groups) + 1)
 
     bp = ax.boxplot(
@@ -290,6 +316,7 @@ def draw_guideline_behind_boxes(
 
 
 def plot_settling_time(df: pd.DataFrame):
+    """Create settling-time boxplot by state with reference guideline."""
     fig, ax = plt.subplots(figsize=(6, 4))
 
     state_labels = ["V (L)", "X (g/L)", "S (g/L)"]
@@ -339,6 +366,7 @@ def plot_settling_time(df: pd.DataFrame):
 
 
 def plot_np_by_case(df: pd.DataFrame):
+    """Create N_p-by-case boxplot with jittered raw-point overlay."""
     fig, ax = plt.subplots(figsize=(5, 4))
 
     if df is None or df.empty or "N_p" not in df.columns:
@@ -510,6 +538,7 @@ def plot_nc_by_case(df: pd.DataFrame):
 
 
 def print_np_points_by_case(df: pd.DataFrame):
+    """Print N_p values used in the boxplot, grouped by case label."""
     print("\nN_p points used in boxplot:")
     if df is None or df.empty or "N_p" not in df.columns:
         print("No N_p data available")

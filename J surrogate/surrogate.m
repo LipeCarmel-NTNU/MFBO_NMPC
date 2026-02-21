@@ -2,6 +2,12 @@
 % Fit on all surrogate_data_<i>.mat files:
 %   SSdU: Cheb5 in x on grid f = (1:N)/N  (length N)
 %   SSE : Cheb5 in x on grid f = (1:N)/N  (length N)
+%
+% Figure-generation method summary
+% - Build normalized cumulative trajectories for each surrogate dataset.
+% - Fit global Chebyshev polynomials by least squares (shared across files).
+% - Plot per-fidelity envelopes (min/max + mean) and fitted curves.
+% - Export side-by-side and stacked diagnostics to results/graphical_results.
 
 clear; close all; clc
 rng(1)
@@ -13,7 +19,8 @@ set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 18;
-plotColors = nature_methods_colors(2); % Blue, Vermillion
+NATURE_COLOR = nature_methods_colors();
+plotColors = [NATURE_COLOR.Blue; NATURE_COLOR.BluishGreen];
 
 files = dir(fullfile(scriptDir, "surrogate_data_*.mat"));
 if isempty(files)
@@ -199,6 +206,7 @@ print(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked.pdf"), "-dpdf"
 % Objectives
 % =============================
 function J = obj_Cheb5(c, x, y)
+%OBJ_CHEB5 Least-squares objective for Chebyshev coefficient fitting.
     r = y - Cheb5(x, c);
     J = r.'*r;
     if ~isfinite(J); J = realmax; end
@@ -208,6 +216,7 @@ end
 % Models
 % =============================
 function y = Cheb5(x, c)
+%CHEB5 Evaluate degree-5 Chebyshev polynomial using c0..c5 coefficients.
     c = c(:);
     if numel(c) ~= 6
         error('Cheb5 expects 6 coefficients (c0..c5).');
@@ -223,10 +232,12 @@ function y = Cheb5(x, c)
 end
 
 function y = clamp01(y)
+%CLAMP01 Clip values to [0, 1].
     y = min(max(y, 0), 1);
 end
 
 function r2 = compute_r2(y, y_hat)
+%COMPUTE_R2 Compute coefficient of determination for fit diagnostics.
     y = y(:);
     y_hat = y_hat(:);
     sse_res = sum((y - y_hat).^2);
@@ -239,6 +250,7 @@ function r2 = compute_r2(y, y_hat)
 end
 
 function [f_ref, SSdU_mat, SSE_mat] = build_case_matrices(f_cases, SSdU_cases, SSE_cases)
+%BUILD_CASE_MATRICES Align case trajectories onto one reference fidelity grid.
     K = numel(f_cases);
     if K == 0
         error('No cases available for diagnostics plotting.');
@@ -265,6 +277,7 @@ function [f_ref, SSdU_mat, SSE_mat] = build_case_matrices(f_cases, SSdU_cases, S
 end
 
 function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab, titleLabel, plotColors, fontSize, showXLabel)
+%PLOT_CASE_ENVELOPE_WITH_FIT Plot min-max envelope, mean trend, and fitted curve.
     if nargin < 11
         showXLabel = true;
     end

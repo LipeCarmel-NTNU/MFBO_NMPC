@@ -1,6 +1,14 @@
 % test_surrogate.m
 % Validate Chebyshev-based multifidelity extrapolation against stored run outputs.
 % Kept output: normalized prediction trajectories only.
+%
+% Figure-generation method summary
+% - Reconstruct projected full-horizon costs from partial costs and Chebyshev fractions.
+% - Normalize each trajectory by the stored final objective value.
+% - Plot all run trajectories plus ensemble median.
+% - Plot a pointwise 95% empirical quantile envelope:
+%   at each tau-grid value, lower/upper bounds are the 2.5th/97.5th
+%   percentiles across trajectories after interpolation to a common grid.
 
 clear; close all; clc
 
@@ -12,7 +20,9 @@ set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 16;
-plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
+NATURE_COLOR = nature_methods_colors();
+plotColors = [NATURE_COLOR.Blue; NATURE_COLOR.BluishGreen; NATURE_COLOR.ReddishPurple];
+lineBlack = [0 0 0];
 
 % %%%%%%%%%%
 % Configuration
@@ -124,7 +134,7 @@ for i = 1:nRec
     plot(records(i).tauSSdU, records(i).ratioSSdU, "-", "Color", [plotColors(1,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSdU", "ratioSSdU", plotColors(1,:));
-yline(1, "k--", "LineWidth", 1.8);
+yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
 xlabel("");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 t = title("\textbf{a}");
@@ -140,7 +150,7 @@ for i = 1:nRec
     plot(records(i).tauSSE, records(i).ratioSSE, "-", "Color", [plotColors(2,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSE", "ratioSSE", plotColors(2,:));
-yline(1, "k--","LineWidth", 1.8);
+yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 t = title("\textbf{b}");
@@ -152,7 +162,7 @@ grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 set_fig_size(1200, 900);
 
-% Figure: ensemble-style 95% band (2.5th to 97.5th percentile)
+% Figure: pointwise 95% empirical quantile envelope
 fig95 = figure;
 
 [fGridSSdU, YSSdU] = build_interpolated_ensemble(records, "tauSSdU", "ratioSSdU");
@@ -161,7 +171,7 @@ fig95 = figure;
 subplot(2,1,1); hold on
 plot_percentile_band(fGridSSdU, YSSdU, plotColors(1,:), 0.20);
 plot_median_from_matrix(fGridSSdU, YSSdU, plotColors(1,:));
-yline(1, "k--", "LineWidth", 1.8);
+yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
 xlabel("");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 t = title("\textbf{a}");
@@ -175,7 +185,7 @@ set_font_size(fontSize); format_tick(2, 2);
 subplot(2,1,2); hold on
 plot_percentile_band(fGridSSE, YSSE, plotColors(2,:), 0.20);
 plot_median_from_matrix(fGridSSE, YSSE, plotColors(2,:));
-yline(1, "k--","LineWidth", 1.8);
+yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 t = title("\textbf{b}");
@@ -226,6 +236,7 @@ fprintf("Saved summary to: %s\n", summaryTxt);
 % Helpers
 % %%%%%%%%--
 function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSSdU, cSSE, fullHorizonHours)
+%COMPUTE_RATIOS Reconstruct normalized extrapolated costs for one run output.
     ratioSSdU = [];
     ratioSSE = [];
     tauSSdU = [];
@@ -287,10 +298,12 @@ function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSS
 end
 
 function x = as_col(x)
+%AS_COL Convert input to a double column vector.
     x = double(x(:));
 end
 
 function y = Cheb5(x, c)
+%CHEB5 Evaluate degree-5 Chebyshev polynomial using c0..c5 coefficients.
     c = c(:);
     T0 = ones(size(x));
     T1 = x;
@@ -302,11 +315,13 @@ function y = Cheb5(x, c)
 end
 
 function plot_median_curve(records, xField, yField, color)
+%PLOT_MEDIAN_CURVE Plot ensemble median across aligned trajectories.
     [fGrid, Y] = build_interpolated_ensemble(records, xField, yField);
     plot_median_from_matrix(fGrid, Y, color);
 end
 
 function [fGrid, Y] = build_interpolated_ensemble(records, xField, yField)
+%BUILD_INTERPOLATED_ENSEMBLE Interpolate each trajectory to a shared tau grid.
     fGrid = linspace(0, 1, 120)';
     Y = nan(numel(fGrid), numel(records));
     for i = 1:numel(records)
@@ -321,11 +336,13 @@ function [fGrid, Y] = build_interpolated_ensemble(records, xField, yField)
 end
 
 function plot_median_from_matrix(fGrid, Y, color)
+%PLOT_MEDIAN_FROM_MATRIX Plot pointwise median from a matrix of trajectories.
     yMed = median(Y, 2, "omitnan");
     plot(fGrid, yMed, "-", "Color", color, "LineWidth", 2.6);
 end
 
 function plot_percentile_band(fGrid, Y, color, faceAlpha)
+%PLOT_PERCENTILE_BAND Plot pointwise 2.5th/97.5th quantile envelope.
     yLo = prctile(Y, 2.5, 2);
     yHi = prctile(Y, 97.5, 2);
     fill([fGrid; flipud(fGrid)], [yLo; flipud(yHi)], color, ...
@@ -333,11 +350,13 @@ function plot_percentile_band(fGrid, Y, color, faceAlpha)
 end
 
 function filesOut = sort_struct_by_name(filesIn)
+%SORT_STRUCT_BY_NAME Sort dir() output by filename in ascending order.
     [~, idx] = sort({filesIn.name});
     filesOut = filesIn(idx);
 end
 
 function v = safe_scalar(S, fieldName, fallback)
+%SAFE_SCALAR Return scalar field value or fallback when missing/invalid.
     if isfield(S, fieldName)
         v = double(S.(fieldName));
         if numel(v) ~= 1 || ~isfinite(v)
