@@ -146,7 +146,8 @@ def load_settling_and_np_data(analysis_dir: str | Path | None = None) -> dict[st
 
     if np_df.empty:
         np_df = build_np_from_results_csv(project_root)
-    return {"settling_time": data["settling_time"], "np_by_case": np_df}
+    nc_df = build_nc_from_results_csv(project_root)
+    return {"settling_time": data["settling_time"], "np_by_case": np_df, "nc_by_case": nc_df}
 
 
 def build_np_from_results_csv(project_root: Path) -> pd.DataFrame:
@@ -175,6 +176,32 @@ def build_np_from_results_csv(project_root: Path) -> pd.DataFrame:
                 records.append({"run_label": label, "timestamp": ts, "N_p": float(val)})
 
     return pd.DataFrame.from_records(records, columns=["run_label", "timestamp", "N_p"])
+
+
+def build_nc_from_results_csv(project_root: Path) -> pd.DataFrame:
+    """Reconstruct N_c from run1/run2 results.csv and final Pareto timestamps."""
+    records: list[dict[str, object]] = []
+    for run_name, label in [("run1", "Case 1"), ("run2", "Case 2")]:
+        csv_path = project_root / "results" / run_name / "results.csv"
+        if not csv_path.exists():
+            continue
+        df = pd.read_csv(csv_path)
+        if not {"timestamp", "theta_3"}.issubset(df.columns):
+            continue
+
+        df["timestamp"] = df["timestamp"].astype(str)
+        df = df[df["timestamp"].isin(FINAL_PARETO_TIMESTAMPS)].copy()
+        if df.empty:
+            continue
+
+        theta_m = np.rint(pd.to_numeric(df["theta_3"], errors="coerce"))
+        n_c = theta_m + 1
+
+        for ts, val in zip(df["timestamp"].tolist(), n_c.tolist()):
+            if pd.notna(val):
+                records.append({"run_label": label, "timestamp": ts, "N_c": float(val)})
+
+    return pd.DataFrame.from_records(records, columns=["run_label", "timestamp", "N_c"])
 
 
 def _first_existing(paths: list[Path]) -> Path | None:
@@ -398,6 +425,90 @@ def plot_np_by_case(df: pd.DataFrame):
     return fig
 
 
+def plot_nc_by_case(df: pd.DataFrame):
+    fig, ax = plt.subplots(figsize=(5, 4))
+
+    if df is None or df.empty or "N_c" not in df.columns:
+        ax.text(0.5, 0.5, "No $N_c$ data available", ha="center", va="center")
+        ax.set_axis_off()
+        fig.tight_layout()
+        return fig
+
+    df_local = df.copy()
+    if "run_label" in df_local.columns:
+        df_local["run_label"] = (
+            df_local["run_label"]
+            .astype(str)
+            .str.strip()
+            .replace({"run1": "Case 1", "run2": "Case 2"})
+        )
+    else:
+        df_local["run_label"] = "Case 1"
+
+    df_local["N_c"] = pd.to_numeric(df_local["N_c"], errors="coerce")
+
+    groups = []
+    labels = []
+    colors = []
+
+    for case_label, color_key in [
+        ("Case 1", "case_1_color_hex"),
+        ("Case 2", "case_2_color_hex"),
+    ]:
+        subset = df_local[df_local["run_label"] == case_label]["N_c"].dropna().to_numpy()
+        if len(subset) > 0:
+            groups.append(subset)
+            labels.append(case_label)
+            colors.append(PLOT_CONVENTION[color_key])
+
+    if len(groups) == 0:
+        ax.text(0.5, 0.5, "No $N_c$ data available", ha="center", va="center")
+        ax.set_axis_off()
+        fig.tight_layout()
+        return fig
+
+    positions = np.arange(1, len(groups) + 1)
+
+    bp = ax.boxplot(
+        groups,
+        positions=positions,
+        widths=0.5,
+        patch_artist=True,
+        showfliers=False,
+        whis=1.5,
+    )
+
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set(facecolor=color, alpha=0.25, edgecolor=color, linewidth=1)
+
+    for median, color in zip(bp["medians"], colors):
+        median.set(color=color, linewidth=1.5)
+
+    rng = np.random.default_rng(0)
+    for i, (y, color, case_label) in enumerate(zip(groups, colors, labels)):
+        x = np.full_like(y, positions[i], dtype=float)
+        jitter = rng.uniform(-0.15, 0.15, size=len(y))
+        ax.scatter(
+            x + jitter,
+            y,
+            s=36,
+            marker="o",
+            alpha=0.6,
+            color=PLOT_CONVENTION["scatter_color_hex"],
+            edgecolors="none",
+            zorder=2,
+        )
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Control horizon $N_c$")
+    ax.set_ylim(bottom=0)
+    ax.grid(False)
+
+    fig.tight_layout()
+    return fig
+
+
 def print_np_points_by_case(df: pd.DataFrame):
     print("\nN_p points used in boxplot:")
     if df is None or df.empty or "N_p" not in df.columns:
@@ -425,23 +536,55 @@ def print_np_points_by_case(df: pd.DataFrame):
             print(f"{case_label} (0): []")
 
 
+def print_nc_points_by_case(df: pd.DataFrame):
+    print("\nN_c points used in boxplot:")
+    if df is None or df.empty or "N_c" not in df.columns:
+        print("No N_c data available")
+        return
+
+    df_local = df.copy()
+    if "run_label" in df_local.columns:
+        df_local["run_label"] = (
+            df_local["run_label"]
+            .astype(str)
+            .str.strip()
+            .replace({"run1": "Case 1", "run2": "Case 2"})
+        )
+    else:
+        df_local["run_label"] = "Case 1"
+
+    df_local["N_c"] = pd.to_numeric(df_local["N_c"], errors="coerce")
+
+    for case_label in ["Case 1", "Case 2"]:
+        vals = df_local.loc[df_local["run_label"] == case_label, "N_c"].dropna().to_list()
+        if vals:
+            print(f"{case_label} ({len(vals)}): {vals}")
+        else:
+            print(f"{case_label} (0): []")
+
+
 if __name__ == "__main__":
     data = load_settling_and_np_data()
 
     settling_df = data["settling_time"]
     np_df = data["np_by_case"]
+    nc_df = data["nc_by_case"]
 
     fig_a = plot_settling_time(settling_df)
     fig_b = plot_np_by_case(np_df)
+    fig_c = plot_nc_by_case(nc_df)
 
     out_dir = Path(__file__).resolve().parent.parent / "results" / "graphical_results"
     out_dir.mkdir(parents=True, exist_ok=True)
     export_dpi = 600
     fig_a.savefig(out_dir / "python_settling_time_boxplot.png", dpi=300, bbox_inches="tight")
     fig_b.savefig(out_dir / "python_np_by_case_boxplot.png", dpi=300, bbox_inches="tight")
+    fig_c.savefig(out_dir / "python_nc_by_case_boxplot.png", dpi=300, bbox_inches="tight")
     fig_a.savefig(out_dir / "python_settling_time_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
     fig_b.savefig(out_dir / "python_np_by_case_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
+    fig_c.savefig(out_dir / "python_nc_by_case_boxplot.pdf", dpi=export_dpi, bbox_inches="tight")
 
     print_np_points_by_case(np_df)
+    print_nc_points_by_case(nc_df)
     plt.show()
     print('Done')
