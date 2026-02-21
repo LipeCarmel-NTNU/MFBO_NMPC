@@ -384,6 +384,62 @@ for k = 1:2
 end
 
 save_plot_outputs(fig3, fullfile(outDir, "z_np_nc_vs_iteration_3x2.png"), fontSize, 1200, 980);
+
+% N_c by N_p density maps (side-by-side)
+fig4 = figure("Color", "w");
+tiledlayout(fig4, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+panelLabelsNcNp = ["a", "b"];
+
+for k = 1:2
+    T = allT{k};
+    p = double(T.p);
+    m = double(T.m); % N_c
+    valid = isfinite(p) & isfinite(m);
+    p = p(valid);
+    m = m(valid);
+
+    ax = nexttile; hold(ax, "on");
+    if isempty(p)
+        text(ax, 0.5, 0.5, "No valid $(N_p, N_c)$ data", ...
+            "Units", "normalized", "HorizontalAlignment", "center", "Interpreter", "latex");
+        axis(ax, "off");
+        continue
+    end
+
+    pMin = floor(min(p)); pMax = ceil(max(p));
+    mMin = floor(min(m)); mMax = ceil(max(m));
+    xEdges = (pMin - 0.5):(pMax + 0.5);
+    yEdges = (mMin - 0.5):(mMax + 0.5);
+    counts = histcounts2(p, m, xEdges, yEdges);
+
+    xCenters = xEdges(1:end-1) + 0.5;
+    yCenters = yEdges(1:end-1) + 0.5;
+    imagesc(ax, xCenters, yCenters, counts.');
+    set(ax, "YDir", "normal");
+    colormap(ax, parula(256));
+    cb = colorbar(ax);
+    cb.Label.String = "Count";
+    cb.Label.Interpreter = "latex";
+    cb.TickLabelInterpreter = "latex";
+    cb.FontSize = fontSize;
+
+    % Overlay points to preserve discrete-location visibility.
+    scatter(ax, p, m, 26, "k", "filled", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
+
+    xlabel(ax, "$N_p$");
+    ylabel(ax, "$N_c$");
+    title(ax, "$\mathbf{" + panelLabelsNcNp(k) + "}$", "Interpreter", "latex");
+    ax.TitleHorizontalAlignment = "left";
+    set(ax, "FontSize", fontSize);
+    xlim(ax, [pMin - 0.5, pMax + 0.5]);
+    ylim(ax, [mMin - 0.5, mMax + 0.5]);
+    xticks(ax, pMin:pMax);
+    yticks(ax, mMin:mMax);
+    grid(ax, "off");
+    box(ax, "off");
+end
+
+save_plot_outputs(fig4, fullfile(outDir, "nc_by_np_density_side_by_side.png"), fontSize, 1100, 470);
 end
 
 
