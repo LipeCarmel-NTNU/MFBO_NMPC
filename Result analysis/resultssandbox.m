@@ -267,7 +267,7 @@ end
 % SSE vs SSdU (side-by-side), color mapped by z.
 fig1z = figure("Color", "w");
 tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
-seqMap = make_nature_sequential(256);
+seqMap = load_navia_colormap(256);
 panelLabels = ["a", "b"];
 for k = 1:2
     T = allT{k};
@@ -595,17 +595,27 @@ h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
-function cmap = make_nature_sequential(n)
-%MAKE_NATURE_SEQUENTIAL Sequential map using Nature palette anchor colors.
-% Anchors chosen for monotone-like progression in perceptual lightness:
-% Blue -> SkyBlue -> Yellow.
-NATURE_COLOR = nature_methods_colors();
-anchorsNature = [
-    NATURE_COLOR.Blue
-    NATURE_COLOR.SkyBlue
-    NATURE_COLOR.Yellow
-];
-cmap = interpolate_anchors(anchorsNature, n);
+function cmap = load_navia_colormap(n)
+%LOAD_NAVIA_COLORMAP Load navia colormap from dependencies/navia/navia.mat.
+% Expected variable: navia (256x3).
+matPath = which("navia.mat");
+if strlength(string(matPath)) == 0
+    error("Unable to locate navia.mat on MATLAB path.");
+end
+S = load(matPath, "navia");
+if ~isfield(S, "navia")
+    error("File %s does not contain variable 'navia'.", matPath);
+end
+cmap = double(S.navia);
+if size(cmap, 2) ~= 3
+    error("Variable 'navia' in %s must have 3 columns (RGB).", matPath);
+end
+if size(cmap, 1) ~= n
+    x = linspace(0, 1, size(cmap, 1));
+    xq = linspace(0, 1, n);
+    cmap = interp1(x, cmap, xq, "linear");
+end
+cmap = min(max(cmap, 0), 1);
 end
 
 
