@@ -1,13 +1,6 @@
 % test_surrogate.m
 % Validate Chebyshev-based multifidelity extrapolation against stored run outputs.
-%
-% What this script checks:
-% 1) Time-varying projected full-horizon costs from partial sums:
-%       J_hat(t) = J_partial(0:t) / frac(t)
-% 2) Normalized prediction trajectories:
-%       J_hat(t) / J_final
-%    (flat at 1 is ideal)
-% 3) End-of-run bias statistics and bias vs fidelity.
+% Kept output: normalized prediction trajectories only.
 
 clear; close all; clc
 
@@ -24,27 +17,27 @@ plotColors = good_colors(4);
 % ------------------------------------------------------------
 % Configuration
 % ------------------------------------------------------------
-fullHorizonHours = 10.0;            % assumed in main setup: T = 10*z hours
-maxFilesPerRun = 10;                % keep plots readable (set [] for all)
+fullHorizonHours = 10.0;  % T in tau = t / (z*T)
+maxFilesPerRun = 10;      % set [] to include all files
 useCoeffFileIfPresent = false;
 
-    cSSdU = [ ...
-         6.442657e-01 ...
-         4.682368e-01 ...
-        -1.455242e-01 ...
-         2.457724e-02 ...
-         2.198219e-02 ...
-        -1.598959e-02 ...
-    ].';
+cSSdU = [ ...
+     6.442657e-01 ...
+     4.682368e-01 ...
+    -1.455242e-01 ...
+     2.457724e-02 ...
+     2.198219e-02 ...
+    -1.598959e-02 ...
+].';
 
-    cSSE = [ ...
-         7.827330e-01 ...
-         3.771709e-01 ...
-        -2.433549e-01 ...
-         1.091471e-01 ...
-        -2.846259e-02 ...
-         1.358572e-03 ...
-    ].';
+cSSE = [ ...
+     7.827330e-01 ...
+     3.771709e-01 ...
+    -2.433549e-01 ...
+     1.091471e-01 ...
+    -2.846259e-02 ...
+     1.358572e-03 ...
+].';
 
 if useCoeffFileIfPresent
     coeffTxt = fullfile(projectRoot, "results", "numerical results", "surrogate_cheb_coeffs.txt");
@@ -67,8 +60,7 @@ records = struct( ...
     "runLabel", {}, "fileName", {}, "path", {}, ...
     "tauSSdU", {}, "tauSSE", {}, ...
     "zEval", {}, "ratioSSdU", {}, "ratioSSE", {}, ...
-    "endRatioSSdU", {}, "endRatioSSE", {}, ...
-    "endErrSSdU", {}, "endErrSSE", {});
+    "endRatioSSdU", {}, "endRatioSSE", {});
 
 for r = 1:size(runDirs, 1)
     runPath = runDirs{r, 1};
@@ -103,11 +95,6 @@ for r = 1:size(runDirs, 1)
             continue
         end
 
-        endRatioSSdU = ratioSSdU(end);
-        endRatioSSE = ratioSSE(end);
-        endErrSSdU = endRatioSSdU - 1;
-        endErrSSE = endRatioSSE - 1;
-
         records(end+1) = struct( ... %#ok<SAGROW>
             "runLabel", runLabel, ...
             "fileName", files(k).name, ...
@@ -117,10 +104,8 @@ for r = 1:size(runDirs, 1)
             "zEval", zEval, ...
             "ratioSSdU", ratioSSdU, ...
             "ratioSSE", ratioSSE, ...
-            "endRatioSSdU", endRatioSSdU, ...
-            "endRatioSSE", endRatioSSE, ...
-            "endErrSSdU", endErrSSdU, ...
-            "endErrSSE", endErrSSE);
+            "endRatioSSdU", ratioSSdU(end), ...
+            "endRatioSSE", ratioSSE(end));
     end
 end
 
@@ -128,54 +113,19 @@ if isempty(records)
     error("No valid run outputs processed.");
 end
 
-% ------------------------------------------------------------
-% Build matrices for boxplots (one box per out file)
-% ------------------------------------------------------------
 nRec = numel(records);
-dataSSdU = cell(1, nRec);
-dataSSE = cell(1, nRec);
-zVals = nan(1, nRec);
-endErrSSdU = nan(1, nRec);
-endErrSSE = nan(1, nRec);
-
-for i = 1:nRec
-    dataSSdU{i} = records(i).ratioSSdU(:);
-    dataSSE{i} = records(i).ratioSSE(:);
-    zVals(i) = records(i).zEval;
-    endErrSSdU(i) = records(i).endErrSSdU;
-    endErrSSE(i) = records(i).endErrSSE;
-end
 
 % ------------------------------------------------------------
-% Figures
+% Figure: normalized predicted cost trajectories
 % ------------------------------------------------------------
-fig1 = figure;
-subplot(2,1,1);
-boxplot(cell2mat(dataSSdU'), group_index(dataSSdU), "symbol", "");
-hold on; yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
-title("\textbf{a}");
-grid off; box off
-set_font_size(fontSize); format_tick(2, 2);
-
-subplot(2,1,2);
-boxplot(cell2mat(dataSSE'), group_index(dataSSE), "symbol", "");
-hold on; yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
-xlabel("Output file index");
-title("\textbf{b}");
-grid off; box off
-set_font_size(fontSize); format_tick(2, 2);
-set_fig_size(1200, 850);
-
-fig2 = figure;
+fig = figure;
 subplot(2,1,1); hold on
 for i = 1:nRec
     plot(records(i).tauSSdU, records(i).ratioSSdU, "-", "Color", [plotColors(1,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSdU", "ratioSSdU", plotColors(1,:));
 yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("Normalized time $\tau=t/T_f$");
+xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 title("\textbf{a}");
 grid off; box off
@@ -187,52 +137,12 @@ for i = 1:nRec
 end
 plot_median_curve(records, "tauSSE", "ratioSSE", plotColors(2,:));
 yline(1, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("Normalized time $\tau=t/T_f$");
+xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 title("\textbf{b}");
 grid off; box off
 set_font_size(fontSize); format_tick(2, 2);
 set_fig_size(1200, 900);
-
-fig3 = figure;
-subplot(1,2,1);
-scatter(zVals, endErrSSdU, 40, plotColors(1,:), "filled"); hold on
-yline(0, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("Evaluation fidelity $z$");
-ylabel("End bias $\widehat{J}_{TV}(T_f)/J_{TV,\mathrm{final}} - 1$");
-title("\textbf{a}");
-grid off; box off
-set_font_size(fontSize); format_tick(2, 3);
-
-subplot(1,2,2);
-scatter(zVals, endErrSSE, 40, plotColors(2,:), "filled"); hold on
-yline(0, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("Evaluation fidelity $z$");
-ylabel("End bias $\widehat{J}_{track}(T_f)/J_{track,\mathrm{final}} - 1$");
-title("\textbf{b}");
-grid off; box off
-set_font_size(fontSize); format_tick(2, 3);
-set_fig_size(1250, 480);
-
-fig4 = figure;
-subplot(1,2,1);
-histogram(endErrSSdU, "FaceColor", plotColors(1,:), "FaceAlpha", 0.7, "EdgeColor", "none"); hold on
-xline(0, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("End bias in $J_{TV}$ ratio");
-ylabel("Count");
-title("\textbf{a}");
-grid off; box off
-set_font_size(fontSize); format_tick(3, 0);
-
-subplot(1,2,2);
-histogram(endErrSSE, "FaceColor", plotColors(2,:), "FaceAlpha", 0.7, "EdgeColor", "none"); hold on
-xline(0, "--", "Color", plotColors(4,:), "LineWidth", 1.5);
-xlabel("End bias in $J_{track}$ ratio");
-ylabel("Count");
-title("\textbf{b}");
-grid off; box off
-set_font_size(fontSize); format_tick(3, 0);
-set_fig_size(1250, 480);
 
 % ------------------------------------------------------------
 % Save outputs
@@ -240,14 +150,8 @@ set_fig_size(1250, 480);
 plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir), mkdir(plotDir); end
 
-print(fig1, fullfile(plotDir, "surrogate_test_boxplots.png"), "-dpng", "-r300");
-print(fig1, fullfile(plotDir, "surrogate_test_boxplots.pdf"), "-dpdf", "-bestfit");
-print(fig2, fullfile(plotDir, "surrogate_test_ratio_vs_time.png"), "-dpng", "-r300");
-print(fig2, fullfile(plotDir, "surrogate_test_ratio_vs_time.pdf"), "-dpdf", "-bestfit");
-print(fig3, fullfile(plotDir, "surrogate_test_end_bias_vs_z.png"), "-dpng", "-r300");
-print(fig3, fullfile(plotDir, "surrogate_test_end_bias_vs_z.pdf"), "-dpdf", "-bestfit");
-print(fig4, fullfile(plotDir, "surrogate_test_end_bias_hist.png"), "-dpng", "-r300");
-print(fig4, fullfile(plotDir, "surrogate_test_end_bias_hist.pdf"), "-dpdf", "-bestfit");
+print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.png"), "-dpng", "-r300");
+print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.pdf"), "-dpdf", "-bestfit");
 
 % Numeric summary
 numDir = fullfile(projectRoot, "results", "numerical results");
@@ -258,18 +162,11 @@ fid = fopen(summaryTxt, "w");
 if fid == -1
     error("Could not open %s for writing.", summaryTxt);
 end
-cleanupObj = onCleanup(@() fclose(fid));
+cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
 
 fprintf(fid, "=== Surrogate Extrapolation Validation Summary ===\n");
 fprintf(fid, "Processed files: %d\n", nRec);
 fprintf(fid, "Full horizon used for fidelity mapping: %.3f h\n\n", fullHorizonHours);
-
-[m1, s1] = mean_std(endErrSSdU);
-[m2, s2] = mean_std(endErrSSE);
-fprintf(fid, "End-bias stats (ratio-1):\n");
-fprintf(fid, "SSdU mean = %.6e, std = %.6e\n", m1, s1);
-fprintf(fid, "SSE  mean = %.6e, std = %.6e\n\n", m2, s2);
-
 fprintf(fid, "Per-file end ratios:\n");
 fprintf(fid, "run,file,z_eval,end_ratio_SSdU,end_ratio_SSE\n");
 for i = 1:nRec
@@ -277,7 +174,7 @@ for i = 1:nRec
         records(i).zEval, records(i).endRatioSSdU, records(i).endRatioSSE);
 end
 
-fprintf("Saved surrogate test plots to: %s\n", plotDir);
+fprintf("Saved surrogate test plot to: %s\n", plotDir);
 fprintf("Saved summary to: %s\n", summaryTxt);
 
 % ------------------------------------------------------------
@@ -300,14 +197,26 @@ function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSS
     p2_e = as_col(out.case(2).partial_SSE);
     t = as_col(out.T);
 
+    % partial_SSdU starts at iteration 2; partial_SSE starts at iteration 1.
+    NdU = min([numel(p1_dU), numel(p2_dU), max(numel(t) - 1, 0)]);
+    NSE = min([numel(p1_e), numel(p2_e), numel(t)]);
+    if NdU < 3 || NSE < 3
+        return
+    end
+
+    p1_dU = p1_dU(1:NdU); p2_dU = p2_dU(1:NdU);
+    p1_e = p1_e(1:NSE); p2_e = p2_e(1:NSE);
+    tSSdU = t(2:(NdU + 1));
+    tSSE = t(1:NSE);
+
     cumSSdU = cumsum(p1_dU) + cumsum(p2_dU);
     cumSSE = cumsum(p1_e) + cumsum(p2_e);
 
-    fSSdU = t(2:end) / fullHorizonHours;
-    fSSE = t / fullHorizonHours;
-
-    tauSSdU = fSSdU;
-    tauSSE = fSSE;
+    fSSdU = tSSdU / fullHorizonHours;
+    fSSE = tSSE / fullHorizonHours;
+    if any(fSSdU < 0 | fSSdU > 1) || any(fSSE < 0 | fSSE > 1)
+        error("Encountered fidelity values outside [0,1] while building surrogate test ratios.");
+    end
 
     fracSSdU = min(Cheb5(2*fSSdU - 1, cSSdU), 1);
     fracSSE = min(Cheb5(2*fSSE - 1, cSSE), 1);
@@ -317,10 +226,8 @@ function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSS
     projSSdU = cumSSdU ./ fracSSdU;
     projSSE = cumSSE ./ fracSSE;
 
-    % Prefer stored final values; fallback to extrapolated final.
     finalSSdU = safe_scalar(out, "SSdU", projSSdU(end));
     finalSSE = safe_scalar(out, "SSE", projSSE(end));
-
     if ~isfinite(finalSSdU) || finalSSdU <= 0 || ~isfinite(finalSSE) || finalSSE <= 0
         return
     end
@@ -328,7 +235,10 @@ function [ratioSSdU, ratioSSE, tauSSdU, tauSSE, zEval] = compute_ratios(out, cSS
     ratioSSdU = projSSdU / finalSSdU;
     ratioSSE = projSSE / finalSSE;
 
-    zEval = out.theta(1);
+    tfHours = safe_scalar(out, "tf", tSSE(end));
+    zEval = min(max(tfHours / fullHorizonHours, 0), 1);
+    tauSSdU = tSSdU / max(tfHours, eps);
+    tauSSE = tSSE / max(tfHours, eps);
 end
 
 function x = as_col(x)
@@ -344,14 +254,6 @@ function y = Cheb5(x, c)
     T4 = 8*x.^4 - 8*x.^2 + 1;
     T5 = 16*x.^5 - 20*x.^3 + 5*x;
     y = c(1)*T0 + c(2)*T1 + c(3)*T2 + c(4)*T3 + c(5)*T4 + c(6)*T5;
-end
-
-function out = group_index(cellData)
-    n = numel(cellData);
-    out = [];
-    for i = 1:n
-        out = [out; i*ones(numel(cellData{i}), 1)]; %#ok<AGROW>
-    end
 end
 
 function plot_median_curve(records, xField, yField, color)
@@ -413,15 +315,5 @@ function v = safe_scalar(S, fieldName, fallback)
         end
     else
         v = fallback;
-    end
-end
-
-function [m, s] = mean_std(x)
-    x = x(isfinite(x));
-    if isempty(x)
-        m = NaN; s = NaN;
-    else
-        m = mean(x);
-        s = std(x);
     end
 end
