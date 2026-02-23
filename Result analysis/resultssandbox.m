@@ -63,7 +63,6 @@ fontSize = 20;
 
 %% Colors
 plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
-cBlack = [0 0 0];
 
 % figColors = figure("Color", "w");
 % axColors = axes(figColors); hold(axColors, "on");
@@ -104,9 +103,9 @@ TallCombined = [allT{1}; allT{2}];
 runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", optStartIter);
 write_runtime_and_parameter_summary(allT, allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder, optStartIter);
 
-create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors, cBlack);
+create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
 %% Combined Pareto
-plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors, cBlack);
+plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
 
@@ -255,7 +254,7 @@ end
 end
 
 
-function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors, cBlack)
+function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors)
 %CREATE_ANALYSIS_PLOTS_SIDE_BY_SIDE Generate core side-by-side analysis figures.
 if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
     return
@@ -276,7 +275,7 @@ for k = 1:2
     hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
         plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
     hGuide.Color = plotColors(3, :);
-    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", cBlack, "LineWidth", 0.7);
+    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
     scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
         "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
     set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
@@ -307,13 +306,13 @@ for k = 1:2
     ax = nexttile; hold(ax, "on");
     yyaxis(ax, "left");
     plot(ax, T.iteration, runtime_h, "-", "LineWidth", 2.0, "Color", plotColors(k, :));
-    ax.YColor = plotColors(k, :);
+    ax.YColor = "k";
     ylim(ax, [0, 4]);
-    xline(ax, 20.5, "--", "LineWidth", 2.0);
+    xline(ax, 20.5, "--", "LineWidth", 2.0, "Color", "k");
     ylabel(ax, "$t_{\mathrm{iter}}$ (h)");
     yyaxis(ax, "right");
     plot(ax, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
-    ax.YColor = plotColors(3, :);
+    ax.YColor = "k";
     ylim(ax, [0, 1]);
     ylabel(ax, "$z$ (dimensionless)");
     xlabel(ax, "$k$ (iteration)");
@@ -432,7 +431,7 @@ for k = 1:2
     cb.FontSize = fontSize;
 
     % Overlay points to preserve discrete-location visibility.
-    scatter(ax, p, m, 26, cBlack, "filled", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
+    scatter(ax, p, m, 26, "filled", "MarkerFaceColor", "k", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
 
     xlabel(ax, "$N_p$");
     ylabel(ax, "$N_c$");
@@ -512,15 +511,15 @@ end
 
 
 
-function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors, cBlack)
+function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotColors)
 %PLOT_COMBINED_PARETO_SAMPLES Plot all samples and final combined Pareto front.
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
 % All evaluated points as small black dots
 Tall = [T1; T2];
-scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, cBlack, ...
-    "filled", "MarkerEdgeColor", "none", "DisplayName", "All samples");
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, ...
+    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none", "DisplayName", "All samples");
 
 % One smooth curve through the final (combined) Pareto points.
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
@@ -732,7 +731,7 @@ plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWi
 plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
     "Color", plotColors(2,:), ...
     "DisplayName", string(datasets(2).name));
-xline(ax, 20.5, "--", "LineWidth", 2.0);
+xline(ax, 20.5, "--", "LineWidth", 2.0, "Color", "k");
 
 xlabel(ax, "$k$ (iteration)");
 ylabel(ax, "$t_{\mathrm{run}}$ (h)");

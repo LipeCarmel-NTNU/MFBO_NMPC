@@ -22,7 +22,6 @@ set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 16;
 NATURE_COLOR = nature_methods_colors();
 plotColors = [NATURE_COLOR.Blue; NATURE_COLOR.BluishGreen; NATURE_COLOR.ReddishPurple];
-lineBlack = [0 0 0];
 
 % %%%%%%%%%%
 % Configuration
@@ -134,7 +133,7 @@ for i = 1:nRec
     plot(records(i).tauSSdU, records(i).ratioSSdU, "-", "Color", [plotColors(1,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSdU", "ratioSSdU", plotColors(1,:));
-yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
+yline(1, "--", "Color", "k", "LineWidth", 1.8);
 xlabel("");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 t = title("\textbf{a}");
@@ -150,7 +149,7 @@ for i = 1:nRec
     plot(records(i).tauSSE, records(i).ratioSSE, "-", "Color", [plotColors(2,:), 0.25], "LineWidth", 1.0);
 end
 plot_median_curve(records, "tauSSE", "ratioSSE", plotColors(2,:));
-yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
+yline(1, "--", "Color", "k", "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 t = title("\textbf{b}");
@@ -171,7 +170,7 @@ fig95 = figure;
 subplot(2,1,1); hold on
 plot_percentile_band(fGridSSdU, YSSdU, plotColors(1,:), 0.20);
 plot_median_from_matrix(fGridSSdU, YSSdU, plotColors(1,:));
-yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
+yline(1, "--", "Color", "k", "LineWidth", 1.8);
 xlabel("");
 ylabel("$\widehat{J}_{TV}(t)/J_{TV,\mathrm{final}}$");
 t = title("\textbf{a}");
@@ -185,7 +184,7 @@ set_font_size(fontSize); format_tick(2, 2);
 subplot(2,1,2); hold on
 plot_percentile_band(fGridSSE, YSSE, plotColors(2,:), 0.20);
 plot_median_from_matrix(fGridSSE, YSSE, plotColors(2,:));
-yline(1, "--", "Color", lineBlack, "LineWidth", 1.8);
+yline(1, "--", "Color", "k", "LineWidth", 1.8);
 xlabel("Normalized time $\tau=t/(z\cdot T)$");
 ylabel("$\widehat{J}_{track}(t)/J_{track,\mathrm{final}}$");
 t = title("\textbf{b}");
