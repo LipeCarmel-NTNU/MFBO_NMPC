@@ -308,7 +308,7 @@ for k = 1:2
     plot(ax, T.iteration, runtime_h, "-", "LineWidth", 2.0, "Color", plotColors(k, :));
     ax.YColor = "k";
     ylim(ax, [0, 4]);
-    xline(ax, 20.5, "--", "LineWidth", 2.0, "Color", "k");
+    xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k");
     ylabel(ax, "$t_{\mathrm{iter}}$ (h)");
     yyaxis(ax, "right");
     plot(ax, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
@@ -324,8 +324,10 @@ for k = 1:2
     box(ax, "off");
     axes(ax);
     yyaxis(ax, "left");
+    yticks(ax, 0:1:4);
     format_tick(0, 1);
     yyaxis(ax, "right");
+    yticks(ax, 0:0.2:1);
     format_tick(0, 1);
 end
 save_plot_outputs(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), fontSize, 1200, 460);
@@ -731,7 +733,7 @@ plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWi
 plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
     "Color", plotColors(2,:), ...
     "DisplayName", string(datasets(2).name));
-xline(ax, 20.5, "--", "LineWidth", 2.0, "Color", "k");
+xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k");
 
 xlabel(ax, "$k$ (iteration)");
 ylabel(ax, "$t_{\mathrm{run}}$ (h)");

@@ -5,8 +5,9 @@ function run_analysis()
 % 1) Result analysis/analyze_test_run_metrics.m
 % 2) Result analysis/recover_boxplot_data.py
 % 3) Result analysis/resultssandbox.m
-% 4) results/numerical results/compile_results_txt.m
-% 5) Copy and overwrite all PDFs from results/graphical_results to
+% 4) J surrogate/surrogate.m
+% 5) results/numerical results/compile_results_txt.m
+% 6) Copy and overwrite all PDFs from results/graphical_results to
 %    Overleaf---MFBO-NMPC.
 
     scriptDir = fileparts(mfilename("fullpath"));
@@ -22,6 +23,9 @@ function run_analysis()
 
     run_script_in_base(fullfile(scriptDir, "resultssandbox.m"), ...
         "resultssandbox");
+
+    run_script_in_base(fullfile(projectRoot, "J surrogate", "surrogate.m"), ...
+        "surrogate");
 
     run_script_in_base(fullfile(projectRoot, "results", "numerical results", "compile_results_txt.m"), ...
         "compile_results_txt");

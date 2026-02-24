@@ -20,7 +20,7 @@ set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
 fontSize = 18;
 NATURE_COLOR = nature_methods_colors();
-plotColors = [NATURE_COLOR.Blue; NATURE_COLOR.BluishGreen];
+plotColors = [NATURE_COLOR.Blue; [0 0 0]];
 
 files = dir(fullfile(scriptDir, "surrogate_data_*.mat"));
 if isempty(files)
@@ -197,10 +197,8 @@ plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir)
     mkdir(plotDir);
 end
-print(fig_side, fullfile(plotDir, "surrogate_diagnostics_side_by_side.png"), "-dpng", "-r300");
-print(fig_side, fullfile(plotDir, "surrogate_diagnostics_side_by_side.pdf"), "-dpdf", "-bestfit");
-print(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked.png"), "-dpng", "-r300");
-print(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked.pdf"), "-dpdf", "-bestfit");
+save_figure_pair(fig_side, fullfile(plotDir, "surrogate_diagnostics_side_by_side"));
+save_figure_pair(fig_stack, fullfile(plotDir, "surrogate_diagnostics_stacked"));
 
 % =============================
 % Objectives
@@ -282,10 +280,15 @@ function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab,
         showXLabel = true;
     end
 
+    if size(plotColors, 1) < 1 || size(plotColors, 2) ~= 3
+        error("plotColors must be an N-by-3 RGB matrix with at least one row.");
+    end
+    fitColorIdx = min(3, size(plotColors, 1));
+
     fill([f; flipud(f)], [y_min; flipud(y_max)], plotColors(1,:), ...
         'FaceAlpha', 0.20, 'EdgeColor', 'none'); hold on
     plot(f, y_mean, '-', 'LineWidth', 2.2, 'Color', plotColors(1,:));
-    plot(f, y_hat, '--', 'LineWidth', 2.2, 'Color', plotColors(2,:));
+    plot(f, y_hat, '--', 'LineWidth', 2.2, 'Color', plotColors(fitColorIdx,:));
 
     xlim([0, 1]);
     ylim([0, 1.005]);
@@ -302,4 +305,10 @@ function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab,
     grid off; box off
     set_font_size(fontSize);
     format_tick(1, 1);
+end
+
+function save_figure_pair(figHandle, fileStem)
+%SAVE_FIGURE_PAIR Save one figure to PNG and PDF as a single combined layout.
+    exportgraphics(figHandle, fileStem + ".png", "Resolution", 300);
+    exportgraphics(figHandle, fileStem + ".pdf", "ContentType", "vector");
 end
