@@ -308,7 +308,7 @@ for k = 1:2
     plot(ax, T.iteration, runtime_h, "-", "LineWidth", 2.0, "Color", plotColors(k, :));
     ax.YColor = "k";
     ylim(ax, [0, 4]);
-    xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k");
+    xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k", "Alpha", 1);
     ylabel(ax, "$t_{\mathrm{iter}}$ (h)");
     yyaxis(ax, "right");
     plot(ax, T.iteration, double(T.f), "o", "LineWidth", 2.0, "MarkerSize", 4, "Color", plotColors(3, :));
@@ -433,7 +433,7 @@ for k = 1:2
     cb.FontSize = fontSize;
 
     % Overlay points to preserve discrete-location visibility.
-    scatter(ax, p, m, 26, "filled", "MarkerFaceColor", "k", "MarkerFaceAlpha", 0.35, "MarkerEdgeColor", "none");
+    scatter(ax, p, m, 26, "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none");
 
     xlabel(ax, "$N_p$");
     ylabel(ax, "$N_c$");
@@ -671,6 +671,49 @@ for k = 1:numel(datasets)
 end
 fprintf(fid, "  Case 1 + Case 2 (combined): %.6g\n\n", meanZCombined);
 
+% Share of optimization-phase points where N_c (=m) is 1.
+nc1PctCase = NaN(numel(allT), 1);
+nc1CountCase = zeros(numel(allT), 1);
+optRowsCase = zeros(numel(allT), 1);
+for k = 1:numel(allT)
+    [nc1PctCase(k), nc1CountCase(k), optRowsCase(k)] = ...
+        compute_m1_share_optimization(allT{k}, optimizationStartIter);
+end
+[nc1PctCombined, nc1CountCombined, optRowsCombined] = ...
+    compute_m1_share_optimization(Tall, optimizationStartIter);
+
+fprintf("Percentage of optimization points with N_c = 1:\n");
+for k = 1:numel(datasets)
+    fprintf("  %s: %d/%d (%.6g%%)\n", string(datasets(k).name), ...
+        nc1CountCase(k), optRowsCase(k), nc1PctCase(k));
+end
+fprintf("  Case 1 + Case 2 (combined): %d/%d (%.6g%%)\n", ...
+    nc1CountCombined, optRowsCombined, nc1PctCombined);
+
+fprintf(fid, "Percentage of optimization points with N_c = 1:\n");
+for k = 1:numel(datasets)
+    fprintf(fid, "  %s: %d/%d (%.6g%%)\n", char(string(datasets(k).name)), ...
+        nc1CountCase(k), optRowsCase(k), nc1PctCase(k));
+end
+fprintf(fid, "  Case 1 + Case 2 (combined): %d/%d (%.6g%%)\n\n", ...
+    nc1CountCombined, optRowsCombined, nc1PctCombined);
+
+% Export a compact standalone txt for manuscript bookkeeping.
+nc1Path = fullfile(outDir, "optimization_nc1_share.txt");
+fidNc1 = fopen(nc1Path, "w");
+if fidNc1 ~= -1
+    cleanupNc1 = onCleanup(@() fclose(fidNc1)); %#ok<NASGU>
+    fprintf(fidNc1, "Percentage of optimization points with N_c = 1:\n");
+    for k = 1:numel(datasets)
+        fprintf(fidNc1, "  %s: %d/%d (%.6g%%)\n", char(string(datasets(k).name)), ...
+            nc1CountCase(k), optRowsCase(k), nc1PctCase(k));
+    end
+    fprintf(fidNc1, "  Case 1 + Case 2 (combined): %d/%d (%.6g%%)\n", ...
+        nc1CountCombined, optRowsCombined, nc1PctCombined);
+else
+    warning("Unable to write N_c=1 optimization summary: %s", nc1Path);
+end
+
 for k = 1:numel(allTp)
     T = allTp{k};
     validM = isfinite(T.m);
@@ -691,6 +734,32 @@ for k = 1:numel(allTp)
     fprintf(fid, "  Top (lowest SSdU) rows: %d\n", topCount);
     fprintf(fid, "  Top (lowest SSdU) with p = 1 and m = 1: %d\n\n", topPM1);
 end
+end
+
+
+function [pctM1, countM1, nOpt] = compute_m1_share_optimization(T, optimizationStartIter)
+%COMPUTE_M1_SHARE_OPTIMIZATION Share of optimization rows with m (N_c) equal to 1.
+if isempty(T) || ...
+        ~ismember("m", string(T.Properties.VariableNames)) || ...
+        ~ismember("iteration", string(T.Properties.VariableNames))
+    pctM1 = NaN;
+    countM1 = 0;
+    nOpt = 0;
+    return
+end
+
+iter = double(T.iteration);
+mVals = double(T.m);
+optMask = iter > optimizationStartIter;
+nOpt = nnz(optMask);
+if nOpt == 0
+    pctM1 = NaN;
+    countM1 = 0;
+    return
+end
+
+countM1 = nnz(optMask & (mVals == 1));
+pctM1 = 100 * countM1 / nOpt;
 end
 
 
@@ -733,7 +802,7 @@ plot(ax, double(allT{1}.iteration), cumsum(runtime_h_1, "omitnan"), "-", "LineWi
 plot(ax, double(allT{2}.iteration), cumsum(runtime_h_2, "omitnan"), "-.", "LineWidth", 2.0, ...
     "Color", plotColors(2,:), ...
     "DisplayName", string(datasets(2).name));
-xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k");
+xline(ax, 20, "--", "LineWidth", 2.0, "Color", "k", "Alpha", 1);
 
 xlabel(ax, "$k$ (iteration)");
 ylabel(ax, "$t_{\mathrm{run}}$ (h)");

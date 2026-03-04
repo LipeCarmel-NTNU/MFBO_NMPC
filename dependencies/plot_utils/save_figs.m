@@ -1,4 +1,6 @@
 function save_figs(fig_group_number, name, varargin)
+    % Lipe Lima Carmel, 2026
+
     % Parse optional file extension
     if nargin > 2 && ischar(varargin{1})
         ext = varargin{1};
