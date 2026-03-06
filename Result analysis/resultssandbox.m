@@ -18,9 +18,10 @@
 % - `T`: full processed table for a run, including:
 %   `iteration`, `runtime_min`, `f`, `theta_p`, `theta_m`, `p`, `m`,
 %   and mapped weights (`Q_x*`, `R_u_x*`, `R_du_x*`).
-% - `Tp`: Pareto-optimal subset of `T` using minimisation of
+% - `Topt`: optimization-phase subset of `T` (DOE removed with k > 20).
+% - `Tp`: Pareto-optimal subset of `Topt` using minimisation of
 %   `J_track = SSE` and `J_TV = SSdU`, sorted by `SSE` (descending).
-% - `isPareto`: logical mask identifying Pareto points in `T`.
+% - `isPareto`: logical mask identifying Pareto points in `Topt`.
 %
 % Figure-generation method summary
 % - Build per-run and combined Pareto diagnostics from `results.csv`.
@@ -84,15 +85,17 @@ plotColors = nature_methods_colors(3); % Blue, Vermillion, Orange
 
 %% 
 allT = cell(numel(datasets), 1);
+allTopt = cell(numel(datasets), 1);
 allTp = cell(numel(datasets), 1);
 allPareto = cell(numel(datasets), 1);
 runtimeSummaryTables = cell(numel(datasets), 1);
 optStartIter = 20;
 
 for k = 1:numel(datasets)
-    [T, Tp, isPareto] = load_results_table(datasets(k).csvPath);
+    [T, Topt, Tp, isPareto] = load_results_table(datasets(k).csvPath, optStartIter);
     T = enrich_with_out_data(T, datasets(k).outDir);
     allT{k} = T;
+    allTopt{k} = Topt;
     allTp{k} = Tp;
     allPareto{k} = isPareto;
     display_pareto_table(Tp);
@@ -103,16 +106,19 @@ TallCombined = [allT{1}; allT{2}];
 runtimeSummaryCombined = display_runtime_phase_summary(TallCombined, "Case 1 + Case 2 (combined)", optStartIter);
 write_runtime_and_parameter_summary(allT, allTp, datasets, runtimeSummaryTables, runtimeSummaryCombined, numericalFolder, optStartIter);
 
-create_analysis_plots_side_by_side(allT, allPareto, datasets, graphicsFolder, fontSize, plotColors);
+create_analysis_plots_side_by_side(allT, allTopt, allPareto, datasets, graphicsFolder, fontSize, plotColors);
 %% Combined Pareto
-plot_combined_pareto_samples(allT{1}, allTp{1}, allT{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
+plot_combined_pareto_samples(allTopt{1}, allTp{1}, allTopt{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
 
-function [T, Tp, isPareto] = load_results_table(csvPath)
+function [T, Topt, Tp, isPareto] = load_results_table(csvPath, optimizationStartIter)
 %LOAD_RESULTS_TABLE Read one run CSV and construct derived tuning columns.
 if nargin < 1 || strlength(string(csvPath)) == 0
     error("You must provide csvPath.");
+end
+if nargin < 2
+    optimizationStartIter = 20;
 end
 if ~isfile(csvPath)
     error("CSV not found: %s", csvPath);
@@ -168,9 +174,14 @@ T.R_du_x3 = 10.^T.r_du3_log10;
 T.m = T.theta_m + 1;
 T.p = T.theta_p + T.m;
 
-isPareto = compute_pareto_mask(double(T.SSE), double(T.SSdU));
+% Exclude DOE points (iterations 1..optimizationStartIter) from all
+% Pareto/optimal-controller analyses.
+optMask = double(T.iteration) > optimizationStartIter;
+Topt = T(optMask, :);
 
-Tp = T(isPareto, :);
+isPareto = compute_pareto_mask(double(Topt.SSE), double(Topt.SSdU));
+
+Tp = Topt(isPareto, :);
 [~, ord_tune] = sort(double(Tp.SSE), "descend");
 Tp = Tp(ord_tune, :);
 
@@ -254,7 +265,7 @@ end
 end
 
 
-function create_analysis_plots_side_by_side(allT, allPareto, datasets, outDir, fontSize, plotColors)
+function create_analysis_plots_side_by_side(allT, allTopt, allPareto, datasets, outDir, fontSize, plotColors)
 %CREATE_ANALYSIS_PLOTS_SIDE_BY_SIDE Generate core side-by-side analysis figures.
 if numel(allT) < 2 || isempty(allT{1}) || isempty(allT{2})
     return
@@ -269,15 +280,20 @@ tiledlayout(fig1z, 1, 2, "Padding", "compact", "TileSpacing", "compact");
 seqMap = load_navia_colormap(256);
 panelLabels = ["a", "b"];
 for k = 1:2
-    T = allT{k};
+    T = allTopt{k};
     isPareto = allPareto{k};
     ax = nexttile; hold(ax, "on");
-    hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
-        plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
-    hGuide.Color = plotColors(3, :);
-    scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
-    scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
-        "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
+    if isempty(T)
+        text(ax, 0.5, 0.5, "No optimization points after DOE filtering", ...
+            "Units", "normalized", "HorizontalAlignment", "center", "Interpreter", "latex");
+    else
+        hGuide = plot_pareto_continuum(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), ...
+            plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
+        hGuide.Color = plotColors(3, :);
+        scatter(ax, double(T.SSdU), double(T.SSE), 80, double(T.f), "filled", "MarkerEdgeColor", "k", "LineWidth", 0.7);
+        scatter(ax, double(T.SSdU(isPareto)), double(T.SSE(isPareto)), 170, plotColors(3,:), ...
+            "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), "LineWidth", 1.2);
+    end
     set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
     xlim(ax, [1e-2, 1e2]);
     ylim(ax, [1e4, 1.3e5]);
@@ -463,7 +479,7 @@ tuningCols = ["timestamp","SSE","SSdU","J","p","m","f", ...
 tuningCols = tuningCols(ismember(tuningCols, string(Tp.Properties.VariableNames)));
 ParetoTuningTable = Tp(:, tuningCols);
 
-disp("Pareto frontier with tuning weights (Q, R, Rdu):");
+disp("Pareto frontier with tuning weights (Q, R, Rdu) [optimization phase only, DOE excluded]:");
 disp(ParetoTuningTable);
 end
 
@@ -518,10 +534,10 @@ function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotC
 fig = figure("Color", "w");
 ax = axes(fig); hold(ax, "on");
 
-% All evaluated points as small black dots
+% Optimization-phase evaluated points (DOE removed) as small black dots.
 Tall = [T1; T2];
 scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, ...
-    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none", "DisplayName", "All samples");
+    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none", "DisplayName", "Optimization samples");
 
 % One smooth curve through the final (combined) Pareto points.
 finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
@@ -722,7 +738,7 @@ for k = 1:numel(allTp)
     countM1 = nnz(T.m(validM) == 1);
     countP1 = nnz(T.p(validP) == 1);
 
-    fprintf(fid, "%s Pareto counts:\n", char(string(datasets(k).name)));
+    fprintf(fid, "%s Pareto counts (optimization phase only, DOE excluded):\n", char(string(datasets(k).name)));
     fprintf(fid, "  m = 1: %d/%d\n", countM1, nRows);
     fprintf(fid, "  p = 1: %d/%d\n", countP1, nRows);
 

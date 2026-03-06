@@ -14,7 +14,8 @@ function plot_refined_frontier_change()
 %   - results/graphical_results/refined_frontier_change.pdf
 %
 % Figure content:
-%   - Original non-Pareto samples only (gray)
+%   - Original non-Pareto samples only (gray), excluding DOE points
+%     (iterations 1..20 in run1/run2)
 %   - Refined points (blue)
 %   - Refined Pareto frontier (green)
 %   - Promoted points with original z < 1 (red stars)
@@ -35,10 +36,11 @@ function plot_refined_frontier_change()
         struct("runLabel","Case 2 refined", "path", fullfile(projectRoot, "results", "final_fidelity_same_noise", "run2_full_f1_same_noise", "results_full.csv"))
     ];
 
-    print_runtime_cfg(originalFiles, refinedFiles);
+    doeIterationsPerRun = 20;
+    print_runtime_cfg(originalFiles, refinedFiles, doeIterationsPerRun);
 
-    T_orig = load_and_stack_csv(originalFiles);
-    T_ref = load_and_stack_csv(refinedFiles);
+    T_orig = load_and_stack_csv(originalFiles, doeIterationsPerRun);
+    T_ref = load_and_stack_csv(refinedFiles, 0);
 
     if isempty(T_orig)
         error("No rows loaded from original result files.");
@@ -154,11 +156,12 @@ function plot_refined_frontier_change()
 end
 
 
-function print_runtime_cfg(originalFiles, refinedFiles)
+function print_runtime_cfg(originalFiles, refinedFiles, doeIterationsPerRun)
 %PRINT_RUNTIME_CFG Print analysis/runtime settings to command window.
     fprintf("=== plot_refined_frontier_change settings ===\n");
     fprintf("MATLAB version: %s\n", version);
     fprintf("Current folder: %s\n", pwd);
+    fprintf("DOE exclusion in original runs: drop first %d iterations per run\n", doeIterationsPerRun);
 
     p = gcp("nocreate");
     if isempty(p)
@@ -276,8 +279,11 @@ function print_cfg_struct(S)
 end
 
 
-function T = load_and_stack_csv(fileDefs)
+function T = load_and_stack_csv(fileDefs, dropFirstNRows)
 %LOAD_AND_STACK_CSV Load multiple CSV files and stack relevant columns.
+    if nargin < 2
+        dropFirstNRows = 0;
+    end
     T = table();
     for k = 1:numel(fileDefs)
         p = fileDefs(k).path;
@@ -293,12 +299,16 @@ function T = load_and_stack_csv(fileDefs)
             end
         end
         Tk.run_label = repmat(string(fileDefs(k).runLabel), height(Tk), 1);
+        Tk.iteration = (1:height(Tk)).';
+        if dropFirstNRows > 0
+            Tk = Tk(Tk.iteration > dropFirstNRows, :);
+        end
         if ismember("theta_1", string(Tk.Properties.VariableNames))
             Tk.z_eval = double(Tk.theta_1);
         else
             Tk.z_eval = nan(height(Tk), 1);
         end
-        Tk = Tk(:, ["run_label", "timestamp", "SSE", "SSdU", "z_eval"]);
+        Tk = Tk(:, ["run_label", "iteration", "timestamp", "SSE", "SSdU", "z_eval"]);
         T = [T; Tk]; %#ok<AGROW>
     end
 end
@@ -346,6 +356,7 @@ function write_promoted_report(reportPath, promotedTs, T_orig, T_ref, promotedId
     cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
 
     fprintf(fid, "Promoted to refined Pareto frontier with original z < 1\n");
+    fprintf(fid, "Original dataset excludes DOE rows (iterations 1..20 in run1/run2).\n");
     fprintf(fid, "Definition: original non-Pareto -> refined Pareto AND original theta_1 < 1\n");
     fprintf(fid, "Count: %d\n\n", numel(promotedTs));
     fprintf(fid, "timestamp,orig_SSE,orig_SSdU,orig_z,refined_SSE,refined_SSdU\n");

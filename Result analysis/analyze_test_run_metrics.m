@@ -30,6 +30,7 @@ cfg.run_folders = [
     struct("label","Case 1","subfolder","run1_full_f1_no_noise");
     struct("label","Case 2","subfolder","run2_full_f1_no_noise")
 ];
+cfg.doe_last_iteration = 20;
 cfg.final_pareto_timestamps = [
     "20260131_151035";
     "20260201_111557";
@@ -43,6 +44,8 @@ cfg.final_pareto_timestamps = [
     "20260211_122653";
     "20260211_134235"
 ];
+cfg.final_pareto_timestamps = filter_final_pareto_timestamps_excluding_doe( ...
+    cfg.final_pareto_timestamps, cfg.results_root, cfg.doe_last_iteration);
 cfg.settling_tol = 0.05;
 cfg.optim_mean_sim_time_h = 8.09603;
 
@@ -622,6 +625,49 @@ for i = 1:numel(stateId)
         otherwise
             stateLabels(i) = string(stateId(i));
     end
+end
+end
+
+
+function filteredTs = filter_final_pareto_timestamps_excluding_doe(finalTs, resultsRoot, doeLastIteration)
+%FILTER_FINAL_PARETO_TIMESTAMPS_EXCLUDING_DOE Remove timestamps from DOE phase.
+filteredTs = finalTs(:);
+if isempty(filteredTs)
+    return
+end
+
+allowedTs = strings(0,1);
+for runName = ["run1","run2"]
+    csvPath = fullfile(resultsRoot, runName, "results.csv");
+    if ~isfile(csvPath)
+        continue
+    end
+
+    Tcsv = readtable(csvPath, "TextType", "string");
+    if ~ismember("timestamp", string(Tcsv.Properties.VariableNames))
+        continue
+    end
+
+    if ismember("iteration", string(Tcsv.Properties.VariableNames))
+        iter = double(Tcsv.iteration);
+    else
+        iter = (1:height(Tcsv)).';
+    end
+    optMask = iter > doeLastIteration;
+    allowedTs = [allowedTs; string(Tcsv.timestamp(optMask))]; %#ok<AGROW>
+end
+
+if isempty(allowedTs)
+    return
+end
+
+allowedTs = unique(allowedTs, "stable");
+oldTs = filteredTs;
+filteredTs = intersect(filteredTs, allowedTs, "stable");
+removedTs = setdiff(oldTs, filteredTs, "stable");
+if ~isempty(removedTs)
+    fprintf("Excluded %d configured Pareto timestamps from DOE phase (k <= %d).\n", ...
+        numel(removedTs), doeLastIteration);
 end
 end
 

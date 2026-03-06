@@ -63,6 +63,7 @@ PLOT_CONVENTION.update(
 )
 
 REFERENCE_TIME_H = 8.09603
+DOE_ROWS_PER_RUN = 20
 FINAL_PARETO_TIMESTAMPS = {
     "20260131_151035",
     "20260201_111557",
@@ -185,6 +186,7 @@ def build_np_from_results_csv(project_root: Path) -> pd.DataFrame:
         df = pd.read_csv(csv_path)
         if not {"timestamp", "theta_2", "theta_3"}.issubset(df.columns):
             continue
+        df = drop_doe_rows(df, DOE_ROWS_PER_RUN)
 
         df["timestamp"] = df["timestamp"].astype(str)
         df = df[df["timestamp"].isin(FINAL_PARETO_TIMESTAMPS)].copy()
@@ -213,6 +215,7 @@ def build_nc_from_results_csv(project_root: Path) -> pd.DataFrame:
         df = pd.read_csv(csv_path)
         if not {"timestamp", "theta_3"}.issubset(df.columns):
             continue
+        df = drop_doe_rows(df, DOE_ROWS_PER_RUN)
 
         df["timestamp"] = df["timestamp"].astype(str)
         df = df[df["timestamp"].isin(FINAL_PARETO_TIMESTAMPS)].copy()
@@ -235,6 +238,17 @@ def _first_existing(paths: list[Path]) -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def drop_doe_rows(df: pd.DataFrame, n_doe: int) -> pd.DataFrame:
+    """Drop DOE rows (first n_doe evaluations) from one run dataframe."""
+    if n_doe <= 0 or df.empty:
+        return df
+    if "iteration" in df.columns:
+        iter_num = pd.to_numeric(df["iteration"], errors="coerce")
+        if iter_num.notna().any():
+            return df.loc[iter_num > n_doe].copy()
+    return df.iloc[n_doe:].copy()
 
 
 def scattered_boxplot(
