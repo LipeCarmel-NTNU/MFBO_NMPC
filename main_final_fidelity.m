@@ -71,6 +71,7 @@ function run_timestamp_list(cfg_run, base, run_label, timestamps)
     results_csv = fullfile(out_dir, "results_full.csv");
     theta_len = 1 + 2 + base.nx + 2*base.nu;
     init_results_csv(results_csv, theta_len);
+    existing_ts = load_results_csv_timestamps(results_csv);
 
     for i = 1:numel(timestamps)
         ts = timestamps(i);
@@ -83,7 +84,27 @@ function run_timestamp_list(cfg_run, base, run_label, timestamps)
         % Skip reruns if full simulation output already exists in output folder
         full_result_path = fullfile(out_dir, "out_full_" + ts + ".mat");
         if isfile(full_result_path)
-            fprintf("Skipping %s (results already exist in %s)\n", ts, full_result_path);
+            if ~ismember(ts, existing_ts)
+                R = load(full_result_path, "out", "theta");
+                if isfield(R, "out") && isfield(R.out, "SSE") && isfield(R.out, "SSdU") && isfield(R.out, "runtime_s")
+                    if isfield(R, "theta")
+                        theta_csv = R.theta;
+                    else
+                        theta_csv = theta;
+                    end
+                    SSE = R.out.SSE;
+                    SSdU = R.out.SSdU;
+                    runtime_s = R.out.runtime_s;
+                    J = SSE + 1e4 * SSdU;
+                    append_results_row(results_csv, char(ts), SSE, SSdU, J, runtime_s, theta_csv);
+                    existing_ts(end+1,1) = ts; %#ok<AGROW>
+                    fprintf("Recovered missing CSV row for %s from existing %s\n", ts, full_result_path);
+                else
+                    warning("Existing full result missing required fields; cannot recover CSV row: %s", full_result_path);
+                end
+            else
+                fprintf("Skipping %s (results already exist in %s)\n", ts, full_result_path);
+            end
             continue
         end
 
@@ -103,6 +124,7 @@ function run_timestamp_list(cfg_run, base, run_label, timestamps)
         J = SSE + 1e4 * SSdU;
 
         append_results_row(results_csv, char(ts), SSE, SSdU, J, runtime_s, theta);
+        existing_ts(end+1,1) = ts; %#ok<AGROW>
         save(fullfile(out_dir, "out_full_" + ts + ".mat"), "ts", "out", "theta", "cfg_run", "base");
     end
 end
@@ -265,6 +287,20 @@ function init_results_csv(results_csv, theta_len)
     end
     fprintf(fid, "\n");
     fclose(fid);
+end
+
+function timestamps = load_results_csv_timestamps(results_csv)
+%LOAD_RESULTS_CSV_TIMESTAMPS Read existing timestamp column from results CSV.
+    if ~isfile(results_csv)
+        timestamps = strings(0,1);
+        return
+    end
+    T = readtable(results_csv, "TextType", "string");
+    if ~ismember("timestamp", string(T.Properties.VariableNames))
+        timestamps = strings(0,1);
+        return
+    end
+    timestamps = unique(string(T.timestamp), "stable");
 end
 
 function append_results_row(results_csv, ts, SSE, SSdU, J, runtime_s, theta)

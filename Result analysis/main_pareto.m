@@ -883,6 +883,7 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
 
     apply_combined_axes_style(axL, 20);
     [xLimR, yLimR] = refined_pareto_axis_limits_10pct(TrefPareto);
+    xLimR(1) = 2e-2;
     apply_combined_axes_style(axR, 20);
     xlim(axR, xLimR);
     ylim(axR, yLimR);
