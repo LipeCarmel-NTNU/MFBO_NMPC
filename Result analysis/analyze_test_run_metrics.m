@@ -31,19 +31,8 @@ cfg.run_folders = [
     struct("label","Case 2","subfolder","run2_full_f1_no_noise")
 ];
 cfg.doe_last_iteration = 20;
-cfg.final_pareto_timestamps = [
-    "20260131_151035";
-    "20260201_111557";
-    "20260201_111928";
-    "20260201_192807";
-    "20260201_223337";
-    "20260201_232106";
-    "20260210_151703";
-    "20260210_171107";
-    "20260210_180826";
-    "20260211_122653";
-    "20260211_134235"
-];
+cfg.final_pareto_timestamps = compute_combined_non_doe_pareto_timestamps( ...
+    cfg.results_root, cfg.doe_last_iteration);
 cfg.final_pareto_timestamps = filter_final_pareto_timestamps_excluding_doe( ...
     cfg.final_pareto_timestamps, cfg.results_root, cfg.doe_last_iteration);
 cfg.settling_tol = 0.05;
@@ -668,6 +657,65 @@ removedTs = setdiff(oldTs, filteredTs, "stable");
 if ~isempty(removedTs)
     fprintf("Excluded %d configured Pareto timestamps from DOE phase (k <= %d).\n", ...
         numel(removedTs), doeLastIteration);
+end
+end
+
+
+function paretoTs = compute_combined_non_doe_pareto_timestamps(resultsRoot, doeLastIteration)
+%COMPUTE_COMBINED_NON_DOE_PARETO_TIMESTAMPS Compute combined Pareto timestamps from run1/run2 CSVs.
+run1Csv = fullfile(resultsRoot, "run1", "results.csv");
+run2Csv = fullfile(resultsRoot, "run2", "results.csv");
+if ~isfile(run1Csv) || ~isfile(run2Csv)
+    error("Missing run results CSVs required for Pareto timestamp computation.");
+end
+
+T1 = readtable(run1Csv, "TextType", "string");
+T2 = readtable(run2Csv, "TextType", "string");
+requiredCols = ["timestamp", "SSE", "SSdU"];
+for c = requiredCols
+    if ~ismember(c, string(T1.Properties.VariableNames))
+        error("Missing column '%s' in %s.", c, run1Csv);
+    end
+    if ~ismember(c, string(T2.Properties.VariableNames))
+        error("Missing column '%s' in %s.", c, run2Csv);
+    end
+end
+
+if ismember("iteration", string(T1.Properties.VariableNames))
+    iter1 = double(T1.iteration);
+else
+    iter1 = (1:height(T1)).';
+end
+if ismember("iteration", string(T2.Properties.VariableNames))
+    iter2 = double(T2.iteration);
+else
+    iter2 = (1:height(T2)).';
+end
+
+T1 = T1(iter1 > doeLastIteration, :);
+T2 = T2(iter2 > doeLastIteration, :);
+Tall = [T1(:, ["timestamp", "SSE", "SSdU"]); T2(:, ["timestamp", "SSE", "SSdU"])];
+
+isPareto = compute_pareto_mask_local(double(Tall.SSE), double(Tall.SSdU));
+Tp = Tall(isPareto, :);
+[~, ord] = sort(double(Tp.SSdU), "ascend");
+Tp = Tp(ord, :);
+paretoTs = unique(string(Tp.timestamp), "stable");
+fprintf("Computed combined non-DOE Pareto timestamp count: %d\n", numel(paretoTs));
+end
+
+
+function isPareto = compute_pareto_mask_local(Jtrack, Jtv)
+%COMPUTE_PARETO_MASK_LOCAL Non-dominated mask (lower is better in both objectives).
+n = numel(Jtrack);
+isPareto = true(n, 1);
+for i = 1:n
+    dominates_i = (Jtrack <= Jtrack(i)) & (Jtv <= Jtv(i)) & ...
+                  ((Jtrack < Jtrack(i)) | (Jtv < Jtv(i)));
+    dominates_i(i) = false;
+    if any(dominates_i)
+        isPareto(i) = false;
+    end
 end
 end
 
