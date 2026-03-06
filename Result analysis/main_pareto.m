@@ -416,43 +416,9 @@ function plot_combined_pareto_samples(T1, Tp1, T2, Tp2, outPath, fontSize, plotC
 %PLOT_COMBINED_PARETO_SAMPLES Show global optimization tradeoff across both runs.
 fig = figure("Color", "w", "Name", "Combined Pareto Samples");
 ax = axes(fig); hold(ax, "on");
+plot_combined_pareto_base(ax, T1, Tp1, T2, Tp2, plotColors);
 
-% Optimization-phase evaluated points (DOE removed) as small black dots.
-Tall = [T1; T2];
-if ismember("iteration", string(Tall.Properties.VariableNames)) && any(double(Tall.iteration) <= 20)
-    error("Combined Pareto plot received DOE rows (iteration <= 20), which is not allowed.");
-end
-scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, ...
-    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none", "DisplayName", "Optimization samples");
-
-% One smooth curve through the final (combined) Pareto points.
-finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
-Tf = Tall(finalMask, :);
-hCurve = plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
-hCurve.Color = plotColors(3, :);
-
-% Pareto points per case (filled markers) drawn after curve to stay on top.
-scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 80, plotColors(1,:), ...
-    "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
-    "LineWidth", 1.4);
-scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 90, plotColors(2,:), ...
-    "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
-    "LineWidth", 1.4);
-
-% Circle only final (combined) Pareto points with a visible gap.
-scatter(ax, double(Tf.SSdU), double(Tf.SSE), 300, plotColors(3,:), ...
-    "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), ...
-    "LineWidth", 2);
-
-set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
-xlim(ax, [1e-2, 2e0]);
-ylim(ax, [1e4, 3.5e4]);
-xlabel(ax, "$J_{\mathrm{TV}}$");
-ylabel(ax, "$J_{\mathrm{track}}$");
-grid(ax, "off");
-box(ax, "off");
-axes(ax);
-format_tick(1, 1);
+apply_combined_axes_style(ax, fontSize);
 
 save_plot_outputs(fig, outPath, fontSize, 920, 520);
 end
@@ -464,7 +430,9 @@ function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds, yBounds)
 ySort = y(ord);
 
 if numel(xSort) < 3
-    h = plot(ax, xSort, ySort, "-", "Color", curveColor, "LineWidth", 2.0);
+    h = plot(ax, xSort, ySort, "-o", ...
+        "Color", curveColor, "LineWidth", 2.0, ...
+        "MarkerSize", 7, "MarkerFaceColor", "w", "MarkerEdgeColor", curveColor);
     return;
 end
 
@@ -495,6 +463,70 @@ if nargin >= 5 && ~isempty(xBounds)
 end
 
 h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
+plot(ax, xSort, ySort, "o", ...
+    "Color", curveColor, ...
+    "MarkerSize", 7, ...
+    "MarkerFaceColor", "w", ...
+    "MarkerEdgeColor", curveColor, ...
+    "LineWidth", 1.4);
+end
+
+
+function [finalMask, Tf] = plot_combined_pareto_base(ax, T1, Tp1, T2, Tp2, plotColors)
+%PLOT_COMBINED_PARETO_BASE Shared base drawing used by Figure 3 and Figure 5a/5b.
+Tall = [T1; T2];
+if ismember("iteration", string(Tall.Properties.VariableNames)) && any(double(Tall.iteration) <= 20)
+    error("Combined Pareto plot received DOE rows (iteration <= 20), which is not allowed.");
+end
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, ...
+    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none", "DisplayName", "Optimization samples");
+
+finalMask = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
+Tf = Tall(finalMask, :);
+plot_pareto_continuum(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), [1e-2, 1e2], [1e4, 1.3e5]);
+
+scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 80, plotColors(1,:), ...
+    "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
+    "LineWidth", 1.4);
+scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 90, plotColors(2,:), ...
+    "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
+    "LineWidth", 1.4);
+
+scatter(ax, double(Tf.SSdU), double(Tf.SSE), 300, plotColors(3,:), ...
+    "o", "MarkerFaceColor", "none", "MarkerEdgeColor", plotColors(3,:), ...
+    "LineWidth", 2);
+end
+
+
+function plot_combined_samples_no_guide(ax, T1, Tp1, T2, Tp2, plotColors)
+%PLOT_COMBINED_SAMPLES_NO_GUIDE Combined samples + case markers, without guideline/pareto ring.
+Tall = [T1; T2];
+if ismember("iteration", string(Tall.Properties.VariableNames)) && any(double(Tall.iteration) <= 20)
+    error("Combined Pareto plot received DOE rows (iteration <= 20), which is not allowed.");
+end
+scatter(ax, double(Tall.SSdU), double(Tall.SSE), 18, ...
+    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none");
+
+scatter(ax, double(Tp1.SSdU), double(Tp1.SSE), 80, plotColors(1,:), ...
+    "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), ...
+    "LineWidth", 1.4);
+scatter(ax, double(Tp2.SSdU), double(Tp2.SSE), 90, plotColors(2,:), ...
+    "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), ...
+    "LineWidth", 1.4);
+end
+
+
+function apply_combined_axes_style(ax, fontSize)
+%APPLY_COMBINED_AXES_STYLE Match Figure 3 axes/tick styling.
+set(ax, "XScale", "log", "YScale", "log", "FontSize", fontSize);
+xlim(ax, [1e-2, 2e0]);
+ylim(ax, [1e4, 3.5e4]);
+xlabel(ax, "$J_{\mathrm{TV}}$");
+ylabel(ax, "$J_{\mathrm{track}}$");
+grid(ax, "off");
+box(ax, "off");
+axes(ax);
+format_tick(1, 1);
 end
 
 
@@ -824,15 +856,20 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     matchedOrigParetoCount = nnz(origParetoMatched);
     matchedRefParetoCount = nnz(refParetoMatched);
 
+    T_orig_run1 = T_orig(string(T_orig.run_key) == "run1", :);
+    T_orig_run2 = T_orig(string(T_orig.run_key) == "run2", :);
+    Tp_orig_run1 = T_orig_run1(compute_pareto_mask(double(T_orig_run1.SSE), double(T_orig_run1.SSdU)), :);
+    Tp_orig_run2 = T_orig_run2(compute_pareto_mask(double(T_orig_run2.SSE), double(T_orig_run2.SSdU)), :);
+
     fig = figure("Color", "w", "Toolbar", "none", "Name", "Pareto Frontier Change");
     tiledlayout(fig, 1, 2, "Padding", "compact", "TileSpacing", "compact");
     set(fig, "Position", [80 80 1400 560]);
 
     axL = nexttile; hold(axL, "on");
-    [isParetoLeft, ~] = plot_original_frontier_from_non_doe(axL, T_orig, plotColors, doeIterationsPerRun);
+    [isParetoLeft, ~] = plot_combined_pareto_base(axL, T_orig_run1, Tp_orig_run1, T_orig_run2, Tp_orig_run2, plotColors);
 
     axR = nexttile; hold(axR, "on");
-    plot_original_frontier_from_non_doe(axR, T_orig, plotColors, doeIterationsPerRun);
+    plot_combined_samples_no_guide(axR, T_orig_run1, Tp_orig_run1, T_orig_run2, Tp_orig_run2, plotColors);
     scatter(axR, double(T_ref.SSdU), double(T_ref.SSE), 42, ...
         "filled", "MarkerFaceColor", colRefAll, "MarkerEdgeColor", "none");
     TrefPareto = T_ref(isParetoRef, :);
@@ -844,17 +881,14 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
             "p", "MarkerFaceColor", colPromoted, "MarkerEdgeColor", "k", "LineWidth", 0.7);
     end
 
-    for ax = [axL, axR]
-        set(ax, "XScale", "log", "YScale", "log", "FontSize", 16);
-        xlim(ax, [1e-2, 2e0]);
-        ylim(ax, [1e4, 3.5e4]);
-        xlabel(ax, "$J_{\mathrm{TV}}$", "Interpreter", "latex");
-        ylabel(ax, "$J_{\mathrm{track}}$", "Interpreter", "latex");
-        grid(ax, "off");
-        box(ax, "off");
-        axes(ax);
-        format_tick(1, 1);
-    end
+    apply_combined_axes_style(axL, 20);
+    [xLimR, yLimR] = refined_pareto_axis_limits_10pct(TrefPareto);
+    apply_combined_axes_style(axR, 20);
+    xlim(axR, xLimR);
+    ylim(axR, yLimR);
+    axes(axR);
+    format_tick(1, 1);
+
     title(axL, "$\mathbf{a}$", "Interpreter", "latex");
     title(axR, "$\mathbf{b}$", "Interpreter", "latex");
     axL.TitleHorizontalAlignment = "left";
@@ -883,6 +917,22 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     fprintf("Original Pareto points in matched set: %d\n", matchedOrigParetoCount);
     fprintf("Refined Pareto points in matched set: %d\n", matchedRefParetoCount);
     fprintf("Promoted to Pareto with z < 1: %d\n", numel(promotedIdxRef));
+end
+
+
+function [xLim, yLim] = refined_pareto_axis_limits_10pct(TrefPareto)
+%REFINED_PARETO_AXIS_LIMITS_10PCT Axis limits set to +/-10% of refined Pareto cost range.
+xVals = double(TrefPareto.SSdU);
+yVals = double(TrefPareto.SSE);
+xVals = xVals(isfinite(xVals) & (xVals > 0));
+yVals = yVals(isfinite(yVals) & (yVals > 0));
+if isempty(xVals) || isempty(yVals)
+    xLim = [1e-2, 2e0];
+    yLim = [1e4, 3.5e4];
+    return
+end
+xLim = [0.9 * min(xVals), 1.1 * max(xVals)];
+yLim = [0.9 * min(yVals), 1.1 * max(yVals)];
 end
 
 
