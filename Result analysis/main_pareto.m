@@ -1,4 +1,5 @@
-% RESULTSSANDBOX
+function main_pareto()
+% MAIN_PARETO
 % Post-processing hub for MFBO-NMPC optimization outcomes.
 %
 % Intent
@@ -26,7 +27,7 @@
 
 
 %% Dependencies
-clear; close all; clc
+close all; clc
 scriptDir = fileparts(mfilename("fullpath"));
 projectRoot = fileparts(scriptDir);
 addpath(genpath(fullfile(projectRoot, "dependencies")));
@@ -105,6 +106,10 @@ create_analysis_plots_side_by_side(allT, allTopt, allPareto, datasets, graphicsF
 plot_combined_pareto_samples(allTopt{1}, allTp{1}, allTopt{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
+% Refined comparison (former plot_refined_frontier_change.m logic).
+run_refined_frontier_change(projectRoot, graphicsFolder, optStartIter);
+end
+
 
 function [T, Topt, Tp, isPareto] = load_results_table(csvPath, optimizationStartIter)
 %LOAD_RESULTS_TABLE Build one run table and derive optimization-only subset.
@@ -172,6 +177,10 @@ T.p = T.theta_p + T.m;
 % Pareto/optimal-controller analyses.
 optMask = double(T.iteration) > optimizationStartIter;
 Topt = T(optMask, :);
+
+if height(Topt) ~= 101
+    error('DOE LEAK')
+end
 
 isPareto = compute_pareto_mask(double(Topt.SSE), double(Topt.SSdU));
 
@@ -339,124 +348,6 @@ for k = 1:2
     format_tick(0, 1);
 end
 save_plot_outputs(fig2, fullfile(outDir, "runtime_vs_iteration_side_by_side.png"), fontSize, 1200, 460);
-
-% z, N_p, N_c by iteration (3x2)
-fig3 = figure("Color", "w", "Name", "Fidelity and Horizons by Iteration");
-tiledlayout(fig3, 3, 2, "Padding", "compact", "TileSpacing", "compact");
-panelLabels3x2 = ["a", "b", "c", "d", "e", "f"];
-
-for k = 1:2
-    T = allT{k};
-    iter = double(T.iteration);
-
-    % Row 1: z by k
-    ax1 = nexttile((1 - 1) * 2 + k); hold(ax1, "on");
-    plot(ax1, iter, double(T.f), "-", "LineWidth", 2.0, "Color", plotColors(3, :));
-    plot(ax1, iter, double(T.f), "o", "MarkerSize", 3.5, "Color", plotColors(3, :));
-    ylim(ax1, [0, 1]);
-    xlim(ax1, [1, max(1, height(T))]);
-    ylabel(ax1, "$z$");
-    xlabel(ax1, "");
-    title(ax1, "$\mathbf{" + panelLabels3x2((1 - 1) * 2 + k) + "}$", "Interpreter", "latex");
-    ax1.TitleHorizontalAlignment = "left";
-    set(ax1, "FontSize", fontSize);
-    grid(ax1, "off"); box(ax1, "off");
-    format_tick(0, 1);
-
-    % Row 2: N_p by k
-    ax2 = nexttile((2 - 1) * 2 + k); hold(ax2, "on");
-    plot(ax2, iter, double(T.p), "-", "LineWidth", 2.0, "Color", plotColors(k, :));
-    plot(ax2, iter, double(T.p), "o", "MarkerSize", 3.5, "Color", plotColors(k, :));
-    xlim(ax2, [1, max(1, height(T))]);
-    yminP = min(double(T.p), [], "omitnan");
-    ymaxP = max(double(T.p), [], "omitnan");
-    if isfinite(yminP) && isfinite(ymaxP)
-        ylim(ax2, [max(0, floor(yminP) - 1), ceil(ymaxP) + 1]);
-    end
-    ylabel(ax2, "$N_p$");
-    xlabel(ax2, "");
-    title(ax2, "$\mathbf{" + panelLabels3x2((2 - 1) * 2 + k) + "}$", "Interpreter", "latex");
-    ax2.TitleHorizontalAlignment = "left";
-    set(ax2, "FontSize", fontSize);
-    grid(ax2, "off"); box(ax2, "off");
-    format_tick(0, 0);
-
-    % Row 3: N_c by k (stored as m)
-    ax3 = nexttile((3 - 1) * 2 + k); hold(ax3, "on");
-    plot(ax3, iter, double(T.m), "-", "LineWidth", 2.0, "Color", plotColors(k, :));
-    plot(ax3, iter, double(T.m), "o", "MarkerSize", 3.5, "Color", plotColors(k, :));
-    xlim(ax3, [1, max(1, height(T))]);
-    yminM = min(double(T.m), [], "omitnan");
-    ymaxM = max(double(T.m), [], "omitnan");
-    if isfinite(yminM) && isfinite(ymaxM)
-        ylim(ax3, [max(0, floor(yminM) - 1), ceil(ymaxM) + 1]);
-    end
-    ylabel(ax3, "$N_c$");
-    xlabel(ax3, "$k$ (iteration)");
-    title(ax3, "$\mathbf{" + panelLabels3x2((3 - 1) * 2 + k) + "}$", "Interpreter", "latex");
-    ax3.TitleHorizontalAlignment = "left";
-    set(ax3, "FontSize", fontSize);
-    grid(ax3, "off"); box(ax3, "off");
-    format_tick(0, 0);
-end
-
-save_plot_outputs(fig3, fullfile(outDir, "z_np_nc_vs_iteration_3x2.png"), fontSize, 1200, 980);
-
-% N_c by N_p density maps (side-by-side)
-fig4 = figure("Color", "w", "Name", "Nc by Np Density by Case");
-tiledlayout(fig4, 1, 2, "Padding", "compact", "TileSpacing", "compact");
-panelLabelsNcNp = ["a", "b"];
-
-for k = 1:2
-    T = allTopt{k};
-    p = double(T.p);
-    m = double(T.m); % N_c
-    valid = isfinite(p) & isfinite(m);
-    p = p(valid);
-    m = m(valid);
-
-    ax = nexttile; hold(ax, "on");
-    if isempty(p)
-        text(ax, 0.5, 0.5, "No valid $(N_p, N_c)$ data", ...
-            "Units", "normalized", "HorizontalAlignment", "center", "Interpreter", "latex");
-        axis(ax, "off");
-        continue
-    end
-
-    pMin = floor(min(p)); pMax = ceil(max(p));
-    mMin = floor(min(m)); mMax = ceil(max(m));
-    xEdges = (pMin - 0.5):(pMax + 0.5);
-    yEdges = (mMin - 0.5):(mMax + 0.5);
-    counts = histcounts2(p, m, xEdges, yEdges);
-
-    xCenters = xEdges(1:end-1) + 0.5;
-    yCenters = yEdges(1:end-1) + 0.5;
-    imagesc(ax, xCenters, yCenters, counts.');
-    set(ax, "YDir", "normal");
-    colormap(ax, parula(256));
-    cb = colorbar(ax);
-    cb.Label.String = "Count";
-    cb.Label.Interpreter = "latex";
-    cb.TickLabelInterpreter = "latex";
-    cb.FontSize = fontSize;
-
-    % Overlay points to preserve discrete-location visibility.
-    scatter(ax, p, m, 26, "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none");
-
-    xlabel(ax, "$N_p$");
-    ylabel(ax, "$N_c$");
-    title(ax, "$\mathbf{" + panelLabelsNcNp(k) + "}$", "Interpreter", "latex");
-    ax.TitleHorizontalAlignment = "left";
-    set(ax, "FontSize", fontSize);
-    xlim(ax, [pMin - 0.5, pMax + 0.5]);
-    ylim(ax, [mMin - 0.5, mMax + 0.5]);
-    xticks(ax, pMin:pMax);
-    yticks(ax, mMin:mMax);
-    grid(ax, "off");
-    box(ax, "off");
-end
-
-save_plot_outputs(fig4, fullfile(outDir, "nc_by_np_density_side_by_side.png"), fontSize, 1100, 470);
 end
 
 
@@ -607,6 +498,33 @@ h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
+function [isParetoCombined, Tf] = plot_original_frontier_from_non_doe(ax, T, plotColors, doeIterationsPerRun)
+%PLOT_ORIGINAL_FRONTIER_FROM_NON_DOE Plot combined original frontier with strict DOE exclusion.
+if nargin < 4
+    doeIterationsPerRun = 20;
+end
+if ismember("iteration", string(T.Properties.VariableNames)) && any(double(T.iteration) <= doeIterationsPerRun)
+    error("Pareto pool contains DOE rows (iteration <= %d), which is not allowed.", doeIterationsPerRun);
+end
+
+scatter(ax, double(T.SSdU), double(T.SSE), 18, ...
+    "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none");
+
+isParetoCombined = compute_pareto_mask(double(T.SSE), double(T.SSdU));
+Tf = T(isParetoCombined, :);
+plot_pareto_polyline_with_markers_refined(ax, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), 2.0, 8);
+
+if ismember("run_key", string(T.Properties.VariableNames))
+    isRun1Front = isParetoCombined & (string(T.run_key) == "run1");
+    isRun2Front = isParetoCombined & (string(T.run_key) == "run2");
+    scatter(ax, double(T.SSdU(isRun1Front)), double(T.SSE(isRun1Front)), 80, plotColors(1,:), ...
+        "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), "LineWidth", 1.4);
+    scatter(ax, double(T.SSdU(isRun2Front)), double(T.SSE(isRun2Front)), 90, plotColors(2,:), ...
+        "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), "LineWidth", 1.4);
+end
+end
+
+
 function cmap = load_navia_colormap(n)
 %LOAD_NAVIA_COLORMAP Load the sequential map used for fidelity-color plots.
 matPath = which("navia.mat");
@@ -625,18 +543,6 @@ if size(cmap, 1) ~= n
     x = linspace(0, 1, size(cmap, 1));
     xq = linspace(0, 1, n);
     cmap = interp1(x, cmap, xq, "linear");
-end
-cmap = min(max(cmap, 0), 1);
-end
-
-
-function cmap = interpolate_anchors(anchors, n)
-%INTERPOLATE_ANCHORS Utility to generate smooth custom colormaps.
-tAnch = linspace(0, 1, size(anchors, 1));
-t = linspace(0, 1, n);
-cmap = zeros(n, 3);
-for j = 1:3
-    cmap(:, j) = interp1(tAnch, anchors(:, j), t, "pchip");
 end
 cmap = min(max(cmap, 0), 1);
 end
@@ -858,4 +764,381 @@ exportgraphics(figHandle, pngPath, "Resolution", 300);
 [folderPath, fileStem] = fileparts(pngPath);
 pdfPath = fullfile(folderPath, strcat(fileStem, ".pdf"));
 save_figure(pdfPath, NaN, false);
+end
+
+
+function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsPerRun)
+%RUN_REFINED_FRONTIER_CHANGE Compare original (non-DOE) and refined Pareto points.
+    originalFiles = [
+        struct("runKey","run1", "runLabel","Case 1", "path", fullfile(projectRoot, "results", "run1", "results.csv"));
+        struct("runKey","run2", "runLabel","Case 2", "path", fullfile(projectRoot, "results", "run2", "results.csv"))
+    ];
+    refinedFiles = [
+        struct("runKey","run1", "runLabel","Case 1 refined", "path", fullfile(projectRoot, "results", "final_fidelity_same_noise", "run1_full_f1_same_noise", "results_full.csv"));
+        struct("runKey","run2", "runLabel","Case 2 refined", "path", fullfile(projectRoot, "results", "final_fidelity_same_noise", "run2_full_f1_same_noise", "results_full.csv"))
+    ];
+
+    print_runtime_cfg_refined(originalFiles, refinedFiles, doeIterationsPerRun);
+
+    T_orig_full = load_results_for_refined(originalFiles, 0);
+    T_orig = T_orig_full(T_orig_full.iteration > doeIterationsPerRun, :);
+    T_ref = load_results_for_refined(refinedFiles, 0);
+    if isempty(T_orig)
+        error("No original rows remain after DOE filtering.");
+    end
+    if isempty(T_ref)
+        error("No rows loaded from refined result files.");
+    end
+
+    isParetoOrig = compute_pareto_mask(double(T_orig.SSE), double(T_orig.SSdU));
+    [T_ref, refFilterInfo] = keep_refined_from_original_pareto_refined(T_ref, T_orig, isParetoOrig, T_orig_full);
+    print_refined_filter_summary_refined(refFilterInfo);
+    if isempty(T_ref)
+        error("No refined rows remain after filtering to original non-DOE Pareto points.");
+    end
+
+    T_jtv = compute_jtv_change_table_refined(T_orig, T_ref);
+    fprintf("\n=== J_TV change (original -> refined), sorted by |delta| descending ===\n");
+    disp(T_jtv);
+    print_top1_cfg_refined(projectRoot, T_jtv);
+
+    isParetoRef = compute_pareto_mask(double(T_ref.SSE), double(T_ref.SSdU));
+    [commonKeys, idxOrig, idxRef] = intersect(string(T_orig.match_key), string(T_ref.match_key), "stable");
+    [matchedRunKey, matchedTs] = split_match_key_refined(commonKeys);
+
+    NATURE_COLOR = nature_methods_colors();
+    plotColors = nature_methods_colors(3); % Blue, BluishGreen, ReddishPurple
+    colRefAll = [0.60 0.82 0.98];
+    colPromoted = plotColors(2, :);
+
+    % Promotion bookkeeping.
+    origParetoMatched = isParetoOrig(idxOrig);
+    refParetoMatched = isParetoRef(idxRef);
+    zOrigMatched = double(T_orig.z_eval(idxOrig));
+    promotedMask = ~origParetoMatched & refParetoMatched;
+    promotedZlt1Mask = promotedMask & isfinite(zOrigMatched) & (zOrigMatched < 1 - 1e-12);
+    promotedIdxOrig = idxOrig(promotedZlt1Mask);
+    promotedIdxRef = idxRef(promotedZlt1Mask);
+    promotedRunKey = matchedRunKey(promotedZlt1Mask);
+    promotedTs = matchedTs(promotedZlt1Mask);
+    matchedOrigParetoCount = nnz(origParetoMatched);
+    matchedRefParetoCount = nnz(refParetoMatched);
+
+    fig = figure("Color", "w", "Toolbar", "none", "Name", "Pareto Frontier Change");
+    tiledlayout(fig, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+    set(fig, "Position", [80 80 1400 560]);
+
+    axL = nexttile; hold(axL, "on");
+    [isParetoLeft, ~] = plot_original_frontier_from_non_doe(axL, T_orig, plotColors, doeIterationsPerRun);
+
+    axR = nexttile; hold(axR, "on");
+    plot_original_frontier_from_non_doe(axR, T_orig, plotColors, doeIterationsPerRun);
+    scatter(axR, double(T_ref.SSdU), double(T_ref.SSE), 42, ...
+        "filled", "MarkerFaceColor", colRefAll, "MarkerEdgeColor", "none");
+    TrefPareto = T_ref(isParetoRef, :);
+    scatter(axR, double(TrefPareto.SSdU), double(TrefPareto.SSE), 80, ...
+        "d", "MarkerFaceColor", NATURE_COLOR.ReddishPurple, ...
+        "MarkerEdgeColor", NATURE_COLOR.ReddishPurple, "LineWidth", 1.0);
+    if ~isempty(promotedIdxRef)
+        scatter(axR, double(T_ref.SSdU(promotedIdxRef)), double(T_ref.SSE(promotedIdxRef)), 140, ...
+            "p", "MarkerFaceColor", colPromoted, "MarkerEdgeColor", "k", "LineWidth", 0.7);
+    end
+
+    for ax = [axL, axR]
+        set(ax, "XScale", "log", "YScale", "log", "FontSize", 16);
+        xlim(ax, [1e-2, 2e0]);
+        ylim(ax, [1e4, 3.5e4]);
+        xlabel(ax, "$J_{\mathrm{TV}}$", "Interpreter", "latex");
+        ylabel(ax, "$J_{\mathrm{track}}$", "Interpreter", "latex");
+        grid(ax, "off");
+        box(ax, "off");
+        axes(ax);
+        format_tick(1, 1);
+    end
+    title(axL, "$\mathbf{a}$", "Interpreter", "latex");
+    title(axR, "$\mathbf{b}$", "Interpreter", "latex");
+    axL.TitleHorizontalAlignment = "left";
+    axR.TitleHorizontalAlignment = "left";
+
+    outStem = fullfile(graphicsFolder, "refined_frontier_change");
+    exportgraphics(fig, outStem + ".png", "Resolution", 300);
+    exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
+
+    outTxtDir = fullfile(projectRoot, "results", "txt results");
+    if ~isfolder(outTxtDir)
+        mkdir(outTxtDir);
+    end
+    reportPath = fullfile(outTxtDir, "refined_promoted_frontier_z_lt_1.txt");
+    write_promoted_report_refined(reportPath, promotedRunKey, promotedTs, T_orig, T_ref, promotedIdxOrig, promotedIdxRef);
+
+    fprintf("Saved: %s\n", outStem + ".png");
+    fprintf("Saved: %s\n", outStem + ".pdf");
+    fprintf("Saved: %s\n", reportPath);
+    fprintf("J_TV rows compared: %d\n", height(T_jtv));
+    fprintf("Matched points (run_key + timestamp): %d\n", numel(idxOrig));
+    fprintf("Left-panel frontier pool size (all original non-DOE points): %d\n", height(T_orig));
+    fprintf("Left-panel frontier points (combined Pareto): %d\n", nnz(isParetoLeft));
+    fprintf("Original Pareto points (all original rows after DOE filter): %d\n", nnz(isParetoOrig));
+    fprintf("Refined Pareto points (all refined rows): %d\n", nnz(isParetoRef));
+    fprintf("Original Pareto points in matched set: %d\n", matchedOrigParetoCount);
+    fprintf("Refined Pareto points in matched set: %d\n", matchedRefParetoCount);
+    fprintf("Promoted to Pareto with z < 1: %d\n", numel(promotedIdxRef));
+end
+
+
+function print_runtime_cfg_refined(originalFiles, refinedFiles, doeIterationsPerRun)
+%PRINT_RUNTIME_CFG_REFINED Print reproducibility settings for refined comparison.
+    fprintf("=== refined frontier settings ===\n");
+    fprintf("MATLAB version: %s\n", version);
+    fprintf("Current folder: %s\n", pwd);
+    fprintf("DOE exclusion in original runs: drop first %d iterations per run\n", doeIterationsPerRun);
+    p = gcp("nocreate");
+    if isempty(p)
+        fprintf("Parallel pool: not running\n");
+        workers = 0;
+    else
+        workers = p.NumWorkers;
+        fprintf("Parallel pool: running (%d workers)\n", workers);
+    end
+    fprintf("Configured worker count (observed): %d\n", workers);
+    fprintf("Original CSV sources:\n");
+    for k = 1:numel(originalFiles)
+        fprintf("  - %s\n", originalFiles(k).path);
+    end
+    fprintf("Refined CSV sources:\n");
+    for k = 1:numel(refinedFiles)
+        fprintf("  - %s\n", refinedFiles(k).path);
+    end
+end
+
+
+function T = load_results_for_refined(fileDefs, dropFirstNRows)
+%LOAD_RESULTS_FOR_REFINED Load and normalize CSV rows for refined comparison.
+    T = table();
+    for k = 1:numel(fileDefs)
+        p = fileDefs(k).path;
+        if ~isfile(p)
+            warning("Missing file: %s", p);
+            continue
+        end
+        Tk = readtable(p, "TextType", "string");
+        required = ["timestamp", "SSE", "SSdU"];
+        for c = required
+            if ~ismember(c, string(Tk.Properties.VariableNames))
+                error("Missing column '%s' in %s", c, p);
+            end
+        end
+        Tk.run_label = repmat(string(fileDefs(k).runLabel), height(Tk), 1);
+        Tk.run_key = repmat(string(fileDefs(k).runKey), height(Tk), 1);
+        Tk.iteration = (1:height(Tk)).';
+        if dropFirstNRows > 0
+            Tk = Tk(Tk.iteration > dropFirstNRows, :);
+        end
+        if ismember("theta_1", string(Tk.Properties.VariableNames))
+            Tk.z_eval = double(Tk.theta_1);
+        else
+            Tk.z_eval = nan(height(Tk), 1);
+        end
+        Tk.match_key = Tk.run_key + "|" + string(Tk.timestamp);
+        Tk = Tk(:, ["run_label", "run_key", "match_key", "iteration", "timestamp", "SSE", "SSdU", "z_eval"]);
+        T = [T; Tk]; %#ok<AGROW>
+    end
+end
+
+
+function [TrefKeep, info] = keep_refined_from_original_pareto_refined(T_ref, T_orig, isParetoOrig, T_orig_full)
+%KEEP_REFINED_FROM_ORIGINAL_PARETO_REFINED Keep only refined points linked to original Pareto.
+    refKeys = string(T_ref.match_key);
+    origKeys = string(T_orig.match_key);
+    origFullKeys = string(T_orig_full.match_key);
+    origParetoKeys = string(T_orig.match_key(isParetoOrig));
+
+    inOrigFull = ismember(refKeys, origFullKeys);
+    inOrig = ismember(refKeys, origKeys);
+    inOrigPareto = ismember(refKeys, origParetoKeys);
+
+    info = struct();
+    info.n_ref_input = height(T_ref);
+    info.n_drop_doe = nnz(inOrigFull & ~inOrig);
+    info.n_drop_not_in_orig = nnz(~inOrigFull);
+    info.n_drop_in_orig_not_pareto = nnz(inOrig & ~inOrigPareto);
+    info.dropped_doe_keys = refKeys(inOrigFull & ~inOrig);
+    TrefKeep = T_ref(inOrigPareto, :);
+    if ~isempty(TrefKeep)
+        [~, uniqIdx] = unique(string(TrefKeep.match_key), "stable");
+        info.n_drop_duplicate_refined = height(TrefKeep) - numel(uniqIdx);
+        TrefKeep = TrefKeep(uniqIdx, :);
+    else
+        info.n_drop_duplicate_refined = 0;
+    end
+    info.n_keep_final = height(TrefKeep);
+end
+
+
+function print_refined_filter_summary_refined(info)
+%PRINT_REFINED_FILTER_SUMMARY_REFINED Print keep/drop diagnostics.
+    fprintf("\n=== Refined sample eligibility check ===\n");
+    fprintf("Input refined rows: %d\n", info.n_ref_input);
+    fprintf("Dropped (mapped to original DOE rows): %d\n", info.n_drop_doe);
+    fprintf("Dropped (not found in original run datasets): %d\n", info.n_drop_not_in_orig);
+    fprintf("Dropped (original but not Pareto): %d\n", info.n_drop_in_orig_not_pareto);
+    fprintf("Dropped duplicate refined rows: %d\n", info.n_drop_duplicate_refined);
+    fprintf("Kept refined rows (original non-DOE Pareto-linked): %d\n", info.n_keep_final);
+    if info.n_drop_doe > 0
+        fprintf("Dropped DOE-linked keys:\n");
+        for i = 1:numel(info.dropped_doe_keys)
+            fprintf("  - %s\n", string(info.dropped_doe_keys(i)));
+        end
+    end
+end
+
+
+function T = compute_jtv_change_table_refined(T_orig, T_ref)
+%COMPUTE_JTV_CHANGE_TABLE_REFINED Build delta-JTV table for matched points.
+    [commonKeys, idxOrig, idxRef] = intersect(string(T_orig.match_key), string(T_ref.match_key), "stable");
+    if isempty(commonKeys)
+        error("No matching (run_key, timestamp) points between original and refined tables.");
+    end
+    [runKey, ts] = split_match_key_refined(commonKeys);
+    T = table(runKey, ts, double(T_orig.SSdU(idxOrig)), double(T_ref.SSdU(idxRef)), ...
+        'VariableNames', {'run_key', 'timestamp', 'JTV_original', 'JTV_refined'});
+    T.delta_JTV = T.JTV_refined - T.JTV_original;
+    T.delta_pct = 100 * T.delta_JTV ./ T.JTV_original;
+    T.abs_delta_JTV = abs(T.delta_JTV);
+    T = sortrows(T, "abs_delta_JTV", "descend");
+end
+
+
+function print_top1_cfg_refined(projectRoot, T_jtv)
+%PRINT_TOP1_CFG_REFINED Print original/refined configs for the largest JTV change.
+    if isempty(T_jtv)
+        return
+    end
+    runKey = string(T_jtv.run_key(1));
+    ts = string(T_jtv.timestamp(1));
+    origMat = find_mat_for_timestamp_refined(projectRoot, runKey, ts, true);
+    refMat = find_mat_for_timestamp_refined(projectRoot, runKey, ts, false);
+    if strlength(origMat) == 0 || strlength(refMat) == 0
+        fprintf("\nTop-1 cfg print skipped (missing MAT files) for %s | %s.\n", runKey, ts);
+        return
+    end
+    Sorig = load_cfg_snapshot_refined(origMat);
+    Sref = load_cfg_snapshot_refined(refMat);
+    fprintf("\n=== Top-1 point by |delta J_TV|: %s | %s ===\n", runKey, ts);
+    fprintf("\n--- Original cfg (%s) ---\n", origMat);
+    print_cfg_struct_refined(Sorig);
+    fprintf("\n--- Refined cfg (%s) ---\n", refMat);
+    print_cfg_struct_refined(Sref);
+end
+
+
+function matPath = find_mat_for_timestamp_refined(projectRoot, runKey, ts, isOriginal)
+%FIND_MAT_FOR_TIMESTAMP_REFINED Resolve original/refined MAT path for one controller.
+    if isOriginal
+        cand = fullfile(projectRoot, "results", runKey, "out_" + ts + ".mat");
+    else
+        cand = fullfile(projectRoot, "results", "final_fidelity_same_noise", runKey + "_full_f1_same_noise", "out_full_" + ts + ".mat");
+    end
+    if isfile(cand)
+        matPath = string(cand);
+    else
+        matPath = "";
+    end
+end
+
+
+function S = load_cfg_snapshot_refined(matPath)
+%LOAD_CFG_SNAPSHOT_REFINED Load only cfg-relevant MAT fields.
+    S = struct();
+    vars = string(who("-file", matPath));
+    if any(vars == "out")
+        tmp = load(matPath, "out");
+        S.out = tmp.out;
+    end
+    if any(vars == "cfg_run")
+        tmp = load(matPath, "cfg_run");
+        S.cfg_run = tmp.cfg_run;
+    end
+end
+
+
+function print_cfg_struct_refined(S)
+%PRINT_CFG_STRUCT_REFINED Print compact configuration information.
+    if isfield(S, "out") && isfield(S.out, "cfg")
+        cfg = S.out.cfg;
+        if isfield(cfg, "f"), fprintf("f = %.12g\n", cfg.f); end
+        if isfield(cfg, "m"), fprintf("m = %d\n", cfg.m); end
+        if isfield(cfg, "p"), fprintf("p = %d\n", cfg.p); end
+        if isfield(cfg, "Q"), fprintf("Q =\n"); disp(cfg.Q); end
+        if isfield(cfg, "Ru"), fprintf("Ru =\n"); disp(cfg.Ru); end
+        if isfield(cfg, "Rdu"), fprintf("Rdu =\n"); disp(cfg.Rdu); end
+    end
+    if isfield(S, "out") && isfield(S.out, "theta")
+        fprintf("theta =\n");
+        disp(S.out.theta);
+    end
+    if isfield(S, "cfg_run")
+        cfgRun = S.cfg_run;
+        if isfield(cfgRun, "sigma_y"), fprintf("sigma_y = "); disp(cfgRun.sigma_y); end
+        if isfield(cfgRun, "mode"), fprintf("cfg_run.mode = %s\n", string(cfgRun.mode)); end
+        if isfield(cfgRun, "source_root"), fprintf("cfg_run.source_root = %s\n", string(cfgRun.source_root)); end
+        if isfield(cfgRun, "output_root"), fprintf("cfg_run.output_root = %s\n", string(cfgRun.output_root)); end
+        if isfield(cfgRun, "results_csv"), fprintf("cfg_run.results_csv = %s\n", string(cfgRun.results_csv)); end
+        if isfield(cfgRun, "out_dir"), fprintf("cfg_run.out_dir = %s\n", string(cfgRun.out_dir)); end
+        if isfield(cfgRun, "NumWorkers"), fprintf("cfg_run.NumWorkers = %d\n", double(cfgRun.NumWorkers)); end
+    end
+end
+
+
+function [runKey, ts] = split_match_key_refined(matchKey)
+%SPLIT_MATCH_KEY_REFINED Split "runKey|timestamp" identifiers.
+    n = numel(matchKey);
+    runKey = strings(n, 1);
+    ts = strings(n, 1);
+    for i = 1:n
+        parts = split(string(matchKey(i)), "|");
+        runKey(i) = parts(1);
+        ts(i) = parts(2);
+    end
+end
+
+
+function h = plot_pareto_polyline_with_markers_refined(ax, x, y, colorVal, lineWidth, markerSize)
+%PLOT_PARETO_POLYLINE_WITH_MARKERS_REFINED Draw frontier as one '-o' object.
+    if isempty(x) || isempty(y)
+        h = gobjects(0);
+        return
+    end
+    [xSort, ord] = sort(x(:), "ascend");
+    ySort = y(ord);
+    h = plot(ax, xSort, ySort, "-o", ...
+        "Color", colorVal, ...
+        "LineWidth", lineWidth, ...
+        "MarkerSize", markerSize, ...
+        "MarkerFaceColor", "w", ...
+        "MarkerEdgeColor", colorVal);
+end
+
+
+function write_promoted_report_refined(reportPath, promotedRunKey, promotedTs, T_orig, T_ref, promotedIdxOrig, promotedIdxRef)
+%WRITE_PROMOTED_REPORT_REFINED Save promoted-point table for traceability.
+    fid = fopen(reportPath, "w");
+    if fid < 0
+        warning("Could not write promoted-point report: %s", reportPath);
+        return
+    end
+    cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+    fprintf(fid, "Promoted to refined Pareto frontier with original z < 1\n");
+    fprintf(fid, "Original dataset excludes DOE rows (iterations 1..20 in run1/run2).\n");
+    fprintf(fid, "Definition: original non-Pareto -> refined Pareto AND original theta_1 < 1\n");
+    fprintf(fid, "Count: %d\n\n", numel(promotedTs));
+    fprintf(fid, "run_key,timestamp,orig_SSE,orig_SSdU,orig_z,refined_SSE,refined_SSdU\n");
+    for i = 1:numel(promotedTs)
+        io = promotedIdxOrig(i);
+        ir = promotedIdxRef(i);
+        fprintf(fid, "%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g\n", ...
+            promotedRunKey(i), promotedTs(i), ...
+            double(T_orig.SSE(io)), double(T_orig.SSdU(io)), double(T_orig.z_eval(io)), ...
+            double(T_ref.SSE(ir)), double(T_ref.SSdU(ir)));
+    end
 end

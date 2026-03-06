@@ -1,33 +1,37 @@
 function plot_refined_frontier_change()
-%PLOT_REFINED_FRONTIER_CHANGE Visualize how the Pareto frontier changed after refinement.
+%PLOT_REFINED_FRONTIER_CHANGE Compare original vs refined frontier decisions.
 %
-% Inputs (from disk):
-%   - Original runs:
-%       results/run1/results.csv
-%       results/run2/results.csv
-%   - Refined full-fidelity evaluations:
-%       results/final_fidelity_same_noise/run1_full_f1_same_noise/results_full.csv
-%       results/final_fidelity_same_noise/run2_full_f1_same_noise/results_full.csv
+% Intent
+% - Answer one question: "How did the candidate controllers chosen by the
+%   optimization frontier change after full-fidelity reevaluation?"
+% - Keep the comparison fair by excluding DOE points from the original
+%   optimization history.
+% - Compare only like-for-like controller identities (run + timestamp).
 %
-% Outputs:
-%   - results/graphical_results/refined_frontier_change.png
-%   - results/graphical_results/refined_frontier_change.pdf
+% Data contract
+% - Original optimization histories:
+%   results/run1/results.csv, results/run2/results.csv
+% - Refined reevaluations:
+%   results/final_fidelity_same_noise/run1_full_f1_same_noise/results_full.csv
+%   results/final_fidelity_same_noise/run2_full_f1_same_noise/results_full.csv
 %
-% Figure content:
-%   - Original non-Pareto samples only (gray), excluding DOE points
-%     (iterations 1..20 in run1/run2)
-%   - Refined points (blue), restricted to original non-DOE Pareto points
-%   - Refined Pareto frontier (green)
-%   - Promoted points with original z < 1 (red stars)
-%   - Thin connector lines for matched points (original -> refined)
+% Figure intent
+% - Panel a: reference picture of the combined optimization frontier from
+%   the matched non-DOE points (context view).
+% - Panel b: direct before/after comparison where:
+%   - original points remain visible by run (marker + color identity),
+%   - refined evaluations are overlaid,
+%   - refined Pareto points are highlighted (purple diamonds).
 %
-% Matching rule:
-%   - Match by (run_key, timestamp) to avoid accidental collisions if two
-%     runs reuse the same timestamp string.
+% Filtering intent (fairness guards)
+% - DOE exclusion: original iterations 1..20 are never eligible.
+% - Eligibility: refined points are only kept if they map to an original
+%   non-DOE Pareto controller identity.
+% - Identity matching: (run_key, timestamp), not timestamp alone.
 %
-% Refined-sample guard:
-%   - Any refined row that does not map to an original Pareto point
-%     (computed after DOE removal) is dropped before plotting/analysis.
+% Outputs
+% - results/graphical_results/refined_frontier_change.png/.pdf
+% - results/txt results/refined_promoted_frontier_z_lt_1.txt
 
     close all; clc
     scriptDir = fileparts(mfilename("fullpath"));
@@ -83,12 +87,27 @@ function plot_refined_frontier_change()
     [commonKeys, idxOrig, idxRef] = intersect(string(T_orig.match_key), string(T_ref.match_key), "stable"); %#ok<ASGLU>
     [matchedRunKey, matchedTs] = split_match_key(commonKeys);
 
-    C = nature_methods_colors();
-    colOrigAll = 0.80 * [1 1 1];
-    colRefAll = C.SkyBlue;
-    colRefPareto = C.BluishGreen;
-    colShift = 0.35 * [1 1 1];
-    colPromoted = C.Vermillion;
+    NATURE_COLOR = nature_methods_colors();
+    plotColors = nature_methods_colors(3); % Blue, BluishGreen, ReddishPurple
+    colRefAll = [0.60 0.82 0.98];
+    colPromoted = plotColors(2, :);
+
+    % Left-panel data: all combined optimization samples + matched subset frontier.
+    T1 = T_orig(T_orig.run_key == "run1", :);
+    T2 = T_orig(T_orig.run_key == "run2", :);
+    Tall = [T1; T2];
+    matchedKeySet = string(commonKeys);
+    isLeft1 = ismember(string(T1.match_key), matchedKeySet);
+    isLeft2 = ismember(string(T2.match_key), matchedKeySet);
+    TleftFrontPool = [T1(isLeft1, :); T2(isLeft2, :)];
+    leftMask = compute_pareto_mask(double(TleftFrontPool.SSE), double(TleftFrontPool.SSdU));
+    Tf = TleftFrontPool(leftMask, :);
+
+    % Safety check: left frontier must not include DOE-derived points.
+    doeKeys = string(T_orig_full.match_key(T_orig_full.iteration <= doeIterationsPerRun));
+    if any(ismember(string(Tf.match_key), doeKeys))
+        error("Left-panel frontier unexpectedly contains DOE-derived points.");
+    end
 
     % Promotion definition (discard original Pareto points):
     % promoted = not Pareto in original AND Pareto in refined.
@@ -104,55 +123,57 @@ function plot_refined_frontier_change()
     matchedOrigParetoCount = nnz(origParetoMatched);
     matchedRefParetoCount = nnz(refParetoMatched);
 
-    fig = figure("Color", "w", "Toolbar", "none");
-    ax = axes(fig); hold(ax, "on");
+    fig = figure("Color", "w", "Toolbar", "none", "Name", "Pareto Frontier Change");
+    tiledlayout(fig, 1, 2, "Padding", "compact", "TileSpacing", "compact");
+    set(fig, "Position", [80 80 1400 560]);
 
-    % Original non-Pareto samples only (original Pareto discarded).
-    scatter(ax, double(T_orig.SSdU(~isParetoOrig)), double(T_orig.SSE(~isParetoOrig)), 24, ...
-        "filled", "MarkerFaceColor", colOrigAll, "MarkerEdgeColor", "none", ...
-        "DisplayName", "Original non-Pareto");
+    % ---- Left: combined frontier (RESULTSSANDBOX figure-5 style) ----
+    axL = nexttile; hold(axL, "on");
+    scatter(axL, double(Tall.SSdU), double(Tall.SSE), 18, ...
+        "filled", "MarkerFaceColor", "k", "MarkerEdgeColor", "none");
+    plot_pareto_polyline_with_markers(axL, double(Tf.SSdU), double(Tf.SSE), plotColors(3, :), 2.0, 8, 2.0);
+    scatter(axL, double(T1.SSdU(isLeft1)), double(T1.SSE(isLeft1)), 80, plotColors(1,:), ...
+        "o", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:), "LineWidth", 1.4);
+    scatter(axL, double(T2.SSdU(isLeft2)), double(T2.SSE(isLeft2)), 90, plotColors(2,:), ...
+        "^", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:), "LineWidth", 1.4);
 
-    % Refined samples and refined Pareto.
-    scatter(ax, double(T_ref.SSdU), double(T_ref.SSE), 42, ...
-        "filled", "MarkerFaceColor", colRefAll, "MarkerEdgeColor", "none", ...
-        "DisplayName", "Refined samples");
-
-    draw_frontier(ax, T_ref(isParetoRef, :), colRefPareto, "Refined Pareto");
-
-    % Connect all matched timestamps (original -> refined).
-    for i = 1:numel(idxOrig)
-        x = [double(T_orig.SSdU(idxOrig(i))), double(T_ref.SSdU(idxRef(i)))];
-        y = [double(T_orig.SSE(idxOrig(i))), double(T_ref.SSE(idxRef(i)))];
-        plot(ax, x, y, "-", "Color", colShift, "LineWidth", 1.0, "HandleVisibility", "off");
-    end
+    % ---- Right: refinement change ----
+    axR = nexttile; hold(axR, "on");
+    Torig1 = T_orig(T_orig.run_key == "run1", :);
+    Torig2 = T_orig(T_orig.run_key == "run2", :);
+    scatter(axR, double(Torig1.SSdU), double(Torig1.SSE), 16, ...
+        "o", "filled", "MarkerFaceColor", plotColors(1,:), "MarkerEdgeColor", plotColors(1,:));
+    scatter(axR, double(Torig2.SSdU), double(Torig2.SSE), 20, ...
+        "^", "filled", "MarkerFaceColor", plotColors(2,:), "MarkerEdgeColor", plotColors(2,:));
+    scatter(axR, double(T_ref.SSdU), double(T_ref.SSE), 42, ...
+        "filled", "MarkerFaceColor", colRefAll, "MarkerEdgeColor", "none");
+    TrefPareto = T_ref(isParetoRef, :);
+    scatter(axR, double(TrefPareto.SSdU), double(TrefPareto.SSE), 80, ...
+        "d", "MarkerFaceColor", NATURE_COLOR.ReddishPurple, ...
+        "MarkerEdgeColor", NATURE_COLOR.ReddishPurple, "LineWidth", 1.0);
 
     if ~isempty(promotedIdxRef)
-        scatter(ax, double(T_ref.SSdU(promotedIdxRef)), double(T_ref.SSE(promotedIdxRef)), 140, ...
-            "p", "MarkerFaceColor", colPromoted, "MarkerEdgeColor", "k", "LineWidth", 0.7, ...
-            "DisplayName", "Promoted (z < 1)");
+        scatter(axR, double(T_ref.SSdU(promotedIdxRef)), double(T_ref.SSE(promotedIdxRef)), 140, ...
+            "p", "MarkerFaceColor", colPromoted, "MarkerEdgeColor", "k", "LineWidth", 0.7);
     end
 
-    set(ax, "XScale", "log", "YScale", "log");
-    xlabel(ax, "$J_{\mathrm{TV}}$", "Interpreter", "latex");
-    ylabel(ax, "$J_{\mathrm{track}}$", "Interpreter", "latex");
-    title(ax, "$\mathbf{Pareto~Frontier~Change:~Original~vs~Refined}$", "Interpreter", "latex");
-    grid(ax, "off");
-    box(ax, "off");
-    set(ax, "FontSize", 16);
-    format_tick(1, 1);
+    for ax = [axL, axR]
+        set(ax, "XScale", "log", "YScale", "log", "FontSize", 16);
+        xlim(ax, [1e-2, 2e0]);
+        ylim(ax, [1e4, 3.5e4]);
+        xlabel(ax, "$J_{\mathrm{TV}}$", "Interpreter", "latex");
+        ylabel(ax, "$J_{\mathrm{track}}$", "Interpreter", "latex");
+        grid(ax, "off");
+        box(ax, "off");
+        axes(ax);
+        format_tick(1, 1);
+    end
+    title(axL, "$\mathbf{a}$", "Interpreter", "latex");
+    title(axR, "$\mathbf{b}$", "Interpreter", "latex");
+    axL.TitleHorizontalAlignment = "left";
+    axR.TitleHorizontalAlignment = "left";
 
-    lg = legend(ax, "Location", "southwest");
-    lg.Interpreter = "latex";
-    lg.Box = "off";
-
-    txt = sprintf(['matched points: %d\n' ...
-        'orig Pareto in matched set: %d\n' ...
-        'refined Pareto in matched set: %d\n' ...
-        'promoted to Pareto (z < 1): %d'], ...
-        numel(idxOrig), matchedOrigParetoCount, matchedRefParetoCount, numel(promotedIdxRef));
-    text(ax, 0.98, 0.04, txt, "Units", "normalized", ...
-        "HorizontalAlignment", "right", "VerticalAlignment", "bottom", ...
-        "Interpreter", "none", "FontSize", 12);
+    % (panel b) no on-figure text annotation by request.
 
     outDir = fullfile(projectRoot, "results", "graphical_results");
     if ~isfolder(outDir)
@@ -175,6 +196,8 @@ function plot_refined_frontier_change()
     fprintf("Saved: %s\n", reportPath);
     fprintf("J_TV rows compared: %d\n", height(T_jtv));
     fprintf("Matched points (run_key + timestamp): %d\n", numel(idxOrig));
+    fprintf("Left-panel matched-frontier pool size: %d\n", height(TleftFrontPool));
+    fprintf("Left-panel frontier points (non-DOE): %d\n", height(Tf));
     fprintf("Original Pareto points (all original rows after DOE filter): %d\n", nnz(isParetoOrig));
     fprintf("Refined Pareto points (all refined rows): %d\n", nnz(isParetoRef));
     fprintf("Original Pareto points in matched set: %d\n", matchedOrigParetoCount);
@@ -184,7 +207,7 @@ end
 
 
 function print_runtime_cfg(originalFiles, refinedFiles, doeIterationsPerRun)
-%PRINT_RUNTIME_CFG Print analysis/runtime settings to command window.
+%PRINT_RUNTIME_CFG Print reproducibility settings used for this comparison.
     fprintf("=== plot_refined_frontier_change settings ===\n");
     fprintf("MATLAB version: %s\n", version);
     fprintf("Current folder: %s\n", pwd);
@@ -212,7 +235,7 @@ end
 
 
 function T = compute_jtv_change_table(T_orig, T_ref)
-%COMPUTE_JTV_CHANGE_TABLE Build matched-point table and sort by |delta J_TV|.
+%COMPUTE_JTV_CHANGE_TABLE Quantify objective drift per matched controller.
     [commonKeys, idxOrig, idxRef] = intersect(string(T_orig.match_key), string(T_ref.match_key), "stable");
     if isempty(commonKeys)
         error("No matching (run_key, timestamp) points between original and refined tables.");
@@ -230,7 +253,7 @@ end
 
 
 function print_top1_cfg(projectRoot, T_jtv)
-%PRINT_TOP1_CFG Print original/refined cfg for top-1 |delta J_TV| timestamp.
+%PRINT_TOP1_CFG Sanity-check the largest change by printing both controller configs.
     if isempty(T_jtv)
         fprintf("\nNo J_TV rows available for cfg comparison.\n");
         return
@@ -258,7 +281,7 @@ end
 
 
 function matPath = find_mat_for_timestamp(projectRoot, runKey, ts, isOriginal)
-%FIND_MAT_FOR_TIMESTAMP Locate original/refined MAT file for a timestamp.
+%FIND_MAT_FOR_TIMESTAMP Resolve source artifact for one matched controller identity.
     if isOriginal
         cands = fullfile(projectRoot, "results", runKey, "out_" + ts + ".mat");
     else
@@ -275,7 +298,7 @@ end
 
 
 function print_cfg_struct(S)
-%PRINT_CFG_STRUCT Display cfg/theta/sigma_y values if present.
+%PRINT_CFG_STRUCT Display high-value tuning/noise metadata for auditability.
     if isfield(S, "out") && isfield(S.out, "cfg")
         cfg = S.out.cfg;
         if isfield(cfg, "f"), fprintf("f = %.12g\n", cfg.f); end
@@ -308,7 +331,7 @@ end
 
 
 function T = load_and_stack_csv(fileDefs, dropFirstNRows)
-%LOAD_AND_STACK_CSV Load multiple CSV files and stack relevant columns.
+%LOAD_AND_STACK_CSV Standardize raw CSV tables into one comparable schema.
     if nargin < 2
         dropFirstNRows = 0;
     end
@@ -347,9 +370,63 @@ function T = load_and_stack_csv(fileDefs, dropFirstNRows)
 end
 
 
+function h = plot_pareto_polyline_with_markers(ax, x, y, colorVal, lineWidth, markerSize, markerLineWidth)
+%PLOT_PARETO_POLYLINE_WITH_MARKERS Draw frontier as one visual object (line+markers).
+    if isempty(x) || isempty(y)
+        h = gobjects(0);
+        return
+    end
+    [xSort, ord] = sort(x(:), "ascend");
+    ySort = y(ord);
+    h = plot(ax, xSort, ySort, "-o", ...
+        "Color", colorVal, ...
+        "LineWidth", lineWidth, ...
+        "MarkerSize", 15, ...
+        "MarkerFaceColor", "w", ...
+        "MarkerEdgeColor", colorVal);
+    %#ok<INUSD> markerLineWidth retained for call-site compatibility.
+end
+
+
+function h = plot_pareto_continuum(ax, x, y, curveColor, xBounds, yBounds)
+%PLOT_PARETO_CONTINUUM Draw a smooth monotone guide through frontier points.
+    [xSort, ord] = sort(x(:), "ascend");
+    ySort = y(ord);
+
+    if numel(xSort) < 3
+        h = plot(ax, xSort, ySort, "-", "Color", curveColor, "LineWidth", 2.0);
+        return;
+    end
+
+    lx = log10(xSort);
+    ly = log10(ySort);
+    lxqIn = linspace(min(lx), max(lx), 220);
+    lyqIn = pchip(lx, ly, lxqIn);
+    xq = (10.^lxqIn).';
+    yq = (10.^lyqIn).';
+
+    if nargin >= 6 && ~isempty(yBounds)
+        yTop = max(yBounds);
+        if yTop > yq(1)
+            xq = [xq(1); xq];
+            yq = [yTop; yq];
+        end
+    end
+
+    if nargin >= 5 && ~isempty(xBounds)
+        xRight = max(xBounds);
+        if xRight > xq(end)
+            xq = [xq; xRight];
+            yq = [yq; yq(end)];
+        end
+    end
+
+    h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
+end
+
+
 function [TrefKeep, info] = keep_refined_from_original_pareto(T_ref, T_orig, isParetoOrig, T_orig_full)
-%KEEP_REFINED_FROM_ORIGINAL_PARETO Keep only refined points from original Pareto set.
-% Original DOE points are already excluded because T_orig is DOE-filtered.
+%KEEP_REFINED_FROM_ORIGINAL_PARETO Enforce refined eligibility for fair comparison.
     refKeys = string(T_ref.match_key);
     origKeys = string(T_orig.match_key);
     origFullKeys = string(T_orig_full.match_key);
@@ -383,7 +460,7 @@ end
 
 
 function print_refined_filter_summary(info)
-%PRINT_REFINED_FILTER_SUMMARY Log refined-point filtering diagnostics.
+%PRINT_REFINED_FILTER_SUMMARY Report why refined points were kept or dropped.
     fprintf("\n=== Refined sample eligibility check ===\n");
     fprintf("Input refined rows: %d\n", info.n_ref_input);
     fprintf("Dropped (mapped to original DOE rows): %d\n", info.n_drop_doe);
@@ -404,7 +481,7 @@ end
 
 
 function draw_frontier(ax, Tpareto, colorVal, legendLabel)
-%DRAW_FRONTIER Draw sorted Pareto points and connecting line.
+%DRAW_FRONTIER Legacy helper for frontier overlays (kept for compatibility).
     if isempty(Tpareto)
         return
     end
@@ -421,7 +498,7 @@ end
 
 
 function isPareto = compute_pareto_mask(J_track, J_TV)
-%COMPUTE_PARETO_MASK Return non-dominated mask for minimization objectives.
+%COMPUTE_PARETO_MASK Identify non-dominated tradeoffs (min SSE, min SSdU).
     n = numel(J_track);
     isPareto = true(n, 1);
     for i = 1:n
@@ -436,7 +513,7 @@ end
 
 
 function write_promoted_report(reportPath, promotedRunKey, promotedTs, T_orig, T_ref, promotedIdxOrig, promotedIdxRef)
-%WRITE_PROMOTED_REPORT Save promoted refined-Pareto points with original z<1.
+%WRITE_PROMOTED_REPORT Persist promoted-point audit rows for manuscript traceability.
     fid = fopen(reportPath, "w");
     if fid < 0
         warning("Could not write promoted-point report: %s", reportPath);
@@ -462,8 +539,7 @@ end
 
 
 function S = load_cfg_snapshot(matPath)
-%LOAD_CFG_SNAPSHOT Load only fields needed for cfg comparison output.
-% Avoid loading workspace fields that may contain unresolved function handles.
+%LOAD_CFG_SNAPSHOT Load only audit-relevant MAT fields to avoid handle issues.
     S = struct();
     vars = string(who("-file", matPath));
     if any(vars == "out")
@@ -478,7 +554,7 @@ end
 
 
 function [runKey, ts] = split_match_key(matchKey)
-%SPLIT_MATCH_KEY Split "runKey|timestamp" keys into separate vectors.
+%SPLIT_MATCH_KEY Decode controller identity keys back to run and timestamp.
     n = numel(matchKey);
     runKey = strings(n, 1);
     ts = strings(n, 1);

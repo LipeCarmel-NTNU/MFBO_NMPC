@@ -4,7 +4,7 @@ function run_analysis()
 % Pipeline (in order):
 % 1) Result analysis/analyze_test_run_metrics.m
 % 2) Result analysis/recover_boxplot_data.py
-% 3) Result analysis/resultssandbox.m
+% 3) Result analysis/main_pareto_results.m
 % 4) J surrogate/surrogate.m
 % 5) results/numerical results/compile_results_txt.m
 % 6) Copy and overwrite all PDFs from results/graphical_results to
@@ -21,8 +21,8 @@ function run_analysis()
 
     run_python_recover_boxplot(fullfile(scriptDir, "recover_boxplot_data.py"));
 
-    run_script_in_base(fullfile(scriptDir, "resultssandbox.m"), ...
-        "resultssandbox");
+    run_script_in_base(fullfile(scriptDir, "main_pareto_results.m"), ...
+        "main_pareto_results");
 
     run_script_in_base(fullfile(projectRoot, "J surrogate", "surrogate.m"), ...
         "surrogate");
