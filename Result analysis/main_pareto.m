@@ -106,11 +106,11 @@ create_analysis_plots_side_by_side(allT, allTopt, allPareto, datasets, graphicsF
 plot_combined_pareto_samples(allTopt{1}, allTp{1}, allTopt{2}, allTp{2}, fullfile(graphicsFolder, "pareto_samples_run1_run2.png"), fontSize, plotColors);
 plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotColors);
 
-% Refined comparison (former plot_refined_frontier_change.m logic).
+%% Refined comparison (former plot_refined_frontier_change.m logic).
 run_refined_frontier_change(projectRoot, graphicsFolder, optStartIter);
 end
 
-
+%% FUNCTIONS
 function [T, Topt, Tp, isPareto] = load_results_table(csvPath, optimizationStartIter)
 %LOAD_RESULTS_TABLE Build one run table and derive optimization-only subset.
 if nargin < 1 || strlength(string(csvPath)) == 0
@@ -469,6 +469,43 @@ plot(ax, xSort, ySort, "o", ...
     "MarkerFaceColor", "w", ...
     "MarkerEdgeColor", curveColor, ...
     "LineWidth", 1.4);
+end
+
+
+function h = plot_pareto_continuum_line_only(ax, x, y, curveColor, xBounds, yBounds)
+%PLOT_PARETO_CONTINUUM_LINE_ONLY Smooth pchip Pareto guide without point markers.
+[xSort, ord] = sort(x(:), "ascend");
+ySort = y(ord);
+
+if numel(xSort) < 3
+    h = plot(ax, xSort, ySort, "-", "Color", curveColor, "LineWidth", 2.0);
+    return;
+end
+
+lx = log10(xSort);
+ly = log10(ySort);
+lxqIn = linspace(min(lx), max(lx), 220);
+lyqIn = pchip(lx, ly, lxqIn);
+xq = (10.^lxqIn).';
+yq = (10.^lyqIn).';
+
+if nargin >= 6 && ~isempty(yBounds)
+    yTop = max(yBounds);
+    if yTop > yq(1)
+        xq = [xq(1); xq];
+        yq = [yTop; yq];
+    end
+end
+
+if nargin >= 5 && ~isempty(xBounds)
+    xRight = max(xBounds);
+    if xRight > xq(end)
+        xq = [xq; xRight];
+        yq = [yq; yq(end)];
+    end
+end
+
+h = plot(ax, xq, yq, "-", "Color", curveColor, "LineWidth", 2.0);
 end
 
 
@@ -884,6 +921,8 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     apply_combined_axes_style(axL, 20);
     [xLimR, yLimR] = refined_pareto_axis_limits_10pct(TrefPareto);
     xLimR(1) = 2e-2;
+    plot_pareto_continuum_line_only(axR, double(TrefPareto.SSdU), double(TrefPareto.SSE), ...
+        NATURE_COLOR.ReddishPurple, xLimR, yLimR);
     apply_combined_axes_style(axR, 20);
     xlim(axR, xLimR);
     ylim(axR, yLimR);
