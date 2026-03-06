@@ -18,7 +18,7 @@ USE_PARALLEL = true;
 % Configure a parallel pool. If USE_PARALLEL==false, the script ensures no pool.
 p = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 2;   % Choose based on machine capacity (cores/RAM).
+    NumWorkers = 31;
     if isempty(p) || p.NumWorkers ~= NumWorkers
         if ~isempty(p)
             delete(p);
@@ -48,7 +48,12 @@ base = nmpc_init_base(cfg_run.sigma_y);
 
 % Build timestamp lists from the saved final Pareto frontier file.
 frontier_ts_file = fullfile(cfg_run.source_root, "txt results", "final_pareto_frontier_timestamps_only.txt");
-all_ts = load_frontier_timestamps(frontier_ts_file);
+all_ts_file = load_frontier_timestamps(frontier_ts_file);
+all_ts_calc = load_combined_non_doe_pareto_timestamps(cfg_run.source_root, 20);
+[all_ts, tsSync] = resolve_frontier_timestamps(all_ts_file, all_ts_calc);
+if ~tsSync.in_sync
+    fprintf("Using computed combined non-DOE Pareto timestamps (count=%d) due to mismatch with file list.\n", numel(all_ts));
+end
 [t1, t2] = split_timestamps_by_run(cfg_run.source_root, all_ts);
 
 run_timestamp_list(cfg_run, base, "run1", t1);
@@ -110,6 +115,92 @@ function timestamps = load_frontier_timestamps(path)
     lines = strip(string(splitlines(fileread(path))));
     is_ts = lines ~= "" & startsWith(lines, "20");
     timestamps = unique(lines(is_ts), "stable");
+end
+
+function [timestamps, info] = resolve_frontier_timestamps(tsFile, tsComputed)
+%RESOLVE_FRONTIER_TIMESTAMPS Compare file list with computed Pareto list.
+% Falls back to computed list when mismatch is detected.
+    tsFile = unique(string(tsFile), "stable");
+    tsComputed = unique(string(tsComputed), "stable");
+
+    missingInFile = setdiff(tsComputed, tsFile, "stable");
+    extraInFile = setdiff(tsFile, tsComputed, "stable");
+
+    info = struct();
+    info.in_sync = isempty(missingInFile) && isempty(extraInFile);
+    info.missing_in_file = missingInFile;
+    info.extra_in_file = extraInFile;
+
+    if info.in_sync
+        timestamps = tsFile;
+        fprintf("Frontier timestamp list is in sync with current combined non-DOE Pareto set (%d timestamps).\n", numel(timestamps));
+        return
+    end
+
+    fprintf("Frontier timestamp list mismatch detected.\n");
+    fprintf("  File list count: %d\n", numel(tsFile));
+    fprintf("  Computed Pareto count: %d\n", numel(tsComputed));
+    if ~isempty(missingInFile)
+        fprintf("  Missing in file (present in computed Pareto):\n");
+        for i = 1:numel(missingInFile)
+            fprintf("    - %s\n", missingInFile(i));
+        end
+    end
+    if ~isempty(extraInFile)
+        fprintf("  Extra in file (not in computed Pareto):\n");
+        for i = 1:numel(extraInFile)
+            fprintf("    - %s\n", extraInFile(i));
+        end
+    end
+
+    timestamps = tsComputed;
+end
+
+function timestamps = load_combined_non_doe_pareto_timestamps(source_root, doeLastIter)
+%LOAD_COMBINED_NON_DOE_PARETO_TIMESTAMPS Compute combined Pareto from run1/run2 CSVs.
+    if nargin < 2
+        doeLastIter = 20;
+    end
+    c1 = fullfile(source_root, "run1", "results.csv");
+    c2 = fullfile(source_root, "run2", "results.csv");
+    T1 = readtable(c1, "TextType", "string");
+    T2 = readtable(c2, "TextType", "string");
+
+    req = ["timestamp", "SSE", "SSdU"];
+    for r = req
+        if ~ismember(r, string(T1.Properties.VariableNames))
+            error("Missing required column '%s' in %s", r, c1);
+        end
+        if ~ismember(r, string(T2.Properties.VariableNames))
+            error("Missing required column '%s' in %s", r, c2);
+        end
+    end
+
+    T1.iteration = (1:height(T1)).';
+    T2.iteration = (1:height(T2)).';
+    T1 = T1(T1.iteration > doeLastIter, :);
+    T2 = T2(T2.iteration > doeLastIter, :);
+    Tall = [T1(:, ["timestamp", "SSE", "SSdU"]); T2(:, ["timestamp", "SSE", "SSdU"])];
+
+    isPareto = compute_pareto_mask_ff(double(Tall.SSE), double(Tall.SSdU));
+    Tp = Tall(isPareto, :);
+    [~, ord] = sort(double(Tp.SSdU), "ascend");
+    Tp = Tp(ord, :);
+    timestamps = unique(string(Tp.timestamp), "stable");
+end
+
+function isPareto = compute_pareto_mask_ff(J_track, J_TV)
+%COMPUTE_PARETO_MASK_FF Non-dominated mask (lower is better).
+    n = numel(J_track);
+    isPareto = true(n, 1);
+    for i = 1:n
+        dominated = (J_track <= J_track(i)) & (J_TV <= J_TV(i)) & ...
+                    ((J_track < J_track(i)) | (J_TV < J_TV(i)));
+        dominated(i) = false;
+        if any(dominated)
+            isPareto(i) = false;
+        end
+    end
 end
 
 function [ts_run1, ts_run2] = split_timestamps_by_run(source_root, timestamps)
