@@ -41,6 +41,22 @@ cfg.optim_mean_sim_time_h = 8.09603;
 diagnostics = run_full_run_diagnostics(cfg);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
+
+%% Selection
+selectionTable = build_selection_table(diagnostics.per_case, diagnostics.per_controller);
+fprintf("Selection:\n");
+if isempty(selectionTable)
+    fprintf("Selection table: none\n");
+else
+    selectionCols = [ ...
+        "run_label","timestamp","p","m","SSE","SSdU","J", ...
+        "settle_x1_h_c1","settle_x2_h_c1","settle_x1_h_c2","settle_x2_h_c2", ...
+        "IAE_x3_c1","IAE_x3_c2", ...
+        "Q_diag","R1_diag","R2_diag"];
+    selectionCols = selectionCols(ismember(selectionCols, string(selectionTable.Properties.VariableNames)));
+    disp(selectionTable(:, selectionCols));
+end
+
 write_numerical_results(diagnostics, cfg.settling_tol, cfg.optim_mean_sim_time_h, cfg.results_root);
 export_boxplot_data_csv(diagnostics, cfg.analysis_dir);
 plot_summary_boxplots(diagnostics, cfg.optim_mean_sim_time_h, NATURE_COLOR.Orange);
@@ -421,6 +437,7 @@ if ~isempty(settlingColumns)
         disp(bothCasesTable(:, reportCols));
     end
 end
+
 end
 
 
@@ -468,6 +485,85 @@ end
 
 if ~isempty(controllerCaseTable)
     controllerCaseTable = sortrows(controllerCaseTable, ["SSE","SSdU"], ["ascend","ascend"]);
+end
+end
+
+
+function Tsel = build_selection_table(caseTable, controllerTable)
+%BUILD_SELECTION_TABLE Apply requested median filters and include strict complete-settling controllers.
+if isempty(caseTable) || isempty(controllerTable)
+    Tsel = table();
+    return
+end
+
+targetCaseCols = ["settle_x1_h", "settle_x2_h", "IAE_x3"];
+availableCaseCols = targetCaseCols(ismember(targetCaseCols, string(caseTable.Properties.VariableNames)));
+if isempty(availableCaseCols)
+    Tsel = table();
+    return
+end
+
+case1 = caseTable(caseTable.case_id == 1, ["run_label", "timestamp", availableCaseCols]);
+case2 = caseTable(caseTable.case_id == 2, ["run_label", "timestamp", availableCaseCols]);
+if isempty(case1) || isempty(case2)
+    Tsel = table();
+    return
+end
+
+case1 = renamevars(case1, availableCaseCols, availableCaseCols + "_c1");
+case2 = renamevars(case2, availableCaseCols, availableCaseCols + "_c2");
+Tbase = innerjoin(case1, case2, "Keys", ["run_label", "timestamp"]);
+Tbase = innerjoin( ...
+    Tbase, ...
+    controllerTable(:, ["run_label","timestamp","p","m","SSE","SSdU","J","Q_diag","R1_diag","R2_diag"]), ...
+    "Keys", ["run_label","timestamp"]);
+if isempty(Tbase)
+    Tsel = table();
+    return
+end
+
+Tsel = Tbase;
+settleFilterCols = ["settle_x1_h_c1", "settle_x2_h_c1", "settle_x1_h_c2", "settle_x2_h_c2"];
+settleFilterCols = settleFilterCols(ismember(settleFilterCols, string(Tsel.Properties.VariableNames)));
+for c = settleFilterCols
+    v = double(Tsel.(c));
+    v(~isfinite(v)) = inf;
+    medVal = median(v, "omitnan");
+    Tsel = Tsel(v <= medVal, :);
+    if isempty(Tsel)
+        return
+    end
+end
+
+iaeFilterCols = ["IAE_x3_c1", "IAE_x3_c2"];
+iaeFilterCols = iaeFilterCols(ismember(iaeFilterCols, string(Tsel.Properties.VariableNames)));
+for c = iaeFilterCols
+    v = double(Tsel.(c));
+    v(~isfinite(v)) = inf;
+    medVal = median(v, "omitnan");
+    Tsel = Tsel(v <= medVal, :);
+    if isempty(Tsel)
+        return
+    end
+end
+
+% Ensure strict complete-settling controllers are retained.
+settlingCols = caseTable.Properties.VariableNames(startsWith(caseTable.Properties.VariableNames, "settle_x"));
+Tstrict = build_controller_both_case_table(caseTable, controllerTable, settlingCols, true);
+if ~isempty(Tstrict)
+    strictKeys = string(Tstrict.run_label) + "|" + string(Tstrict.timestamp);
+    selKeys = string(Tsel.run_label) + "|" + string(Tsel.timestamp);
+    missingStrictKeys = strictKeys(~ismember(strictKeys, selKeys));
+    if ~isempty(missingStrictKeys)
+        baseKeys = string(Tbase.run_label) + "|" + string(Tbase.timestamp);
+        Tsel = [Tsel; Tbase(ismember(baseKeys, missingStrictKeys), :)]; %#ok<AGROW>
+    end
+end
+
+if ~isempty(Tsel)
+    [~, uniqueIdx] = unique(string(Tsel.run_label) + "|" + string(Tsel.timestamp), "stable");
+    Tsel = Tsel(uniqueIdx, :);
+    Tsel = sort_table_by_sse(Tsel);
 end
 end
 
@@ -765,4 +861,32 @@ settlingData = table2array(caseTable(:, settlingColumns));
 settledAllBefore = all(isfinite(settlingData) & (settlingData <= settlingTimeRefH), 2);
 fracAll = nnz(settledAllBefore) / height(caseTable);
 fprintf(fid, "  all states: %.2f%% (%d/%d)\n", 100*fracAll, nnz(settledAllBefore), height(caseTable));
+
+% Final Pareto controller counts by case (from diagnostics.pareto_controllers).
+paretoControllerTable = diagnostics.pareto_controllers;
+if isempty(paretoControllerTable) || ~ismember("run_label", string(paretoControllerTable.Properties.VariableNames))
+    c1Count = 0;
+    c2Count = 0;
+else
+    c1Count = nnz(string(paretoControllerTable.run_label) == "Case 1");
+    c2Count = nnz(string(paretoControllerTable.run_label) == "Case 2");
+end
+totalPareto = c1Count + c2Count;
+fprintf(fid, "\nFinal Pareto controller counts by case:\n");
+fprintf(fid, "  Case 1: %d\n", c1Count);
+fprintf(fid, "  Case 2: %d\n", c2Count);
+fprintf(fid, "  Total: %d\n", totalPareto);
+
+% Standalone txt for quick manuscript bookkeeping.
+countsPath = fullfile(outDir, "final_pareto_counts_by_case.txt");
+fidCounts = fopen(countsPath, "w");
+if fidCounts == -1
+    warning("Unable to write final Pareto counts summary: %s", countsPath);
+else
+    cleanupCounts = onCleanup(@() fclose(fidCounts)); %#ok<NASGU>
+    fprintf(fidCounts, "Final Pareto controller counts by case\n");
+    fprintf(fidCounts, "Case 1: %d\n", c1Count);
+    fprintf(fidCounts, "Case 2: %d\n", c2Count);
+    fprintf(fidCounts, "Total: %d\n", totalPareto);
+end
 end

@@ -41,6 +41,11 @@ for s = 1:numel(scenarios)
 
     out_dir = fullfile(cfg.output_root, scenario.name);
     ensure_dir(out_dir);
+    existingMat = dir(fullfile(out_dir, "*.mat"));
+    if ~isempty(existingMat)
+        fprintf("Skipping scenario %s (existing MAT found in %s)\n", scenario.name, out_dir);
+        continue
+    end
 
     base = init_base(scenario.sigma_y, cfg.Ts, cfg.tf_h);
     theta = benchmark_theta();

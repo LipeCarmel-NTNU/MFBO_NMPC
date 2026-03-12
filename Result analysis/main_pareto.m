@@ -867,8 +867,11 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     end
 
     T_jtv = compute_jtv_change_table_refined(T_orig, T_ref);
-    fprintf("\n=== J_TV change (original -> refined), sorted by |delta| descending ===\n");
+    fprintf("\n=== J_TV change (original -> refined), sorted by |delta %%| descending ===\n");
     disp(T_jtv);
+    T_jtrack = compute_jtrack_change_table_refined(T_orig, T_ref);
+    fprintf("\n=== J_track change (original -> refined), sorted by |delta %%| descending ===\n");
+    disp(T_jtrack);
     print_top1_cfg_refined(projectRoot, T_jtv);
 
     isParetoRef = compute_pareto_mask(double(T_ref.SSE), double(T_ref.SSdU));
@@ -1093,9 +1096,27 @@ function T = compute_jtv_change_table_refined(T_orig, T_ref)
     T = table(runKey, ts, double(T_orig.SSdU(idxOrig)), double(T_ref.SSdU(idxRef)), ...
         'VariableNames', {'run_key', 'timestamp', 'JTV_original', 'JTV_refined'});
     T.delta_JTV = T.JTV_refined - T.JTV_original;
-    T.delta_pct = 100 * T.delta_JTV ./ T.JTV_original;
+    T.delta_pct = 100 * T.delta_JTV ./ max(abs(T.JTV_original), eps);
     T.abs_delta_JTV = abs(T.delta_JTV);
-    T = sortrows(T, "abs_delta_JTV", "descend");
+    T.abs_delta_pct = abs(T.delta_pct);
+    T = sortrows(T, "abs_delta_pct", "descend");
+end
+
+
+function T = compute_jtrack_change_table_refined(T_orig, T_ref)
+%COMPUTE_JTRACK_CHANGE_TABLE_REFINED Build delta-J_track table for matched points.
+    [commonKeys, idxOrig, idxRef] = intersect(string(T_orig.match_key), string(T_ref.match_key), "stable");
+    if isempty(commonKeys)
+        error("No matching (run_key, timestamp) points between original and refined tables.");
+    end
+    [runKey, ts] = split_match_key_refined(commonKeys);
+    T = table(runKey, ts, double(T_orig.SSE(idxOrig)), double(T_ref.SSE(idxRef)), ...
+        'VariableNames', {'run_key', 'timestamp', 'Jtrack_original', 'Jtrack_refined'});
+    T.delta_Jtrack = T.Jtrack_refined - T.Jtrack_original;
+    T.delta_pct = 100 * T.delta_Jtrack ./ max(abs(T.Jtrack_original), eps);
+    T.abs_delta_Jtrack = abs(T.delta_Jtrack);
+    T.abs_delta_pct = abs(T.delta_pct);
+    T = sortrows(T, "abs_delta_pct", "descend");
 end
 
 

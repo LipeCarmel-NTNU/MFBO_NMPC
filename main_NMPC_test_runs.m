@@ -48,6 +48,7 @@ base = nmpc_init_base(cfg_run.sigma_y);
 % Timestamp lists (Pareto-optimal controllers)
 t1 = [
     "20260201_232106";
+    "20260202_000115";
     "20260201_111557";
     "20260201_223337";
     "20260131_151035";
