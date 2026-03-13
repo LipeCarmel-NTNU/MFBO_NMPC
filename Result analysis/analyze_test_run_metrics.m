@@ -389,7 +389,7 @@ if ~isempty(settlingColumns)
 end
 
 if ~isempty(diagnostics.missing_pareto_timestamps)
-    fprintf("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
+    warning("Missing configured Pareto timestamps: %s\n", strjoin(diagnostics.missing_pareto_timestamps, ", "));
 end
 
 if isempty(controllerTable)
