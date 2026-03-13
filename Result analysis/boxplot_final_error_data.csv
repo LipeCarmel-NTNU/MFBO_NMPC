@@ -59,6 +59,12 @@ Case 1,20260201_232106,1,final_relative_error_pct,x3,S (g/L),220.983213180577
 Case 1,20260201_232106,2,final_relative_error_pct,x1,V (L),0.000507096943413998
 Case 1,20260201_232106,2,final_relative_error_pct,x2,X (g/L),0.015325663469703
 Case 1,20260201_232106,2,final_relative_error_pct,x3,S (g/L),0.0921605485742371
+Case 1,20260202_000115,1,final_relative_error_pct,x1,V (L),4.6463585336006
+Case 1,20260202_000115,1,final_relative_error_pct,x2,X (g/L),15.1024493724665
+Case 1,20260202_000115,1,final_relative_error_pct,x3,S (g/L),223.701139224558
+Case 1,20260202_000115,2,final_relative_error_pct,x1,V (L),0.0345579432684429
+Case 1,20260202_000115,2,final_relative_error_pct,x2,X (g/L),0.215760580357838
+Case 1,20260202_000115,2,final_relative_error_pct,x3,S (g/L),2.00154711036991
 Case 2,20260210_134744,1,final_relative_error_pct,x1,V (L),8.31861832415521
 Case 2,20260210_134744,1,final_relative_error_pct,x2,X (g/L),27.6940397591878
 Case 2,20260210_134744,1,final_relative_error_pct,x3,S (g/L),222.206365143485

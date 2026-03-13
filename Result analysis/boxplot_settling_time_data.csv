@@ -59,6 +59,12 @@ Case 1,20260201_232106,1,settling_time_h,x3,S (g/L),NaN
 Case 1,20260201_232106,2,settling_time_h,x1,V (L),1.28333333333333
 Case 1,20260201_232106,2,settling_time_h,x2,X (g/L),2.36666666666667
 Case 1,20260201_232106,2,settling_time_h,x3,S (g/L),4.8
+Case 1,20260202_000115,1,settling_time_h,x1,V (L),9.26666666666667
+Case 1,20260202_000115,1,settling_time_h,x2,X (g/L),NaN
+Case 1,20260202_000115,1,settling_time_h,x3,S (g/L),NaN
+Case 1,20260202_000115,2,settling_time_h,x1,V (L),0.316666666666667
+Case 1,20260202_000115,2,settling_time_h,x2,X (g/L),3.4
+Case 1,20260202_000115,2,settling_time_h,x3,S (g/L),8.01666666666667
 Case 2,20260210_134744,1,settling_time_h,x1,V (L),NaN
 Case 2,20260210_134744,1,settling_time_h,x2,X (g/L),NaN
 Case 2,20260210_134744,1,settling_time_h,x3,S (g/L),NaN

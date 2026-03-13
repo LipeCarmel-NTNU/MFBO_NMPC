@@ -108,6 +108,7 @@ plot_cumulative_runtime_combined(allT, datasets, graphicsFolder, fontSize, plotC
 
 %% Refined comparison (former plot_refined_frontier_change.m logic).
 run_refined_frontier_change(projectRoot, graphicsFolder, optStartIter);
+report_final_frontier_f1_metrics(projectRoot, numericalFolder, optStartIter);
 end
 
 %% FUNCTIONS
@@ -1252,4 +1253,221 @@ function write_promoted_report_refined(reportPath, promotedRunKey, promotedTs, T
             double(T_orig.SSE(io)), double(T_orig.SSdU(io)), double(T_orig.z_eval(io)), ...
             double(T_ref.SSE(ir)), double(T_ref.SSdU(ir)));
     end
+end
+
+
+function report_final_frontier_f1_metrics(projectRoot, numericalFolder, optimizationStartIter)
+%REPORT_FINAL_FRONTIER_F1_METRICS Build final Pareto f=1 table with noisy/noiseless metrics.
+rootFolder = fullfile(projectRoot, "results");
+runDefs = [
+    struct("run_key","run1","csvPath", fullfile(rootFolder, "run1", "results.csv"));
+    struct("run_key","run2","csvPath", fullfile(rootFolder, "run2", "results.csv"))
+];
+
+Tall = table();
+for k = 1:numel(runDefs)
+    [~, Topt, ~, ~] = load_results_table(runDefs(k).csvPath, optimizationStartIter);
+    Topt.run_key = repmat(string(runDefs(k).run_key), height(Topt), 1);
+    Tall = [Tall; Topt]; %#ok<AGROW>
+end
+if isempty(Tall)
+    fprintf("Final Pareto f=1 metrics table: no optimization rows available.\n");
+    return
+end
+
+isFront = compute_pareto_mask(double(Tall.SSE), double(Tall.SSdU));
+Tf = Tall(isFront, :);
+if isempty(Tf)
+    fprintf("Final Pareto f=1 metrics table: no Pareto rows available.\n");
+    return
+end
+
+n = height(Tf);
+noisy_Jtrack = nan(n,1); noisy_JTV = nan(n,1);
+noiseless_Jtrack = nan(n,1); noiseless_JTV = nan(n,1);
+
+noisy_settle_x1_h_c1 = nan(n,1); noisy_settle_x2_h_c1 = nan(n,1); noisy_settle_x3_h_c1 = nan(n,1);
+noisy_settle_x1_h_c2 = nan(n,1); noisy_settle_x2_h_c2 = nan(n,1); noisy_settle_x3_h_c2 = nan(n,1);
+noisy_settle_case_h_c1 = nan(n,1); noisy_settle_case_h_c2 = nan(n,1);
+noisy_IAE_x1_c1 = nan(n,1); noisy_IAE_x2_c1 = nan(n,1); noisy_IAE_x3_c1 = nan(n,1);
+noisy_IAE_x1_c2 = nan(n,1); noisy_IAE_x2_c2 = nan(n,1); noisy_IAE_x3_c2 = nan(n,1);
+noisy_IAE_case_c1 = nan(n,1); noisy_IAE_case_c2 = nan(n,1);
+
+noiseless_settle_x1_h_c1 = nan(n,1); noiseless_settle_x2_h_c1 = nan(n,1); noiseless_settle_x3_h_c1 = nan(n,1);
+noiseless_settle_x1_h_c2 = nan(n,1); noiseless_settle_x2_h_c2 = nan(n,1); noiseless_settle_x3_h_c2 = nan(n,1);
+noiseless_settle_case_h_c1 = nan(n,1); noiseless_settle_case_h_c2 = nan(n,1);
+noiseless_IAE_x1_c1 = nan(n,1); noiseless_IAE_x2_c1 = nan(n,1); noiseless_IAE_x3_c1 = nan(n,1);
+noiseless_IAE_x1_c2 = nan(n,1); noiseless_IAE_x2_c2 = nan(n,1); noiseless_IAE_x3_c2 = nan(n,1);
+noiseless_IAE_case_c1 = nan(n,1); noiseless_IAE_case_c2 = nan(n,1);
+
+for i = 1:n
+    run_key = string(Tf.run_key(i));
+    ts = string(Tf.timestamp(i));
+    noisyOutPath = fullfile(rootFolder, "final_fidelity_same_noise", run_key + "_full_f1_same_noise", "out_full_" + ts + ".mat");
+    noiselessOutPath = fullfile(rootFolder, "test_run", run_key + "_full_f1_no_noise", "out_full_" + ts + ".mat");
+
+    noisyM = compute_out_metrics_by_path(noisyOutPath, 0.05);
+    noiselessM = compute_out_metrics_by_path(noiselessOutPath, 0.05);
+
+    noisy_Jtrack(i) = noisyM.Jtrack;
+    noisy_JTV(i) = noisyM.JTV;
+    noiseless_Jtrack(i) = noiselessM.Jtrack;
+    noiseless_JTV(i) = noiselessM.JTV;
+
+    noisy_settle_x1_h_c1(i) = noisyM.settle_h(1,1); noisy_settle_x2_h_c1(i) = noisyM.settle_h(1,2); noisy_settle_x3_h_c1(i) = noisyM.settle_h(1,3);
+    noisy_settle_x1_h_c2(i) = noisyM.settle_h(2,1); noisy_settle_x2_h_c2(i) = noisyM.settle_h(2,2); noisy_settle_x3_h_c2(i) = noisyM.settle_h(2,3);
+    noisy_settle_case_h_c1(i) = noisyM.settle_case_h(1); noisy_settle_case_h_c2(i) = noisyM.settle_case_h(2);
+    noisy_IAE_x1_c1(i) = noisyM.IAE(1,1); noisy_IAE_x2_c1(i) = noisyM.IAE(1,2); noisy_IAE_x3_c1(i) = noisyM.IAE(1,3);
+    noisy_IAE_x1_c2(i) = noisyM.IAE(2,1); noisy_IAE_x2_c2(i) = noisyM.IAE(2,2); noisy_IAE_x3_c2(i) = noisyM.IAE(2,3);
+    noisy_IAE_case_c1(i) = noisyM.IAE_case(1); noisy_IAE_case_c2(i) = noisyM.IAE_case(2);
+
+    noiseless_settle_x1_h_c1(i) = noiselessM.settle_h(1,1); noiseless_settle_x2_h_c1(i) = noiselessM.settle_h(1,2); noiseless_settle_x3_h_c1(i) = noiselessM.settle_h(1,3);
+    noiseless_settle_x1_h_c2(i) = noiselessM.settle_h(2,1); noiseless_settle_x2_h_c2(i) = noiselessM.settle_h(2,2); noiseless_settle_x3_h_c2(i) = noiselessM.settle_h(2,3);
+    noiseless_settle_case_h_c1(i) = noiselessM.settle_case_h(1); noiseless_settle_case_h_c2(i) = noiselessM.settle_case_h(2);
+    noiseless_IAE_x1_c1(i) = noiselessM.IAE(1,1); noiseless_IAE_x2_c1(i) = noiselessM.IAE(1,2); noiseless_IAE_x3_c1(i) = noiselessM.IAE(1,3);
+    noiseless_IAE_x1_c2(i) = noiselessM.IAE(2,1); noiseless_IAE_x2_c2(i) = noiselessM.IAE(2,2); noiseless_IAE_x3_c2(i) = noiselessM.IAE(2,3);
+    noiseless_IAE_case_c1(i) = noiselessM.IAE_case(1); noiseless_IAE_case_c2(i) = noiselessM.IAE_case(2);
+end
+
+Treport = table( ...
+    string(Tf.run_key), string(Tf.timestamp), double(Tf.p), double(Tf.m), ...
+    double(Tf.Q_x1), double(Tf.Q_x2), double(Tf.Q_x3), ...
+    double(Tf.R_u_x1), double(Tf.R_u_x2), double(Tf.R_u_x3), ...
+    double(Tf.R_du_x1), double(Tf.R_du_x2), double(Tf.R_du_x3), ...
+    noisy_Jtrack, noisy_JTV, ...
+    noisy_settle_x1_h_c1, noisy_settle_x2_h_c1, noisy_settle_x3_h_c1, ...
+    noisy_settle_x1_h_c2, noisy_settle_x2_h_c2, noisy_settle_x3_h_c2, ...
+    noisy_settle_case_h_c1, noisy_settle_case_h_c2, ...
+    noisy_IAE_x1_c1, noisy_IAE_x2_c1, noisy_IAE_x3_c1, ...
+    noisy_IAE_x1_c2, noisy_IAE_x2_c2, noisy_IAE_x3_c2, ...
+    noisy_IAE_case_c1, noisy_IAE_case_c2, ...
+    noiseless_Jtrack, noiseless_JTV, ...
+    noiseless_settle_x1_h_c1, noiseless_settle_x2_h_c1, noiseless_settle_x3_h_c1, ...
+    noiseless_settle_x1_h_c2, noiseless_settle_x2_h_c2, noiseless_settle_x3_h_c2, ...
+    noiseless_settle_case_h_c1, noiseless_settle_case_h_c2, ...
+    noiseless_IAE_x1_c1, noiseless_IAE_x2_c1, noiseless_IAE_x3_c1, ...
+    noiseless_IAE_x1_c2, noiseless_IAE_x2_c2, noiseless_IAE_x3_c2, ...
+    noiseless_IAE_case_c1, noiseless_IAE_case_c2, ...
+    'VariableNames', { ...
+    'run_key','timestamp','p','m', ...
+    'Q_x1','Q_x2','Q_x3','R_u_x1','R_u_x2','R_u_x3','R_du_x1','R_du_x2','R_du_x3', ...
+    'noisy_Jtrack','noisy_JTV', ...
+    'noisy_settle_x1_h_c1','noisy_settle_x2_h_c1','noisy_settle_x3_h_c1', ...
+    'noisy_settle_x1_h_c2','noisy_settle_x2_h_c2','noisy_settle_x3_h_c2', ...
+    'noisy_settle_case_h_c1','noisy_settle_case_h_c2', ...
+    'noisy_IAE_x1_c1','noisy_IAE_x2_c1','noisy_IAE_x3_c1', ...
+    'noisy_IAE_x1_c2','noisy_IAE_x2_c2','noisy_IAE_x3_c2', ...
+    'noisy_IAE_case_c1','noisy_IAE_case_c2', ...
+    'noiseless_Jtrack','noiseless_JTV', ...
+    'noiseless_settle_x1_h_c1','noiseless_settle_x2_h_c1','noiseless_settle_x3_h_c1', ...
+    'noiseless_settle_x1_h_c2','noiseless_settle_x2_h_c2','noiseless_settle_x3_h_c2', ...
+    'noiseless_settle_case_h_c1','noiseless_settle_case_h_c2', ...
+    'noiseless_IAE_x1_c1','noiseless_IAE_x2_c1','noiseless_IAE_x3_c1', ...
+    'noiseless_IAE_x1_c2','noiseless_IAE_x2_c2','noiseless_IAE_x3_c2', ...
+    'noiseless_IAE_case_c1','noiseless_IAE_case_c2'});
+
+Treport = sortrows(Treport, 'noisy_JTV', 'descend');
+fprintf("\nFinal Pareto frontier f=1 controller table (sorted by decreasing noisy J_TV):\n");
+disp(Treport);
+
+if ~isfolder(numericalFolder)
+    mkdir(numericalFolder);
+end
+writetable(Treport, fullfile(numericalFolder, "final_pareto_frontier_f1_noisy_noiseless_metrics.csv"));
+end
+
+
+function M = compute_out_metrics_by_path(matPath, settlingTol)
+%COMPUTE_OUT_METRICS_BY_PATH Load one out_full MAT and compute objective/settling/IAE metrics.
+M = struct();
+M.Jtrack = nan;
+M.JTV = nan;
+M.settle_h = nan(2,3);
+M.settle_case_h = nan(2,1);
+M.IAE = nan(2,3);
+M.IAE_case = nan(2,1);
+if ~isfile(matPath)
+    return
+end
+S = load(matPath, "out");
+if ~isfield(S, "out")
+    return
+end
+out = S.out;
+if isfield(out, "SSE"), M.Jtrack = double(out.SSE); end
+if isfield(out, "SSdU"), M.JTV = double(out.SSdU); end
+if ~isfield(out, "case") || isempty(out.case)
+    return
+end
+nCase = min(numel(out.case), 2);
+for c = 1:nCase
+    caseData = out.case(c);
+    [settle_h, iae] = summarize_case_metrics_simple(caseData, settlingTol);
+    nState = min(numel(settle_h), 3);
+    M.settle_h(c,1:nState) = settle_h(1:nState);
+    M.IAE(c,1:nState) = iae(1:nState);
+    if any(isfinite(settle_h))
+        M.settle_case_h(c) = max(settle_h(isfinite(settle_h)));
+    else
+        M.settle_case_h(c) = nan;
+    end
+    M.IAE_case(c) = sum(iae, "omitnan");
+end
+end
+
+
+function [settlingTimes_h, IAEByState] = summarize_case_metrics_simple(caseStruct, settlingTol)
+%SUMMARIZE_CASE_METRICS_SIMPLE Compute settling times and IAE from one case struct.
+if ~isfield(caseStruct, "Y") || ~isfield(caseStruct, "Ysp")
+    settlingTimes_h = nan(1,3);
+    IAEByState = nan(1,3);
+    return
+end
+Y = double(caseStruct.Y);
+Ysp = double(caseStruct.Ysp);
+nState = min(size(Y,2), size(Ysp,2));
+Y = Y(:,1:nState);
+Ysp = Ysp(:,1:nState);
+if isfield(caseStruct, "dt")
+    dt = double(caseStruct.dt);
+elseif isfield(caseStruct, "tf")
+    dt = double(caseStruct.tf) / max(size(Y,1)-1, 1);
+else
+    dt = 1/60;
+end
+t = (0:size(Y,1)-1).' * dt;
+settlingTimes_h = nan(1,nState);
+IAEByState = sum(abs(Y - Ysp), 1) * dt;
+epsRef = 1e-9;
+for i = 1:nState
+    refVal = Ysp(end, i);
+    relErr = abs(Y(:,i) - Ysp(:,i)) / max(abs(refVal), epsRef);
+    if relErr(end) > settlingTol
+        settlingTimes_h(i) = nan;
+        continue
+    end
+    settleIdx = find_settling_index(relErr, settlingTol);
+    if isempty(settleIdx)
+        settlingTimes_h(i) = nan;
+    else
+        settlingTimes_h(i) = t(settleIdx);
+    end
+end
+if nState < 3
+    settlingTimes_h(1, end+1:3) = nan;
+    IAEByState(1, end+1:3) = nan;
+end
+end
+
+
+function idx = find_settling_index(relErr, tol)
+%FIND_SETTLING_INDEX First index where relative error stays below tol thereafter.
+n = numel(relErr);
+idx = [];
+for k = 1:n
+    if all(relErr(k:end) <= tol)
+        idx = k;
+        return
+    end
+end
 end
