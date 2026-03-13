@@ -39,6 +39,7 @@ cfg.settling_tol = 0.05;
 cfg.optim_mean_sim_time_h = 8.09603;
 
 diagnostics = run_full_run_diagnostics(cfg);
+warn_missing_no_noise_simulations(cfg, diagnostics);
 % Text summary first, then figures.
 print_full_run_report(diagnostics, cfg);
 
@@ -738,6 +739,7 @@ for runName = ["run1","run2"]
     else
         iter = (1:height(Tcsv)).';
     end
+    validate_run_phase_counts(iter, doeLastIteration, csvPath);
     optMask = iter > doeLastIteration;
     allowedTs = [allowedTs; string(Tcsv.timestamp(optMask))]; %#ok<AGROW>
 end
@@ -787,6 +789,8 @@ if ismember("iteration", string(T2.Properties.VariableNames))
 else
     iter2 = (1:height(T2)).';
 end
+validate_run_phase_counts(iter1, doeLastIteration, run1Csv);
+validate_run_phase_counts(iter2, doeLastIteration, run2Csv);
 
 T1 = T1(iter1 > doeLastIteration, :);
 T2 = T2(iter2 > doeLastIteration, :);
@@ -798,6 +802,41 @@ Tp = Tall(isPareto, :);
 Tp = Tp(ord, :);
 paretoTs = unique(string(Tp.timestamp), "stable");
 fprintf("Computed combined non-DOE Pareto timestamp count: %d\n", numel(paretoTs));
+end
+
+
+function validate_run_phase_counts(iter, doeLastIteration, sourceLabel)
+%VALIDATE_RUN_PHASE_COUNTS Enforce DOE=20 and optimization=101.
+if doeLastIteration ~= 20
+    error("DOE must be exactly 20 iterations. Received doeLastIteration=%d.", doeLastIteration);
+end
+doeCount = nnz(iter <= doeLastIteration);
+optCount = nnz(iter > doeLastIteration);
+if doeCount ~= 20 || optCount ~= 101
+    error("Expected DOE=20 and optimization=101 in %s, got DOE=%d and optimization=%d.", ...
+        string(sourceLabel), doeCount, optCount);
+end
+end
+
+
+function warn_missing_no_noise_simulations(cfg, diagnostics)
+%WARN_MISSING_NO_NOISE_SIMULATIONS Warn if configured Pareto timestamps are missing no-noise MAT files.
+if isempty(cfg.final_pareto_timestamps)
+    return
+end
+for i = 1:numel(cfg.final_pareto_timestamps)
+    ts = string(cfg.final_pareto_timestamps(i));
+    p1 = fullfile(cfg.test_run_root, "run1_full_f1_no_noise", "out_full_" + ts + ".mat");
+    p2 = fullfile(cfg.test_run_root, "run2_full_f1_no_noise", "out_full_" + ts + ".mat");
+    if ~isfile(p1) && ~isfile(p2)
+        warning("Missing no-noise simulation for Pareto timestamp %s (expected %s or %s).", ts, p1, p2);
+    end
+end
+
+if isfield(diagnostics, "missing_pareto_timestamps") && ~isempty(diagnostics.missing_pareto_timestamps)
+    warning("Configured Pareto timestamps missing from scanned no-noise outputs: %s", ...
+        strjoin(string(diagnostics.missing_pareto_timestamps), ", "));
+end
 end
 
 

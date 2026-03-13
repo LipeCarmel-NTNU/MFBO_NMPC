@@ -120,6 +120,9 @@ end
 if nargin < 2
     optimizationStartIter = 20;
 end
+if optimizationStartIter ~= 20
+    error("DOE must be exactly 20 iterations. Received optimizationStartIter=%d.", optimizationStartIter);
+end
 if ~isfile(csvPath)
     error("CSV not found: %s", csvPath);
 end
@@ -179,8 +182,12 @@ T.p = T.theta_p + T.m;
 optMask = double(T.iteration) > optimizationStartIter;
 Topt = T(optMask, :);
 
+doeCount = nnz(double(T.iteration) <= optimizationStartIter);
+if doeCount ~= 20
+    error("DOE must be exactly 20 rows in %s. Found %d.", csvPath, doeCount);
+end
 if height(Topt) ~= 101
-    error('DOE LEAK')
+    error("Optimization phase must be exactly 101 rows in %s. Found %d.", csvPath, height(Topt));
 end
 
 isPareto = compute_pareto_mask(double(Topt.SSE), double(Topt.SSdU));
@@ -866,6 +873,13 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     if isempty(T_ref)
         error("No refined rows remain after filtering to original non-DOE Pareto points.");
     end
+    origParetoKeys = unique(string(T_orig.match_key(isParetoOrig)), "stable");
+    refKeys = unique(string(T_ref.match_key), "stable");
+    missingRefined = setdiff(origParetoKeys, refKeys, "stable");
+    if ~isempty(missingRefined)
+        error("Missing z=1 refined results for %d Pareto controller(s): %s", ...
+            numel(missingRefined), strjoin(missingRefined, ", "));
+    end
 
     T_jtv = compute_jtv_change_table_refined(T_orig, T_ref);
     fprintf("\n=== J_TV change (original -> refined), sorted by |delta %%| descending ===\n");
@@ -883,6 +897,9 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
     plotColors = nature_methods_colors(3); % Blue, BluishGreen, ReddishPurple
     colRefAll = [0.60 0.82 0.98];
     colPromoted = plotColors(2, :);
+    % Match dependencies/plot_utils/good_colors.m: C.orange = [242, 133, 34].
+    benchmarkColor = [242, 133, 34] / 255;
+    [benchJtrack, benchJTV, benchFound] = load_noisy_benchmark_point(projectRoot);
 
     % Promotion bookkeeping.
     origParetoMatched = isParetoOrig(idxOrig);
@@ -908,6 +925,10 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
 
     axL = nexttile; hold(axL, "on");
     [isParetoLeft, ~] = plot_combined_pareto_base(axL, T_orig_run1, Tp_orig_run1, T_orig_run2, Tp_orig_run2, plotColors);
+    if benchFound
+        scatter(axL, benchJTV, benchJtrack, 130, "s", ...
+            "MarkerFaceColor", benchmarkColor, "MarkerEdgeColor", "none", "LineWidth", 1.0);
+    end
 
     axR = nexttile; hold(axR, "on");
     plot_combined_samples_no_guide(axR, T_orig_run1, Tp_orig_run1, T_orig_run2, Tp_orig_run2, plotColors);
@@ -921,13 +942,50 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
         scatter(axR, double(T_ref.SSdU(promotedIdxRef)), double(T_ref.SSE(promotedIdxRef)), 140, ...
             "p", "MarkerFaceColor", colPromoted, "MarkerEdgeColor", "k", "LineWidth", 0.7);
     end
+    if benchFound
+        scatter(axR, benchJTV, benchJtrack, 130, "s", ...
+            "MarkerFaceColor", benchmarkColor, "MarkerEdgeColor", "none", "LineWidth", 1.0);
+    end
+
+    if benchFound
+        [nOrigSuperior, superiorMaskOrig] = count_benchmark_strict_superior_refined( ...
+            double(T_orig.SSE(isParetoOrig)), double(T_orig.SSdU(isParetoOrig)), benchJtrack, benchJTV);
+        [nRefSuperior, superiorMaskRef] = count_benchmark_strict_superior_refined( ...
+            double(TrefPareto.SSE), double(TrefPareto.SSdU), benchJtrack, benchJTV);
+        fprintf("Pareto controllers strictly better than noisy benchmark (J_track and J_TV both lower):\n");
+        fprintf("  Original Pareto (non-DOE): %d/%d\n", nOrigSuperior, nnz(isParetoOrig));
+        print_benchmark_ratio_stats_refined("Original Pareto (non-DOE)", ...
+            double(T_orig.SSE(isParetoOrig)), double(T_orig.SSdU(isParetoOrig)), superiorMaskOrig, benchJtrack, benchJTV);
+        fprintf("  Refined Pareto: %d/%d\n", nRefSuperior, height(TrefPareto));
+        print_benchmark_ratio_stats_refined("Refined Pareto", ...
+            double(TrefPareto.SSE), double(TrefPareto.SSdU), superiorMaskRef, benchJtrack, benchJTV);
+        TorigBench = build_benchmark_comparison_table_refined( ...
+            string(T_orig.run_key(isParetoOrig)), string(T_orig.timestamp(isParetoOrig)), ...
+            double(T_orig.SSE(isParetoOrig)), double(T_orig.SSdU(isParetoOrig)), benchJtrack, benchJTV);
+        fprintf("  Original Pareto benchmark comparison table:\n");
+        disp(TorigBench);
+        TrefBench = build_benchmark_comparison_table_refined( ...
+            string(TrefPareto.run_key), string(TrefPareto.timestamp), ...
+            double(TrefPareto.SSE), double(TrefPareto.SSdU), benchJtrack, benchJTV);
+        fprintf("  Refined Pareto benchmark comparison table:\n");
+        disp(TrefBench);
+    end
 
     apply_combined_axes_style(axL, 20);
-    [xLimR, yLimR] = refined_pareto_axis_limits_10pct(TrefPareto);
-    xLimR(1) = 2e-2;
+    % Keep previous panel-b custom limits for quick swap:
+    % [xLimR, yLimR] = refined_pareto_axis_limits_10pct(TrefPareto);
+    % xLimR(1) = 2e-2;
+    xLimR = [1e-2, 2e0];
+    yLimR = [1e4, 3.5e4];
+    if benchFound
+        xLimR = expand_log_limits_to_include_point_refined(xLimR, benchJTV, 1.10);
+        yLimR = expand_log_limits_to_include_point_refined(yLimR, benchJtrack, 1.10);
+    end
     plot_pareto_continuum_line_only(axR, double(TrefPareto.SSdU), double(TrefPareto.SSE), ...
         NATURE_COLOR.ReddishPurple, xLimR, yLimR);
     apply_combined_axes_style(axR, 20);
+    xlim(axL, xLimR);
+    ylim(axL, yLimR);
     xlim(axR, xLimR);
     ylim(axR, yLimR);
     axes(axR);
@@ -964,6 +1022,81 @@ function run_refined_frontier_change(projectRoot, graphicsFolder, doeIterationsP
 end
 
 
+function limOut = expand_log_limits_to_include_point_refined(limIn, v, padFactor)
+%EXPAND_LOG_LIMITS_TO_INCLUDE_POINT_REFINED Expand positive log-axis limits to include point v.
+limOut = limIn;
+if ~(isfinite(v) && v > 0)
+    return
+end
+if nargin < 3 || ~isfinite(padFactor) || padFactor <= 1
+    padFactor = 1.10;
+end
+if v < limOut(1)
+    limOut(1) = v / padFactor;
+end
+if v > limOut(2)
+    limOut(2) = v * padFactor;
+end
+end
+
+
+function [nSuperior, superiorMask] = count_benchmark_strict_superior_refined(Jtrack, JTV, benchJtrack, benchJTV)
+%COUNT_BENCHMARK_STRICT_SUPERIOR_REFINED Strictly better than benchmark in both objectives.
+superiorMask = isfinite(Jtrack) & isfinite(JTV) & ...
+    (Jtrack < benchJtrack) & (JTV < benchJTV);
+nSuperior = nnz(superiorMask);
+end
+
+
+function print_benchmark_ratio_stats_refined(label, Jtrack, JTV, superiorMask, benchJtrack, benchJTV)
+%PRINT_BENCHMARK_RATIO_STATS_REFINED Print benchmark-relative ratios for superior controllers.
+if nargin < 4 || isempty(superiorMask) || ~any(superiorMask)
+    fprintf("    %s ratios: n/a (no strictly superior controllers)\n", label);
+    return
+end
+JtrackSup = double(Jtrack(superiorMask));
+JTVSup = double(JTV(superiorMask));
+trackPct = 100 * mean(JtrackSup / benchJtrack, "omitnan");
+tvPct = 100 * mean(JTVSup / benchJTV, "omitnan");
+trackTimes = mean(benchJtrack ./ JtrackSup, "omitnan");
+tvTimes = mean(benchJTV ./ JTVSup, "omitnan");
+fprintf("    %s mean (J_better/J_bench): J_track=%.1f%%, J_TV=%.1f%%\n", label, trackPct, tvPct);
+fprintf("    %s mean benchmark higher factor: J_track=%.1fx, J_TV=%.1fx\n", label, trackTimes, tvTimes);
+end
+
+
+function Tcmp = build_benchmark_comparison_table_refined(runKey, timestamp, Jtrack, JTV, benchJtrack, benchJTV)
+%BUILD_BENCHMARK_COMPARISON_TABLE_REFINED Per-controller benchmark-relative metrics.
+runKey = string(runKey(:));
+timestamp = string(timestamp(:));
+Jtrack = double(Jtrack(:));
+JTV = double(JTV(:));
+n = numel(Jtrack);
+
+ratioTrackPct = nan(n,1);
+ratioTVPct = nan(n,1);
+timesTrack = nan(n,1);
+timesTV = nan(n,1);
+isSuperior = false(n,1);
+
+valid = isfinite(Jtrack) & isfinite(JTV) & (Jtrack > 0) & (JTV > 0);
+ratioTrackPct(valid) = 100 * (Jtrack(valid) / benchJtrack);
+ratioTVPct(valid) = 100 * (JTV(valid) / benchJTV);
+timesTrack(valid) = benchJtrack ./ Jtrack(valid);
+timesTV(valid) = benchJTV ./ JTV(valid);
+isSuperior(valid) = (Jtrack(valid) < benchJtrack) & (JTV(valid) < benchJTV);
+
+Tcmp = table(ratioTrackPct, ratioTVPct, timesTrack, timesTV, isSuperior, ...
+    'VariableNames', {'J_track_ratio_pct','J_TV_ratio_pct', ...
+    'J_track_bench_higher_x','J_TV_bench_higher_x','strictly_better'});
+Tcmp = Tcmp(Tcmp.strictly_better, :);
+Tcmp = Tcmp(:, {'J_track_ratio_pct','J_TV_ratio_pct','J_track_bench_higher_x','J_TV_bench_higher_x'});
+if ~isempty(Tcmp)
+    Tcmp = sortrows(Tcmp, 'J_TV_ratio_pct', 'ascend');
+end
+end
+
+
 function [xLim, yLim] = refined_pareto_axis_limits_10pct(TrefPareto)
 %REFINED_PARETO_AXIS_LIMITS_10PCT Axis limits set to +/-10% of refined Pareto cost range.
 xVals = double(TrefPareto.SSdU);
@@ -977,6 +1110,31 @@ if isempty(xVals) || isempty(yVals)
 end
 xLim = [0.9 * min(xVals), 1.1 * max(xVals)];
 yLim = [0.9 * min(yVals), 1.1 * max(yVals)];
+end
+
+
+function [Jtrack, JTV, found] = load_noisy_benchmark_point(projectRoot)
+%LOAD_NOISY_BENCHMARK_POINT Load noisy benchmark aggregate objectives.
+benchPath = fullfile(projectRoot, "results", "benchmark_reference_controller", ...
+    "benchmark_full_f1_same_noise", "out_benchmark.mat");
+Jtrack = nan;
+JTV = nan;
+found = false;
+if ~isfile(benchPath)
+    warning("Noisy benchmark file not found for refined frontier overlay: %s", benchPath);
+    return
+end
+S = load(benchPath, "out");
+if ~isfield(S, "out") || ~isfield(S.out, "SSE") || ~isfield(S.out, "SSdU")
+    warning("Noisy benchmark file missing required out.SSE/out.SSdU fields: %s", benchPath);
+    return
+end
+Jtrack = double(S.out.SSE);
+JTV = double(S.out.SSdU);
+found = isfinite(Jtrack) && isfinite(JTV) && Jtrack > 0 && JTV > 0;
+if ~found
+    warning("Noisy benchmark values are invalid for refined frontier overlay: %s", benchPath);
+end
 end
 
 
@@ -1305,6 +1463,12 @@ for i = 1:n
     ts = string(Tf.timestamp(i));
     noisyOutPath = fullfile(rootFolder, "final_fidelity_same_noise", run_key + "_full_f1_same_noise", "out_full_" + ts + ".mat");
     noiselessOutPath = fullfile(rootFolder, "test_run", run_key + "_full_f1_no_noise", "out_full_" + ts + ".mat");
+    if ~isfile(noisyOutPath)
+        error("Missing z=1 refined MAT for Pareto controller: %s | %s (%s)", run_key, ts, noisyOutPath);
+    end
+    if ~isfile(noiselessOutPath)
+        warning("Missing no-noise MAT for Pareto controller: %s | %s (%s)", run_key, ts, noiselessOutPath);
+    end
 
     noisyM = compute_out_metrics_by_path(noisyOutPath, 0.05);
     noiselessM = compute_out_metrics_by_path(noiselessOutPath, 0.05);
@@ -1370,10 +1534,86 @@ Treport = sortrows(Treport, 'noisy_JTV', 'descend');
 fprintf("\nFinal Pareto frontier f=1 controller table (sorted by decreasing noisy J_TV):\n");
 disp(Treport);
 
+% Controllers simultaneously in top-3 (lowest) for noisy J_track and all individual noisy settling/IAE metrics.
+noisyJtrackSel = double(Treport.noisy_Jtrack);
+noisyJtrackSel(~isfinite(noisyJtrackSel)) = inf;
+
+settleColNames = { ...
+    'noisy_settle_x1_h_c1','noisy_settle_x2_h_c1','noisy_settle_x3_h_c1', ...
+    'noisy_settle_x1_h_c2','noisy_settle_x2_h_c2','noisy_settle_x3_h_c2'};
+iaeColNames = { ...
+    'noisy_IAE_x1_c1','noisy_IAE_x2_c1','noisy_IAE_x3_c1', ...
+    'noisy_IAE_x1_c2','noisy_IAE_x2_c2','noisy_IAE_x3_c2'};
+
+nTop = min(3, height(Treport));
+[~, ordJtrackSel] = sort(noisyJtrackSel, "ascend");
+topJtrackMask = false(height(Treport),1);
+topJtrackMask(ordJtrackSel(1:nTop)) = true;
+topSettleAllMask = true(height(Treport),1);
+topIAEAllMask = true(height(Treport),1);
+
+for c = 1:numel(settleColNames)
+    v = double(Treport.(settleColNames{c}));
+    v(~isfinite(v)) = inf;
+    [~, ord] = sort(v, "ascend");
+    m = false(height(Treport),1);
+    m(ord(1:nTop)) = true;
+    topSettleAllMask = topSettleAllMask & m;
+end
+for c = 1:numel(iaeColNames)
+    v = double(Treport.(iaeColNames{c}));
+    v(~isfinite(v)) = inf;
+    [~, ord] = sort(v, "ascend");
+    m = false(height(Treport),1);
+    m(ord(1:nTop)) = true;
+    topIAEAllMask = topIAEAllMask & m;
+end
+topAllMask = topJtrackMask & topSettleAllMask & topIAEAllMask;
+
+showCols = [{'run_key','timestamp','noisy_Jtrack'}, settleColNames, iaeColNames];
+TtopAll = Treport(topAllMask, showCols);
+if ~isempty(TtopAll)
+    TtopAll = sortrows(TtopAll, 'noisy_Jtrack', 'ascend');
+end
+fprintf("Controllers simultaneously top-3 lowest in noisy J_track and all individual noisy settling/IAE metrics (NaN treated as Inf):\n");
+disp(TtopAll);
+
+[benchJtrack, benchJTV, benchFound] = load_noisy_benchmark_point(projectRoot);
+Tf1Bench = table();
+if benchFound
+    [nSuperiorF1, isSuperiorF1] = count_benchmark_strict_superior_refined( ...
+        Treport.noisy_Jtrack, Treport.noisy_JTV, benchJtrack, benchJTV);
+    fprintf("Final Pareto f=1 controllers strictly better than noisy benchmark (J_track and J_TV both lower): %d/%d\n", ...
+        nSuperiorF1, height(Treport));
+    print_benchmark_ratio_stats_refined("Final Pareto f=1", ...
+        Treport.noisy_Jtrack, Treport.noisy_JTV, isSuperiorF1, benchJtrack, benchJTV);
+    if nSuperiorF1 > 0
+        fprintf("Timestamps strictly better than benchmark:\n");
+        disp(Treport.timestamp(isSuperiorF1));
+    end
+    Tf1Bench = build_benchmark_comparison_table_refined( ...
+        string(Treport.run_key), string(Treport.timestamp), ...
+        double(Treport.noisy_Jtrack), double(Treport.noisy_JTV), benchJtrack, benchJTV);
+    fprintf("Final Pareto f=1 benchmark comparison table:\n");
+    disp(Tf1Bench);
+else
+    warning("Benchmark superiority verification skipped: noisy benchmark not available.");
+end
+
 if ~isfolder(numericalFolder)
     mkdir(numericalFolder);
 end
 writetable(Treport, fullfile(numericalFolder, "final_pareto_frontier_f1_noisy_noiseless_metrics.csv"));
+
+outTxtDir = fullfile(projectRoot, "results", "txt results");
+if ~isfolder(outTxtDir)
+    mkdir(outTxtDir);
+end
+if benchFound
+    benchTxtPath = fullfile(outTxtDir, "final_pareto_f1_benchmark_comparison_table.txt");
+    writetable(Tf1Bench, benchTxtPath, "FileType", "text", "Delimiter", "\t");
+    fprintf("Saved: %s\n", benchTxtPath);
+end
 end
 
 
