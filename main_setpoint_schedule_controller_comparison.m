@@ -63,15 +63,27 @@ write_selected_controller_list(out_dir, controllers, cfg.timestamp_file);
 for i = 1:numel(controllers)
     ctrl = controllers(i);
     fprintf("\n=== Simulating controller: %s ===\n", ctrl.id);
+    out_mat_path = fullfile(out_dir, "out_schedule_" + ctrl.id + ".mat");
 
-    out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning);
+    if isfile(out_mat_path)
+        S = load(out_mat_path, "out");
+        if isfield(S, "out") && isfield(S.out, "SSE") && isfield(S.out, "SSdU") && isfield(S.out, "runtime_s")
+            out = S.out;
+            fprintf("Skipping simulation (existing result found): %s\n", out_mat_path);
+        else
+            warning("Existing file missing required out fields; recomputing: %s", out_mat_path);
+            out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning);
+            save(out_mat_path, "out", "ctrl", "schedule", "cfg", "base");
+        end
+    else
+        out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning);
+        save(out_mat_path, "out", "ctrl", "schedule", "cfg", "base");
+    end
+
     SSE = out.SSE;
     SSdU = out.SSdU;
     runtime_s = out.runtime_s;
     J = SSE + 1e4 * SSdU;
-
-    save(fullfile(out_dir, "out_schedule_" + ctrl.id + ".mat"), ...
-        "out", "ctrl", "schedule", "cfg", "base");
 
     append_summary_row(summary_csv, ctrl, SSE, SSdU, J, runtime_s);
 end
