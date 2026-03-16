@@ -1,8 +1,8 @@
 %% Setpoint-schedule comparison: benchmark vs timestamp-selected controllers
 %
 % Schedule on second-state setpoint Xsp:
-%   0-15 h   : Xsp = 7
-%   15-20 h  : Xsp = 13
+%   0-10 h   : Xsp = 7
+%   10-20 h  : Xsp = 13
 %   20-30 h  : Xsp = 16
 %
 % Controllers simulated:
@@ -29,15 +29,15 @@ cfg = struct();
 cfg.source_root = "results";
 cfg.output_root = fullfile("results", "setpoint_schedule_xsp_7_13_16");
 cfg.timestamp_file = fullfile(cfg.source_root, "txt results", "final_pareto_frontier_timestamps_only.txt");
-cfg.sigma_y = [0.001 0.1 0.1]; % set to [0 0 0] for no-noise runs
+cfg.sigma_y = [0.001 0.1 0.1];
 cfg.use_parallel = true;
-cfg.num_workers = 2;
+cfg.num_workers = 31;
 cfg.Ts = 1/60;
 cfg.tf_h = 30;
 
 schedule = struct();
 schedule.Vsp = 1;
-schedule.segment_end_h = [15 20 30];
+schedule.segment_end_h = [10 20 30];
 schedule.Xsp_values = [7 13 16];
 
 % Same LQR tuning used in TerminalCost/main_TerminalP.m
@@ -49,10 +49,10 @@ ensure_dir(cfg.output_root);
 base = init_base(cfg.sigma_y, cfg.Ts, cfg.tf_h);
 controllers = build_controller_set(cfg.source_root, cfg.timestamp_file);
 
-scenario_name = "same_noise";
 if all(cfg.sigma_y == 0)
-    scenario_name = "no_noise";
+    error("This refactored workflow requires noise in both cases (cfg.sigma_y must be nonzero).");
 end
+scenario_name = "same_noise";
 out_dir = fullfile(cfg.output_root, scenario_name);
 ensure_dir(out_dir);
 
@@ -64,6 +64,7 @@ for i = 1:numel(controllers)
     ctrl = controllers(i);
     fprintf("\n=== Simulating controller: %s ===\n", ctrl.id);
     out_mat_path = fullfile(out_dir, "out_schedule_" + ctrl.id + ".mat");
+    partial_mat_path = fullfile(out_dir, "out_schedule_" + ctrl.id + "_partial.mat");
 
     if isfile(out_mat_path)
         S = load(out_mat_path, "out");
@@ -72,12 +73,14 @@ for i = 1:numel(controllers)
             fprintf("Skipping simulation (existing result found): %s\n", out_mat_path);
         else
             warning("Existing file missing required out fields; recomputing: %s", out_mat_path);
-            out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning);
+            out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, partial_mat_path);
             save(out_mat_path, "out", "ctrl", "schedule", "cfg", "base");
+            if isfile(partial_mat_path), delete(partial_mat_path); end
         end
     else
-        out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning);
+        out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, partial_mat_path);
         save(out_mat_path, "out", "ctrl", "schedule", "cfg", "base");
+        if isfile(partial_mat_path), delete(partial_mat_path); end
     end
 
     SSE = out.SSE;
@@ -195,7 +198,7 @@ function [src_run, theta] = load_theta_by_timestamp(source_root, ts)
     theta(1) = 1; % enforce full-horizon settings
 end
 
-function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning)
+function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, partial_mat_path)
     cfg = decode_theta(ctrl.theta, base.nx, base.nu);
     pool_empty = isempty(gcp("nocreate"));
 
@@ -220,25 +223,52 @@ function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning)
     out.SSE = 0;
     out.SSdU = 0;
     out.runtime_s = 0;
+    out.case = struct([]);
 
-    for case_id = 1:2
-        if case_id == 1
-            x0 = [1.0, 10, 0];
-        else
-            x0 = [1.1, 25, 5];
-        end
-        case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning, x0);
-        out.case(case_id) = case_out;
-        out.SSE = out.SSE + case_out.SSE;
-        out.SSdU = out.SSdU + case_out.SSdU;
-        out.runtime_s = out.runtime_s + case_out.runtime_s;
+    start_case = 1;
+    resume_case_state = struct();
+    partial = load_partial_state(partial_mat_path, ctrl.id);
+    if partial.valid
+        out = partial.out;
+        start_case = partial.case_id;
+        resume_case_state = partial.case_state;
+        fprintf("Resuming from partial checkpoint (case %d): %s\n", start_case, partial_mat_path);
     end
+
+    if start_case > 2
+        out = recompute_out_totals(out);
+        return
+    end
+
+    for case_id = start_case:2
+        x0 = [1.0, 2.0, 2.0];
+
+        if case_id == start_case && ~isempty(fieldnames(resume_case_state))
+            case_resume = resume_case_state;
+        else
+            case_resume = struct();
+        end
+
+        case_out = run_one_case_schedule( ...
+            base, NMPC, schedule, ctrl, lqr_tuning, x0, ...
+            partial_mat_path, out, case_id, case_resume);
+        out.case(case_id) = case_out;
+        out = recompute_out_totals(out);
+        save_partial_state(partial_mat_path, ctrl.id, out, case_id + 1, struct());
+    end
+
+    out = recompute_out_totals(out);
 end
 
-function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning, x0)
+function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning, x0, partial_mat_path, out_prefix, case_id, case_resume)
     N = base.N;
     noise = base.noise;
 
+    if nargin < 10
+        case_resume = struct();
+    end
+
+    i_start = 1;
     uk = zeros(1, base.nu);
     Y = zeros(N, base.nx);
     Y_meas = zeros(N, base.nx);
@@ -246,22 +276,34 @@ function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning
     U = zeros(N, base.nu);
     RUNTIME = zeros(N, 1);
     Xsp2_trace = zeros(N, 1);
-
     xk = x0;
     currentXsp2 = NaN;
 
-    timer = tic;
-    for i = 1:N
+    if ~isempty(fieldnames(case_resume))
+        i_start = max(1, min(N, double(case_resume.i_next)));
+        if isfield(case_resume, "uk"), uk = double(case_resume.uk); end
+        if isfield(case_resume, "xk"), xk = double(case_resume.xk); end
+        if isfield(case_resume, "currentXsp2"), currentXsp2 = double(case_resume.currentXsp2); end
+        if isfield(case_resume, "Y"), Y = double(case_resume.Y); end
+        if isfield(case_resume, "Y_meas"), Y_meas = double(case_resume.Y_meas); end
+        if isfield(case_resume, "Ysp"), Ysp = double(case_resume.Ysp); end
+        if isfield(case_resume, "U"), U = double(case_resume.U); end
+        if isfield(case_resume, "RUNTIME"), RUNTIME = double(case_resume.RUNTIME); end
+        if isfield(case_resume, "Xsp2_trace"), Xsp2_trace = double(case_resume.Xsp2_trace); end
+    end
+
+    for i = i_start:N
         t_now = base.T(i);
         xsp2_target = scheduled_xsp2(schedule, t_now);
 
-        if i == 1 || abs(xsp2_target - currentXsp2) > 1e-12
+        if i == i_start || abs(xsp2_target - currentXsp2) > 1e-12
             [xss, uss, P] = update_setpoint_and_P(base, NMPC, ctrl, lqr_tuning, schedule.Vsp, xsp2_target);
             NMPC.xsp = xss;
             NMPC.usp = uss;
             NMPC.P = P;
             currentXsp2 = xsp2_target;
         end
+        NMPC = apply_case_setpoint_policy(NMPC, case_id, xk, currentXsp2);
 
         iter_timer = tic;
         Y(i, :) = xk;
@@ -280,31 +322,41 @@ function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning
             xk = y(end, :);
         end
         RUNTIME(i) = toc(iter_timer);
+
+        if should_save_hourly_checkpoint(base.T(i), i, N)
+            case_state = struct();
+            case_state.i_next = min(i + 1, N + 1);
+            case_state.uk = uk;
+            case_state.xk = xk;
+            case_state.currentXsp2 = currentXsp2;
+            case_state.Y = Y;
+            case_state.Y_meas = Y_meas;
+            case_state.Ysp = Ysp;
+            case_state.U = U;
+            case_state.RUNTIME = RUNTIME;
+            case_state.Xsp2_trace = Xsp2_trace;
+            out_partial = out_prefix;
+            out_partial.case(case_id) = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, i);
+            out_partial = recompute_out_totals(out_partial);
+            save_partial_state(partial_mat_path, ctrl.id, out_partial, case_id, case_state);
+        end
     end
-    runtime_s = toc(timer);
 
-    E = Y - Ysp;
-    E = E .* [10 1 1];
-    SSE_vec = sum(E.^2, 2);
-    dU = diff(U, 1, 1);
-    SSdU_vec = sum(dU.^2, 2);
-    SSE = sum(SSE_vec);
-    SSdU = sum(SSdU_vec);
+    case_out = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, N);
+end
 
-    case_out = struct();
-    case_out.Y = Y;
-    case_out.Y_meas = Y_meas;
-    case_out.Ysp = Ysp;
-    case_out.Xsp2_trace = Xsp2_trace;
-    case_out.U = U;
-    case_out.noise = noise;
-    case_out.SSE = SSE;
-    case_out.SSdU = SSdU;
-    case_out.runtime_s = runtime_s;
-    case_out.RUNTIME = RUNTIME;
-    case_out.dt = base.dt;
-    case_out.tf = base.tf;
-    case_out.x0 = x0;
+function NMPC = apply_case_setpoint_policy(NMPC, case_id, xk, xsp2_target)
+% Case 1: keep steady-state setpoint from find_ss / terminal_P_xu_du.
+% Case 2: overwrite xsp(3) with Ssp = min(3, 2*(Xsp - X)).
+if case_id ~= 2
+    return
+end
+X = xk(2);
+Xsp = xsp2_target;
+Ssp = min(3, 2 * (Xsp - X)); % can be negative by design
+if numel(NMPC.xsp) >= 3
+    NMPC.xsp(3) = Ssp;
+end
 end
 
 function xsp2 = scheduled_xsp2(schedule, t_h)
@@ -415,6 +467,94 @@ function write_selected_controller_list(out_dir, controllers, timestamp_file)
         fprintf(fid, "%s | source=%s | timestamp=%s | benchmark=%d\n", ...
             c.id, c.source, c.timestamp, c.is_benchmark);
     end
+end
+
+function tf = should_save_hourly_checkpoint(t_h, i, N)
+    if i == N
+        tf = true;
+        return
+    end
+    tf = abs(t_h - round(t_h)) < 1e-12 && t_h > 0;
+end
+
+function case_out = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, i_last)
+    Y_eval = Y(1:i_last, :);
+    Ysp_eval = Ysp(1:i_last, :);
+    U_eval = U(1:i_last, :);
+
+    E = Y_eval - Ysp_eval;
+    E = E .* [10 1 1];
+    SSE_vec = sum(E.^2, 2);
+    dU = diff(U_eval, 1, 1);
+    SSdU_vec = sum(dU.^2, 2);
+    SSE = sum(SSE_vec);
+    SSdU = sum(SSdU_vec);
+    runtime_s = sum(RUNTIME(1:i_last));
+
+    case_out = struct();
+    case_out.Y = Y;
+    case_out.Y_meas = Y_meas;
+    case_out.Ysp = Ysp;
+    case_out.Xsp2_trace = Xsp2_trace;
+    case_out.U = U;
+    case_out.noise = noise;
+    case_out.SSE = SSE;
+    case_out.SSdU = SSdU;
+    case_out.runtime_s = runtime_s;
+    case_out.RUNTIME = RUNTIME;
+    case_out.dt = base.dt;
+    case_out.tf = base.tf;
+    case_out.x0 = x0;
+end
+
+function out = recompute_out_totals(out)
+    out.SSE = 0;
+    out.SSdU = 0;
+    out.runtime_s = 0;
+    if ~isfield(out, "case") || isempty(out.case)
+        return
+    end
+    for k = 1:numel(out.case)
+        c = out.case(k);
+        if isfield(c, "SSE") && isfinite(c.SSE), out.SSE = out.SSE + c.SSE; end
+        if isfield(c, "SSdU") && isfinite(c.SSdU), out.SSdU = out.SSdU + c.SSdU; end
+        if isfield(c, "runtime_s") && isfinite(c.runtime_s), out.runtime_s = out.runtime_s + c.runtime_s; end
+    end
+end
+
+function save_partial_state(path, ctrl_id, out, case_id, case_state)
+    partial = struct();
+    partial.ctrl_id = string(ctrl_id);
+    partial.case_id = case_id;
+    partial.out = out;
+    partial.case_state = case_state;
+    partial.saved_at = char(datetime("now"));
+    save(path, "partial");
+end
+
+function partial = load_partial_state(path, ctrl_id)
+    partial = struct("valid", false, "case_id", 1, "out", struct(), "case_state", struct());
+    if ~isfile(path)
+        return
+    end
+    S = load(path, "partial");
+    if ~isfield(S, "partial")
+        warning("Ignoring malformed partial file (missing struct): %s", path);
+        return
+    end
+    p = S.partial;
+    if ~isfield(p, "ctrl_id") || string(p.ctrl_id) ~= string(ctrl_id)
+        warning("Ignoring partial file for different controller id: %s", path);
+        return
+    end
+    if ~isfield(p, "case_id") || ~isfield(p, "out") || ~isfield(p, "case_state")
+        warning("Ignoring malformed partial file (missing required fields): %s", path);
+        return
+    end
+    partial.valid = true;
+    partial.case_id = double(p.case_id);
+    partial.out = p.out;
+    partial.case_state = p.case_state;
 end
 
 function ensure_dir(p)
