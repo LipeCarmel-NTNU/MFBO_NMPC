@@ -50,7 +50,9 @@ for k = 1:numel(files)
     rec = table(string(ctrlId), logical(isBenchmark), ...
         double(read_num_field(out, "SSE", nan)), ...
         double(read_num_field(out, "SSdU", nan)), ...
-        'VariableNames', {'controller_id','is_benchmark','SSE_total','SSdU_total'});
+        compute_schedule_wall_time(out), ...
+        'VariableNames', {'controller_id','is_benchmark','SSE_total','SSdU_total','wall_time_s'});
+    rec = append_controller_metadata(rec, ctrl);
     rec.J_total = rec.SSE_total + 1e4 * rec.SSdU_total;
 
     pdat = struct();
@@ -96,16 +98,16 @@ topByC2 = sortrows(nonBenchmarkRecords, "SSE_c2", "ascend");
 topIdsC1 = string(topByC1.controller_id(1:topCount));
 topIdsC2 = string(topByC2.controller_id(1:topCount));
 coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
-[lowestId5h, lowestBiomass5h] = find_lowest_case1_biomass_at_hour(plotData, 5);
-[lowestId20h, lowestBiomass20h] = find_lowest_case_biomass_at_hour(plotData, 2, 20);
-specialGreyControllerIds = unique([lowestId5h; lowestId20h], "stable");
+[peakX1Case2Id, peakX1Case2Val] = find_highest_case_peak_state(plotData, 2, 1, true);
+[pareto3Mask, pareto3Ids] = get_schedule_pareto_3obj(records);
 
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(records);
-disp_case1_biomass_pick(records, "5 h", lowestId5h, lowestBiomass5h);
-disp_case_biomass_pick(records, 2, "20 h", lowestId20h, lowestBiomass20h);
+disp_schedule_pareto_table_3obj(records, pareto3Mask);
+disp_case_peak_pick(records, 2, 1, "x1", peakX1Case2Id, peakX1Case2Val);
+disp_selected_comparison_table(records, coloredControllerIds, peakX1Case2Id);
 
-plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, specialGreyControllerIds);
+plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, peakX1Case2Id, pareto3Ids);
 
 csvPath = fullfile(cfg.numerical_dir, "setpoint_schedule_metrics_" + cfg.scenario + ".csv");
 writetable(records, csvPath);
@@ -120,6 +122,22 @@ else
 end
 end
 
+function wallTime = compute_schedule_wall_time(out)
+wallTime = nan;
+if ~isstruct(out) || ~isfield(out, "case") || isempty(out.case)
+    return
+end
+caseTimes = nan(numel(out.case), 1);
+for k = 1:numel(out.case)
+    if isfield(out.case(k), "runtime_s")
+        caseTimes(k) = double(out.case(k).runtime_s);
+    end
+end
+if any(isfinite(caseTimes))
+    wallTime = sum(caseTimes, "omitnan");
+end
+end
+
 function [ctrlId, isBenchmark] = get_controller_meta(ctrl, filename)
 isBenchmark = false;
 ctrlId = erase(string(filename), ".mat");
@@ -130,6 +148,31 @@ if ~isempty(fieldnames(ctrl))
 end
 if contains(lower(ctrlId), "benchmark")
     isBenchmark = true;
+end
+end
+
+function rec = append_controller_metadata(rec, ctrl)
+rec.source = "";
+rec.timestamp = "";
+rec.m = nan;
+rec.p = nan;
+for k = 1:12
+    rec.(sprintf("theta_%d", k)) = nan;
+end
+if isempty(fieldnames(ctrl))
+    return
+end
+if isfield(ctrl, "source"), rec.source = string(ctrl.source); end
+if isfield(ctrl, "timestamp"), rec.timestamp = string(ctrl.timestamp); end
+if isfield(ctrl, "theta")
+    theta = double(ctrl.theta(:).');
+    if numel(theta) >= 3
+        rec.m = theta(3) + 1;
+        rec.p = theta(2) + rec.m;
+    end
+    for k = 1:min(numel(theta), 12)
+        rec.(sprintf("theta_%d", k)) = theta(k);
+    end
 end
 end
 
@@ -218,42 +261,32 @@ for k = 1:n
 end
 end
 
-function [controllerId, biomassVal] = find_lowest_case1_biomass_at_hour(plotData, targetHour)
- [controllerId, biomassVal] = find_lowest_case_biomass_at_hour(plotData, 1, targetHour);
-end
-
-function [controllerId, biomassVal] = find_lowest_case_biomass_at_hour(plotData, caseId, targetHour)
+function [controllerId, peakVal] = find_highest_case_peak_state(plotData, caseId, stateIdx, excludeBenchmark)
 controllerId = strings(0,1);
-biomassVal = nan;
-bestVal = inf;
+peakVal = nan;
+bestVal = -inf;
 for i = 1:numel(plotData)
+    if excludeBenchmark && plotData(i).is_benchmark
+        continue
+    end
     if numel(plotData(i).cases) < caseId
         continue
     end
-    t = plotData(i).T;
     Y = plotData(i).cases(caseId).Y;
-    if isempty(t) || size(Y, 2) < 2
+    if isempty(Y) || size(Y, 2) < stateIdx
         continue
     end
-    idx = find(abs(t - targetHour) < 1e-12, 1, "first");
-    if isempty(idx)
-        [~, idx] = min(abs(t - targetHour));
-    end
-    xVal = Y(idx, 2);
-    if isfinite(xVal) && xVal < bestVal
-        bestVal = xVal;
+    peakNow = max(Y(:, stateIdx), [], "omitnan");
+    if isfinite(peakNow) && peakNow > bestVal
+        bestVal = peakNow;
         controllerId = string(plotData(i).id);
-        biomassVal = xVal;
+        peakVal = peakNow;
     end
 end
 end
 
-function disp_case1_biomass_pick(records, hourLabel, controllerId, biomassVal)
-disp_case_biomass_pick(records, 1, hourLabel, controllerId, biomassVal);
-end
-
-function disp_case_biomass_pick(records, caseId, hourLabel, controllerId, biomassVal)
-fprintf("Lowest Case %d biomass at %s:\n", caseId, hourLabel);
+function disp_case_peak_pick(records, caseId, stateIdx, stateLabel, controllerId, peakVal)
+fprintf("Highest Case %d peak %s:\n", caseId, stateLabel);
 if isempty(controllerId)
     fprintf("  none found\n");
     return
@@ -263,12 +296,69 @@ if isempty(Tsel)
     fprintf("  controller %s not found in records table\n", controllerId);
     return
 end
-Tsel.case1_biomass = repmat(biomassVal, height(Tsel), 1);
-Tsel = movevars(Tsel, "case1_biomass", "After", "controller_id");
+peakCol = sprintf("peak_%s_c%d", stateLabel, caseId);
+Tsel.(peakCol) = repmat(peakVal, height(Tsel), 1);
+Tsel = movevars(Tsel, peakCol, "After", "controller_id");
 disp(Tsel);
 end
 
-function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControllerIds, specialGreyControllerIds)
+function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId)
+benchmarkRows = records(records.is_benchmark, :);
+benchmarkIds = string(benchmarkRows.controller_id);
+coloredIdsFinal = setdiff(string(coloredControllerIds), [string(blackControllerId); benchmarkIds], "stable");
+keepIds = unique([benchmarkIds; string(blackControllerId); coloredIdsFinal], "stable");
+Tcmp = records(ismember(string(records.controller_id), keepIds), :);
+if isempty(Tcmp)
+    fprintf("Benchmark/selected/colored comparison table: none\n");
+    return
+end
+Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','wall_time_s'});
+Tcmp = sortrows(Tcmp, "SSE_total", "ascend");
+fprintf("Benchmark, selected black controller, and colored controllers (sorted by SSE_total):\n");
+disp(Tcmp);
+end
+
+function [isPareto3, paretoIds] = get_schedule_pareto_3obj(records)
+x1IAETotal = double(records.IAE_x1_c1) + double(records.IAE_x1_c2);
+objectives = [double(records.SSE_total), x1IAETotal, double(records.SSdU_total)];
+isPareto3 = compute_pareto_mask_nd_local(objectives);
+paretoIds = string(records.controller_id(isPareto3));
+end
+
+function disp_schedule_pareto_table_3obj(records, isPareto3)
+x1IAETotal = double(records.IAE_x1_c1) + double(records.IAE_x1_c2);
+Tpareto3 = records(isPareto3, :);
+Tpareto3.x1_IAE_total = x1IAETotal(isPareto3);
+Tpareto3 = movevars(Tpareto3, "x1_IAE_total", "After", "controller_id");
+Tpareto3 = sortrows(Tpareto3, ["SSdU_total","SSE_total","x1_IAE_total"], ["ascend","ascend","ascend"]);
+fprintf("Setpoint schedule 3-objective Pareto controllers (SSE_total, x1 IAE total, SSdU_total):\n");
+disp(Tpareto3);
+end
+
+function isPareto = compute_pareto_mask_nd_local(objectives)
+n = size(objectives, 1);
+isPareto = false(n, 1);
+for i = 1:n
+    oi = objectives(i, :);
+    if ~all(isfinite(oi))
+        continue
+    end
+    dominated = false;
+    for j = 1:n
+        oj = objectives(j, :);
+        if i == j || ~all(isfinite(oj))
+            continue
+        end
+        if all(oj <= oi) && any(oj < oi)
+            dominated = true;
+            break
+        end
+    end
+    isPareto(i) = ~dominated;
+end
+end
+
+function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControllerIds, blackControllerId, pareto3Ids)
 if isempty(plotData)
     return
 end
@@ -289,14 +379,17 @@ for c = 1:nCase
             if numel(plotData(i).cases) < c
                 continue
             end
+            if ~ismember(string(plotData(i).id), pareto3Ids)
+                continue
+            end
             t = plotData(i).T;
             Y = plotData(i).cases(c).Y;
             Ysp = plotData(i).cases(c).Ysp;
             if isempty(t) || size(Y,2) < s || size(Ysp,2) < s
                 continue
             end
-            if ismember(string(plotData(i).id), specialGreyControllerIds)
-                line(ax, t, Y(:, s), "LineStyle", "-", "LineWidth", 1.1, "Color", [0.55 0.55 0.55]);
+            if string(plotData(i).id) == string(blackControllerId)
+                plot(ax, t, Y(:, s), "-", "LineWidth", 1.6, "Color", [0 0 0]);
             elseif plotData(i).is_benchmark
                 plot(ax, t, Y(:, s), "-", "LineWidth", 2.1, "Color", [1 0 0]);
             elseif ismember(string(plotData(i).id), coloredControllerIds)
