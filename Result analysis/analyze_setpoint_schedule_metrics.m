@@ -79,6 +79,7 @@ for k = 1:numel(files)
         pdat.T = M.t;
         pdat.cases(c).Y = M.Y;
         pdat.cases(c).Ysp = M.Ysp;
+        pdat.cases(c).U = M.U;
     end
 
     records = [records; rec]; %#ok<AGROW>
@@ -98,16 +99,18 @@ topByC2 = sortrows(nonBenchmarkRecords, "SSE_c2", "ascend");
 topIdsC1 = string(topByC1.controller_id(1:topCount));
 topIdsC2 = string(topByC2.controller_id(1:topCount));
 coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
-[peakX1Case2Id, peakX1Case2Val] = find_highest_case_peak_state(plotData, 2, 1, true);
 [pareto3Mask, pareto3Ids] = get_schedule_pareto_3obj(records);
+[~, pareto2Ids] = get_schedule_pareto_2obj(records);
+blackControllerId = "ts_20260210_180826";
 
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(records);
 disp_schedule_pareto_table_3obj(records, pareto3Mask);
-disp_case_peak_pick(records, 2, 1, "x1", peakX1Case2Id, peakX1Case2Val);
-disp_selected_comparison_table(records, coloredControllerIds, peakX1Case2Id, pareto3Ids);
+disp_black_controller_pick(records, blackControllerId);
+disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids);
 
-plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, peakX1Case2Id, pareto3Ids);
+plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, blackControllerId, pareto3Ids);
+plot_black_controller_inputs(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
 
 csvPath = fullfile(cfg.numerical_dir, "setpoint_schedule_metrics_" + cfg.scenario + ".csv");
 writetable(records, csvPath);
@@ -183,6 +186,7 @@ M.Ysp = nan(0,3);
 M.t = nan(0,1);
 M.SSE = nan;
 M.SSdU = nan;
+M.U = nan(0,3);
 M.settle_h = nan(1,3);
 M.settle_case_h = nan;
 M.IAE = nan(1,3);
@@ -242,6 +246,9 @@ end
 M.Y = Y;
 M.Ysp = Ysp;
 M.t = t;
+if isfield(caseData, "U")
+    M.U = double(caseData.U);
+end
 M.settle_h = settle;
 M.IAE = iae;
 if any(isfinite(settle))
@@ -261,32 +268,9 @@ for k = 1:n
 end
 end
 
-function [controllerId, peakVal] = find_highest_case_peak_state(plotData, caseId, stateIdx, excludeBenchmark)
-controllerId = strings(0,1);
-peakVal = nan;
-bestVal = -inf;
-for i = 1:numel(plotData)
-    if excludeBenchmark && plotData(i).is_benchmark
-        continue
-    end
-    if numel(plotData(i).cases) < caseId
-        continue
-    end
-    Y = plotData(i).cases(caseId).Y;
-    if isempty(Y) || size(Y, 2) < stateIdx
-        continue
-    end
-    peakNow = max(Y(:, stateIdx), [], "omitnan");
-    if isfinite(peakNow) && peakNow > bestVal
-        bestVal = peakNow;
-        controllerId = string(plotData(i).id);
-        peakVal = peakNow;
-    end
-end
-end
-
-function disp_case_peak_pick(records, caseId, stateIdx, stateLabel, controllerId, peakVal)
-fprintf("Highest Case %d peak %s:\n", caseId, stateLabel);
+function disp_black_controller_pick(records, blackControllerId)
+fprintf("Selected black controller parameters and metrics:\n");
+controllerId = string(blackControllerId);
 if isempty(controllerId)
     fprintf("  none found\n");
     return
@@ -296,27 +280,37 @@ if isempty(Tsel)
     fprintf("  controller %s not found in records table\n", controllerId);
     return
 end
-peakCol = sprintf("peak_%s_c%d", stateLabel, caseId);
-Tsel.(peakCol) = repmat(peakVal, height(Tsel), 1);
-Tsel = movevars(Tsel, peakCol, "After", "controller_id");
 disp(Tsel);
 end
 
-function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto3Ids)
+function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids)
 benchmarkRows = records(records.is_benchmark, :);
-benchmarkIds = intersect(string(benchmarkRows.controller_id), string(pareto3Ids), "stable");
-coloredParetoIds = intersect(string(coloredControllerIds), string(pareto3Ids), "stable");
+benchmarkIds = intersect(string(benchmarkRows.controller_id), string(pareto2Ids), "stable");
+coloredParetoIds = intersect(string(coloredControllerIds), string(pareto2Ids), "stable");
 coloredIdsFinal = setdiff(coloredParetoIds, [string(blackControllerId); benchmarkIds], "stable");
-keepIds = unique([benchmarkIds; string(blackControllerId); coloredIdsFinal], "stable");
-Tcmp = records(ismember(string(records.controller_id), keepIds), :);
-if isempty(Tcmp)
+blackParetoId = intersect(string(blackControllerId), string(pareto2Ids), "stable");
+keepIds = unique([benchmarkIds; blackParetoId; coloredIdsFinal], "stable");
+TcmpFull = records(ismember(string(records.controller_id), keepIds), :);
+if isempty(TcmpFull)
     fprintf("Benchmark/selected/colored comparison table: none\n");
     return
 end
-Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','wall_time_s'});
+Tcmp = TcmpFull;
+Tcmp.x1_IAE_total = double(Tcmp.IAE_x1_c1) + double(Tcmp.IAE_x1_c2);
+Tcmp.is_black = string(Tcmp.controller_id) == string(blackControllerId);
+Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','x1_IAE_total','wall_time_s','is_black'});
 Tcmp = sortrows(Tcmp, "SSE_total", "ascend");
-fprintf("Benchmark, selected black controller, and colored controllers (sorted by SSE_total):\n");
+fprintf("Benchmark, selected black controller, and colored controllers on SSE_total/SSdU_total Pareto set (sorted by SSE_total):\n");
 disp(Tcmp);
+
+Ttune = sortrows(TcmpFull, "SSE_total", "ascend");
+tuningCols = {'controller_id','m','p', ...
+    'theta_1','theta_2','theta_3','theta_4','theta_5','theta_6', ...
+    'theta_7','theta_8','theta_9','theta_10','theta_11','theta_12'};
+presentCols = tuningCols(ismember(tuningCols, Ttune.Properties.VariableNames));
+Ttune = Ttune(:, presentCols);
+fprintf("Same controllers with tuning only (same SSE_total sorting):\n");
+disp(Ttune);
 end
 
 function [isPareto3, paretoIds] = get_schedule_pareto_3obj(records)
@@ -324,6 +318,12 @@ x1IAETotal = double(records.IAE_x1_c1) + double(records.IAE_x1_c2);
 objectives = [double(records.SSE_total), x1IAETotal, double(records.SSdU_total)];
 isPareto3 = compute_pareto_mask_nd_local(objectives);
 paretoIds = string(records.controller_id(isPareto3));
+end
+
+function [isPareto2, paretoIds] = get_schedule_pareto_2obj(records)
+objectives = [double(records.SSE_total), double(records.SSdU_total)];
+isPareto2 = compute_pareto_mask_nd_local(objectives);
+paretoIds = string(records.controller_id(isPareto2));
 end
 
 function disp_schedule_pareto_table_3obj(records, isPareto3)
@@ -414,6 +414,45 @@ for c = 1:nCase
 end
 
 outStem = fullfile(graphicsDir, "setpoint_schedule_all_cases_" + scenario);
+exportgraphics(fig, outStem + ".png", "Resolution", 300);
+exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
+fprintf("Saved: %s\n", outStem + ".png");
+fprintf("Saved: %s\n", outStem + ".pdf");
+end
+
+function plot_black_controller_inputs(plotData, scenario, graphicsDir, blackControllerId)
+idx = find(string({plotData.id}) == string(blackControllerId), 1, "first");
+if isempty(idx)
+    warning("Black controller not found for input plot: %s", blackControllerId);
+    return
+end
+
+fig = figure("Color", "w", "Name", "Black controller inputs");
+tiledlayout(fig, 2, 3, "TileSpacing", "compact", "Padding", "compact");
+set(fig, "Position", [120 120 1400 760]);
+
+for c = 1:2
+    if numel(plotData(idx).cases) < c
+        continue
+    end
+    t = plotData(idx).T;
+    U = plotData(idx).cases(c).U;
+    if isempty(t) || isempty(U)
+        continue
+    end
+    nu = min(size(U, 2), 3);
+    for u = 1:nu
+        ax = nexttile((c - 1) * 3 + u); hold(ax, "on");
+        plot(ax, t, U(:, u), "-", "LineWidth", 1.6, "Color", [0 0 0]);
+        grid(ax, "on");
+        box(ax, "off");
+        xlabel(ax, "Time [h]");
+        ylabel(ax, sprintf("u%d", u));
+        title(ax, sprintf("Case %d, u%d", c, u));
+    end
+end
+
+outStem = fullfile(graphicsDir, "setpoint_schedule_black_controller_inputs_" + scenario);
 exportgraphics(fig, outStem + ".png", "Resolution", 300);
 exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
 fprintf("Saved: %s\n", outStem + ".png");
