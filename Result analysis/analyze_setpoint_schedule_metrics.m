@@ -105,7 +105,7 @@ fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(records);
 disp_schedule_pareto_table_3obj(records, pareto3Mask);
 disp_case_peak_pick(records, 2, 1, "x1", peakX1Case2Id, peakX1Case2Val);
-disp_selected_comparison_table(records, coloredControllerIds, peakX1Case2Id);
+disp_selected_comparison_table(records, coloredControllerIds, peakX1Case2Id, pareto3Ids);
 
 plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, peakX1Case2Id, pareto3Ids);
 
@@ -302,10 +302,11 @@ Tsel = movevars(Tsel, peakCol, "After", "controller_id");
 disp(Tsel);
 end
 
-function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId)
+function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto3Ids)
 benchmarkRows = records(records.is_benchmark, :);
-benchmarkIds = string(benchmarkRows.controller_id);
-coloredIdsFinal = setdiff(string(coloredControllerIds), [string(blackControllerId); benchmarkIds], "stable");
+benchmarkIds = intersect(string(benchmarkRows.controller_id), string(pareto3Ids), "stable");
+coloredParetoIds = intersect(string(coloredControllerIds), string(pareto3Ids), "stable");
+coloredIdsFinal = setdiff(coloredParetoIds, [string(blackControllerId); benchmarkIds], "stable");
 keepIds = unique([benchmarkIds; string(blackControllerId); coloredIdsFinal], "stable");
 Tcmp = records(ismember(string(records.controller_id), keepIds), :);
 if isempty(Tcmp)
