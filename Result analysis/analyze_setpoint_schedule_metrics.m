@@ -89,10 +89,23 @@ end
 
 records = sortrows(records, ["is_benchmark","J_total"], ["descend","ascend"]);
 
+nonBenchmarkRecords = records(~records.is_benchmark, :);
+topCount = min(5, height(nonBenchmarkRecords));
+topByC1 = sortrows(nonBenchmarkRecords, "SSE_c1", "ascend");
+topByC2 = sortrows(nonBenchmarkRecords, "SSE_c2", "ascend");
+topIdsC1 = string(topByC1.controller_id(1:topCount));
+topIdsC2 = string(topByC2.controller_id(1:topCount));
+coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
+[lowestId5h, lowestBiomass5h] = find_lowest_case1_biomass_at_hour(plotData, 5);
+[lowestId20h, lowestBiomass20h] = find_lowest_case_biomass_at_hour(plotData, 2, 20);
+specialGreyControllerIds = unique([lowestId5h; lowestId20h], "stable");
+
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(records);
+disp_case1_biomass_pick(records, "5 h", lowestId5h, lowestBiomass5h);
+disp_case_biomass_pick(records, 2, "20 h", lowestId20h, lowestBiomass20h);
 
-plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir);
+plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, specialGreyControllerIds);
 
 csvPath = fullfile(cfg.numerical_dir, "setpoint_schedule_metrics_" + cfg.scenario + ".csv");
 writetable(records, csvPath);
@@ -205,13 +218,64 @@ for k = 1:n
 end
 end
 
-function plot_setpoint_cases_all(plotData, scenario, graphicsDir)
+function [controllerId, biomassVal] = find_lowest_case1_biomass_at_hour(plotData, targetHour)
+ [controllerId, biomassVal] = find_lowest_case_biomass_at_hour(plotData, 1, targetHour);
+end
+
+function [controllerId, biomassVal] = find_lowest_case_biomass_at_hour(plotData, caseId, targetHour)
+controllerId = strings(0,1);
+biomassVal = nan;
+bestVal = inf;
+for i = 1:numel(plotData)
+    if numel(plotData(i).cases) < caseId
+        continue
+    end
+    t = plotData(i).T;
+    Y = plotData(i).cases(caseId).Y;
+    if isempty(t) || size(Y, 2) < 2
+        continue
+    end
+    idx = find(abs(t - targetHour) < 1e-12, 1, "first");
+    if isempty(idx)
+        [~, idx] = min(abs(t - targetHour));
+    end
+    xVal = Y(idx, 2);
+    if isfinite(xVal) && xVal < bestVal
+        bestVal = xVal;
+        controllerId = string(plotData(i).id);
+        biomassVal = xVal;
+    end
+end
+end
+
+function disp_case1_biomass_pick(records, hourLabel, controllerId, biomassVal)
+disp_case_biomass_pick(records, 1, hourLabel, controllerId, biomassVal);
+end
+
+function disp_case_biomass_pick(records, caseId, hourLabel, controllerId, biomassVal)
+fprintf("Lowest Case %d biomass at %s:\n", caseId, hourLabel);
+if isempty(controllerId)
+    fprintf("  none found\n");
+    return
+end
+Tsel = records(string(records.controller_id) == string(controllerId), :);
+if isempty(Tsel)
+    fprintf("  controller %s not found in records table\n", controllerId);
+    return
+end
+Tsel.case1_biomass = repmat(biomassVal, height(Tsel), 1);
+Tsel = movevars(Tsel, "case1_biomass", "After", "controller_id");
+disp(Tsel);
+end
+
+function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControllerIds, specialGreyControllerIds)
 if isempty(plotData)
     return
 end
 nCase = 2;
 nState = 3;
 stateNames = ["x1","x2","x3"];
+defaultColors = get(groot, "defaultAxesColorOrder");
 
 fig = figure("Color", "w", "Name", "Setpoint schedule all cases");
 tiledlayout(fig, nCase, nState, "TileSpacing", "compact", "Padding", "compact");
@@ -231,10 +295,16 @@ for c = 1:nCase
             if isempty(t) || size(Y,2) < s || size(Ysp,2) < s
                 continue
             end
-            if plotData(i).is_benchmark
-                plot(ax, t, Y(:, s), "-", "LineWidth", 2.1, "Color", [0.95 0.52 0.13]);
+            if ismember(string(plotData(i).id), specialGreyControllerIds)
+                line(ax, t, Y(:, s), "LineStyle", "-", "LineWidth", 1.1, "Color", [0.55 0.55 0.55]);
+            elseif plotData(i).is_benchmark
+                plot(ax, t, Y(:, s), "-", "LineWidth", 2.1, "Color", [1 0 0]);
+            elseif ismember(string(plotData(i).id), coloredControllerIds)
+                colorIdx = find(coloredControllerIds == string(plotData(i).id), 1, "first");
+                colorVal = defaultColors(mod(colorIdx - 1, size(defaultColors, 1)) + 1, :);
+                plot(ax, t, Y(:, s), "-", "LineWidth", 1.0, "Color", colorVal);
             else
-                plot(ax, t, Y(:, s), "-", "LineWidth", 0.9, "Color", [0.65 0.65 0.65]);
+                line(ax, t, Y(:, s), "LineStyle", "-", "LineWidth", 1.0, "Color", [0.65 0.65 0.65]);
             end
             if ~setpointDrawn
                 plot(ax, t, Ysp(:, s), "--", "LineWidth", 1.2, "Color", [0 0 0]);

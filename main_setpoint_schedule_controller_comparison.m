@@ -24,10 +24,11 @@ rng(1)
 
 current_dir = fileparts(mfilename("fullpath"));
 addpath(genpath(current_dir));
+project_root = current_dir;
 
 cfg = struct();
-cfg.source_root = "results";
-cfg.output_root = fullfile("results", "setpoint_schedule_xsp_7_13_16");
+cfg.source_root = fullfile(project_root, "results");
+cfg.output_root = fullfile(project_root, "results", "setpoint_schedule_xsp_7_13_16");
 cfg.timestamp_file = fullfile(cfg.source_root, "txt results", "final_pareto_frontier_timestamps_only.txt");
 cfg.sigma_y = [0.001 0.1 0.1];
 cfg.use_parallel = true;
@@ -68,11 +69,11 @@ for i = 1:numel(controllers)
 
     if isfile(out_mat_path)
         S = load(out_mat_path, "out");
-        if isfield(S, "out") && isfield(S.out, "SSE") && isfield(S.out, "SSdU") && isfield(S.out, "runtime_s")
+        if isfield(S, "out") && is_complete_schedule_output(S.out, base)
             out = S.out;
             fprintf("Skipping simulation (existing result found): %s\n", out_mat_path);
         else
-            warning("Existing file missing required out fields; recomputing: %s", out_mat_path);
+            warning("Existing final result is incomplete; recomputing/resuming: %s", out_mat_path);
             out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, partial_mat_path);
             save(out_mat_path, "out", "ctrl", "schedule", "cfg", "base");
             if isfile(partial_mat_path), delete(partial_mat_path); end
@@ -336,7 +337,11 @@ function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning
             case_state.RUNTIME = RUNTIME;
             case_state.Xsp2_trace = Xsp2_trace;
             out_partial = out_prefix;
-            out_partial.case(case_id) = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, i);
+            if ~isfield(out_partial, "case") || isempty(out_partial.case)
+                out_partial.case = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, i);
+            else
+                out_partial.case(case_id) = finalize_case_out(base, noise, x0, Y, Y_meas, Ysp, Xsp2_trace, U, RUNTIME, i);
+            end
             out_partial = recompute_out_totals(out_partial);
             save_partial_state(partial_mat_path, ctrl.id, out_partial, case_id, case_state);
         end
@@ -555,6 +560,35 @@ function partial = load_partial_state(path, ctrl_id)
     partial.case_id = double(p.case_id);
     partial.out = p.out;
     partial.case_state = p.case_state;
+end
+
+function tf = is_complete_schedule_output(out, base)
+tf = false;
+if ~isstruct(out) || ~isfield(out, "SSE") || ~isfield(out, "SSdU") || ~isfield(out, "runtime_s")
+    return
+end
+if ~isfield(out, "T") || numel(out.T) ~= base.N
+    return
+end
+if ~isfield(out, "case") || numel(out.case) < 2
+    return
+end
+for case_id = 1:2
+    c = out.case(case_id);
+    if ~isfield(c, "Y") || size(c.Y, 1) ~= base.N
+        return
+    end
+    if ~isfield(c, "Ysp") || size(c.Ysp, 1) ~= base.N
+        return
+    end
+    if ~isfield(c, "U") || size(c.U, 1) ~= base.N
+        return
+    end
+    if ~isfield(c, "Xsp2_trace") || numel(c.Xsp2_trace) ~= base.N
+        return
+    end
+end
+tf = true;
 end
 
 function ensure_dir(p)
