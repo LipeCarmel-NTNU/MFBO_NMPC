@@ -101,34 +101,59 @@ plotData(dropMask) = [];
 
 records = sortrows(records, ["is_benchmark","J_total"], ["descend","ascend"]);
 
+[pareto2Mask, pareto2Ids] = get_schedule_pareto_2obj(records);
 nonBenchmarkRecords = records(~records.is_benchmark, :);
-topCount = min(5, height(nonBenchmarkRecords));
-topByC1 = sortrows(nonBenchmarkRecords, "SSE_c1", "ascend");
-topByC2 = sortrows(nonBenchmarkRecords, "SSE_c2", "ascend");
-topIdsC1 = string(topByC1.controller_id(1:topCount));
-topIdsC2 = string(topByC2.controller_id(1:topCount));
-coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
-[pareto3Mask, pareto3Ids] = get_schedule_pareto_3obj(records);
-[~, pareto2Ids] = get_schedule_pareto_2obj(records);
+benchmarkRows = records(records.is_benchmark, :);
+coloredControllerIds = strings(0, 1);
+if ~isempty(benchmarkRows)
+    benchmarkSSE = double(benchmarkRows.SSE_total(1));
+    paretoNonBenchmark = nonBenchmarkRecords(ismember(string(nonBenchmarkRecords.controller_id), pareto2Ids), :);
+    if benchmarkSSE ~= 0 && ~isempty(paretoNonBenchmark)
+        paretoNonBenchmark.rel_SSE = double(paretoNonBenchmark.SSE_total) ./ benchmarkSSE;
+        paretoNonBenchmark = sortrows(paretoNonBenchmark, ["rel_SSE","SSE_total"], ["ascend","ascend"]);
+        topCount = min(3, height(paretoNonBenchmark));
+        coloredControllerIds = string(paretoNonBenchmark.controller_id(1:topCount));
+    end
+end
 
 
-% SELECTED
-blackControllerId = "ts_20260211_122653_modified"; % Lowest X IAE
-% blackControllerId = "ts_20260210_180826_modified"; % Similar to next but lower SSE
-% blackControllerId = "ts_20260210_151703_modified"; % Lowest SSdU and Good X IAE
+%% SELECTED
 
+% blackControllerId = "benchmark_ref";
+blackControllerId = "ts_20260211_122653_modified";
+% Good alternative to benchmark
+% as long as 11.54% worse S tracking is acceptable. 
+% 6.0208% wall time (16.6 times faster)
+% 4.4897 times smaller volume tracking error
+% 8.8700% lower SSdU
+% overall SSE  biomass IAE within 2%
 
+% blackControllerId = "ts_20260210_180826_modified"; 
+% Better than benchmark for most pratical cases
+% 29.82% rel SSdU
+% 3.8958% wall time
+%  volume IAE 8% higher due to larger transient peak but no offset. 
+% x2 2.2% worse (equivalent)
+%  substrate 15.77% better 
+
+% blackControllerId = "ts_20260210_151703_modified";
+% 29.78% rel SSdU 
+%  little compromise (4% SSE) 
+% x1 to x3 tradeoff 35.64% lower x1 and 68.91% higher x3
+% Higher substrate error could be problematic
+
+%%
 
 
 
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(sortrows(records, "SSE_total", "ascend"));
-disp_schedule_pareto_table_3obj(records, pareto3Mask);
-disp_schedule_pareto_relative_table(records, pareto3Mask);
+disp_schedule_pareto_table_2obj(records, pareto2Mask);
+disp_schedule_pareto_relative_table(records, pareto2Mask);
 disp_black_controller_pick(records, blackControllerId);
 disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids);
 
-plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, blackControllerId, pareto3Ids);
+plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, blackControllerId, pareto2Ids);
 plot_black_controller_inputs(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
 % plot_modified_unmodified_boxplots(records, cfg.scenario, cfg.graphics_dir);
 
@@ -313,10 +338,12 @@ if isempty(TcmpFull)
     return
 end
 Tcmp = TcmpFull;
-Tcmp.x1_IAE_total = double(Tcmp.IAE_x1_c1) + double(Tcmp.IAE_x1_c2);
+Tcmp.x1_IAE_total = compute_state_iae_total(Tcmp, 1);
+Tcmp.x2_IAE_total = compute_state_iae_total(Tcmp, 2);
+Tcmp.x3_IAE_total = compute_state_iae_total(Tcmp, 3);
 Tcmp.is_black = string(Tcmp.controller_id) == string(blackControllerId);
 Tcmp.is_pareto2 = ismember(string(Tcmp.controller_id), string(pareto2Ids));
-Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','x1_IAE_total','wall_time_s','is_pareto2','is_black'});
+Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','x1_IAE_total','x2_IAE_total','x3_IAE_total','wall_time_s','is_pareto2','is_black'});
 Tcmp = sortrows(Tcmp, "SSE_total", "ascend");
 fprintf("Benchmark, selected black controller, and colored controllers (sorted by SSE_total; is_pareto2 indicates SSE_total/SSdU_total Pareto membership):\n");
 disp(Tcmp);
@@ -331,52 +358,54 @@ fprintf("Same controllers with tuning only (same SSE_total sorting):\n");
 disp(Ttune);
 end
 
-function [isPareto3, paretoIds] = get_schedule_pareto_3obj(records)
-x1IAETotal = double(records.IAE_x1_c1) + double(records.IAE_x1_c2);
-objectives = [double(records.SSE_total), x1IAETotal, double(records.SSdU_total)];
-isPareto3 = compute_pareto_mask_nd_local(objectives);
-paretoIds = string(records.controller_id(isPareto3));
-end
-
 function [isPareto2, paretoIds] = get_schedule_pareto_2obj(records)
 objectives = [double(records.SSE_total), double(records.SSdU_total)];
 isPareto2 = compute_pareto_mask_nd_local(objectives);
 paretoIds = string(records.controller_id(isPareto2));
 end
 
-function disp_schedule_pareto_table_3obj(records, isPareto3)
-x1IAETotal = double(records.IAE_x1_c1) + double(records.IAE_x1_c2);
-Tpareto3 = records(isPareto3, :);
-Tpareto3.x1_IAE_total = x1IAETotal(isPareto3);
-Tpareto3 = movevars(Tpareto3, "x1_IAE_total", "After", "controller_id");
-Tpareto3 = sortrows(Tpareto3, ["SSdU_total","SSE_total","x1_IAE_total"], ["ascend","ascend","ascend"]);
-fprintf("Setpoint schedule 3-objective Pareto controllers (SSE_total, x1 IAE total, SSdU_total):\n");
-disp(Tpareto3);
+function disp_schedule_pareto_table_2obj(records, isPareto2)
+Tpareto2 = records(isPareto2, :);
+Tpareto2.x1_IAE_total = compute_state_iae_total(Tpareto2, 1);
+Tpareto2.x2_IAE_total = compute_state_iae_total(Tpareto2, 2);
+Tpareto2.x3_IAE_total = compute_state_iae_total(Tpareto2, 3);
+Tpareto2 = movevars(Tpareto2, "x1_IAE_total", "After", "controller_id");
+Tpareto2 = movevars(Tpareto2, "x2_IAE_total", "After", "x1_IAE_total");
+Tpareto2 = movevars(Tpareto2, "x3_IAE_total", "After", "x2_IAE_total");
+Tpareto2 = sortrows(Tpareto2, ["SSdU_total","SSE_total","x1_IAE_total","x2_IAE_total","x3_IAE_total"], ["ascend","ascend","ascend","ascend","ascend"]);
+fprintf("Setpoint schedule 2-objective Pareto controllers (Pareto objectives: SSE_total, SSdU_total):\n");
+disp(Tpareto2);
 end
 
-function disp_schedule_pareto_relative_table(records, isPareto3)
+function disp_schedule_pareto_relative_table(records, isPareto2)
 benchmarkRows = records(records.is_benchmark, :);
 if isempty(benchmarkRows)
     fprintf("Setpoint schedule Pareto benchmark-relative table: benchmark not found\n");
     return
 end
 
-Trel = records(isPareto3, :);
+Trel = records(isPareto2, :);
 if isempty(Trel)
     fprintf("Setpoint schedule Pareto benchmark-relative table: no Pareto controllers\n");
     return
 end
 
 benchmarkRow = benchmarkRows(1, :);
-benchmarkX1IAE = double(benchmarkRow.IAE_x1_c1(1)) + double(benchmarkRow.IAE_x1_c2(1));
 Trel.rel_SSE = double(Trel.SSE_total) ./ double(benchmarkRow.SSE_total(1));
 Trel.rel_SSdU = double(Trel.SSdU_total) ./ double(benchmarkRow.SSdU_total(1));
 Trel.rel_wall_time = double(Trel.wall_time_s) ./ double(benchmarkRow.wall_time_s(1));
-Trel.rel_x1_IAE = (double(Trel.IAE_x1_c1) + double(Trel.IAE_x1_c2)) ./ benchmarkX1IAE;
-Trel = Trel(:, {'controller_id','rel_SSE','rel_SSdU','rel_wall_time','rel_x1_IAE'});
+Trel.rel_x1_IAE = compute_state_iae_total(Trel, 1) ./ compute_state_iae_total(benchmarkRow, 1);
+Trel.rel_x2_IAE = compute_state_iae_total(Trel, 2) ./ compute_state_iae_total(benchmarkRow, 2);
+Trel.rel_x3_IAE = compute_state_iae_total(Trel, 3) ./ compute_state_iae_total(benchmarkRow, 3);
+Trel = Trel(:, {'controller_id','rel_SSE','rel_SSdU','rel_wall_time','rel_x1_IAE','rel_x2_IAE','rel_x3_IAE'});
 Trel = sortrows(Trel, "rel_SSE", "ascend");
-fprintf("Setpoint schedule 3-objective Pareto controllers relative to benchmark:\n");
+fprintf("Setpoint schedule 2-objective Pareto controllers relative to benchmark:\n");
 disp(Trel);
+end
+
+function stateIAETotal = compute_state_iae_total(T, stateIdx)
+stateIAETotal = double(T.(sprintf("IAE_x%d_c1", stateIdx))) + ...
+    double(T.(sprintf("IAE_x%d_c2", stateIdx)));
 end
 
 function isPareto = compute_pareto_mask_nd_local(objectives)
@@ -402,7 +431,7 @@ for i = 1:n
 end
 end
 
-function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControllerIds, blackControllerId, pareto3Ids)
+function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControllerIds, blackControllerId, paretoIds)
 if isempty(plotData)
     return
 end
@@ -423,7 +452,7 @@ for c = 1:nCase
             if numel(plotData(i).cases) < c
                 continue
             end
-            if ~ismember(string(plotData(i).id), pareto3Ids)
+            if ~ismember(string(plotData(i).id), paretoIds)
                 continue
             end
             t = plotData(i).T;
