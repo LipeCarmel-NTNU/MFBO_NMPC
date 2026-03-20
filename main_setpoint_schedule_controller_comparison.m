@@ -155,6 +155,28 @@ function controllers = build_controller_set(source_root, timestamp_file)
             "theta", theta, ...
             "is_benchmark", false);
     end
+
+    modifiedTimestamps = [
+        "20260210_171107";
+        "20260201_192807";
+        "20260202_000115";
+        "20260210_154010";
+        "20260201_232106";
+        "20260201_192807";
+        "20260211_134235";
+        "20260211_122653";
+    ];
+    for i = 1:numel(modifiedTimestamps)
+        ts = modifiedTimestamps(i);
+        [src_run, theta] = load_theta_by_timestamp(source_root, ts);
+        thetaMod = make_schedule_modified_theta(theta);
+        controllers(end+1) = struct( ... %#ok<AGROW>
+            "id", "ts_" + ts + "_modified", ...
+            "source", src_run, ...
+            "timestamp", ts, ...
+            "theta", thetaMod, ...
+            "is_benchmark", false);
+    end
 end
 
 function theta = benchmark_theta()
@@ -199,6 +221,17 @@ function [src_run, theta] = load_theta_by_timestamp(source_root, ts)
     theta(1) = 1; % enforce full-horizon settings
 end
 
+function thetaMod = make_schedule_modified_theta(theta)
+    % Flat gradient wasnt a problem NMPC.optimizer_options.FiniteDifferenceType="central";
+% Set theta_7:theta_9 to theta_10:theta_12 - 1 for modified schedule runs.
+thetaMod = theta(:).';
+% if numel(thetaMod) < 12
+%     error("Expected theta length >= 12 for modified schedule controller.");
+% end
+% thetaMod(7:9) = thetaMod(10:12) - 1;
+% thetaMod(1) = 1; % preserve full-horizon setting explicitly
+end
+
 function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, partial_mat_path)
     cfg = decode_theta(ctrl.theta, base.nx, base.nu);
     pool_empty = isempty(gcp("nocreate"));
@@ -207,6 +240,7 @@ function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, pa
     NMPC.optimizer_options.MaxIterations = 100;
     NMPC.optimizer_options.UseParallel = ~pool_empty;
     NMPC.optimizer_options.Display = "final-detailed";
+    NMPC.optimizer_options.FiniteDifferenceType="central";
     NMPC.Ts = base.dt;
 
     NMPC.p = cfg.p;
@@ -253,7 +287,13 @@ function out = simulate_controller_schedule(base, schedule, ctrl, lqr_tuning, pa
         case_out = run_one_case_schedule( ...
             base, NMPC, schedule, ctrl, lqr_tuning, x0, ...
             partial_mat_path, out, case_id, case_resume);
-        out.case(case_id) = case_out;
+
+        if ~isfield(out, "case") || isempty(out.case)
+            out.case = case_out;
+        else
+            out.case(case_id) = case_out;
+        end
+
         out = recompute_out_totals(out);
         save_partial_state(partial_mat_path, ctrl.id, out, case_id + 1, struct());
     end
@@ -323,7 +363,7 @@ function case_out = run_one_case_schedule(base, NMPC, schedule, ctrl, lqr_tuning
             xk = y(end, :);
         end
         RUNTIME(i) = toc(iter_timer);
-
+disp(uk)
         if should_save_hourly_checkpoint(base.T(i), i, N)
             case_state = struct();
             case_state.i_next = min(i + 1, N + 1);

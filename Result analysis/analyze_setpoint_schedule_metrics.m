@@ -90,6 +90,15 @@ if isempty(records)
     error("No valid schedule outputs were parsed in %s", runDir);
 end
 
+% Drop unmodified duplicates: if both "foo" and "foo_modified" exist, keep
+% only "foo_modified". Controllers with no modified counterpart are kept as-is.
+allIds = string(records.controller_id);
+modifiedIds = allIds(endsWith(allIds, "_modified"));
+baseIdsWithModified = erase(modifiedIds, "_modified");
+dropMask = ismember(allIds, baseIdsWithModified);
+records(dropMask, :) = [];
+plotData(dropMask) = [];
+
 records = sortrows(records, ["is_benchmark","J_total"], ["descend","ascend"]);
 
 nonBenchmarkRecords = records(~records.is_benchmark, :);
@@ -101,7 +110,7 @@ topIdsC2 = string(topByC2.controller_id(1:topCount));
 coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
 [pareto3Mask, pareto3Ids] = get_schedule_pareto_3obj(records);
 [~, pareto2Ids] = get_schedule_pareto_2obj(records);
-blackControllerId = "ts_20260210_180826";
+blackControllerId = "ts_20260210_180826_modified";
 
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
 disp(records);
@@ -444,6 +453,7 @@ for c = 1:2
     for u = 1:nu
         ax = nexttile((c - 1) * 3 + u); hold(ax, "on");
         plot(ax, t, U(:, u), "-", "LineWidth", 1.6, "Color", [0 0 0]);
+        ylim([0 0.4])
         grid(ax, "on");
         box(ax, "off");
         xlabel(ax, "Time [h]");
