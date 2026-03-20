@@ -110,16 +110,27 @@ topIdsC2 = string(topByC2.controller_id(1:topCount));
 coloredControllerIds = intersect(topIdsC1, topIdsC2, "stable");
 [pareto3Mask, pareto3Ids] = get_schedule_pareto_3obj(records);
 [~, pareto2Ids] = get_schedule_pareto_2obj(records);
-blackControllerId = "ts_20260210_180826_modified";
+
+
+% SELECTED
+blackControllerId = "ts_20260211_122653_modified"; % Lowest X IAE
+% blackControllerId = "ts_20260210_180826_modified"; % Similar to next but lower SSE
+% blackControllerId = "ts_20260210_151703_modified"; % Lowest SSdU and Good X IAE
+
+
+
+
 
 fprintf("Setpoint schedule metrics (%s):\n", cfg.scenario);
-disp(records);
+disp(sortrows(records, "SSE_total", "ascend"));
 disp_schedule_pareto_table_3obj(records, pareto3Mask);
+disp_schedule_pareto_relative_table(records, pareto3Mask);
 disp_black_controller_pick(records, blackControllerId);
 disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids);
 
 plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, blackControllerId, pareto3Ids);
 plot_black_controller_inputs(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
+% plot_modified_unmodified_boxplots(records, cfg.scenario, cfg.graphics_dir);
 
 csvPath = fullfile(cfg.numerical_dir, "setpoint_schedule_metrics_" + cfg.scenario + ".csv");
 writetable(records, csvPath);
@@ -294,11 +305,8 @@ end
 
 function disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids)
 benchmarkRows = records(records.is_benchmark, :);
-benchmarkIds = intersect(string(benchmarkRows.controller_id), string(pareto2Ids), "stable");
-coloredParetoIds = intersect(string(coloredControllerIds), string(pareto2Ids), "stable");
-coloredIdsFinal = setdiff(coloredParetoIds, [string(blackControllerId); benchmarkIds], "stable");
-blackParetoId = intersect(string(blackControllerId), string(pareto2Ids), "stable");
-keepIds = unique([benchmarkIds; blackParetoId; coloredIdsFinal], "stable");
+benchmarkIds = string(benchmarkRows.controller_id);
+keepIds = unique([benchmarkIds; string(blackControllerId); string(coloredControllerIds(:))], "stable");
 TcmpFull = records(ismember(string(records.controller_id), keepIds), :);
 if isempty(TcmpFull)
     fprintf("Benchmark/selected/colored comparison table: none\n");
@@ -307,9 +315,10 @@ end
 Tcmp = TcmpFull;
 Tcmp.x1_IAE_total = double(Tcmp.IAE_x1_c1) + double(Tcmp.IAE_x1_c2);
 Tcmp.is_black = string(Tcmp.controller_id) == string(blackControllerId);
-Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','x1_IAE_total','wall_time_s','is_black'});
+Tcmp.is_pareto2 = ismember(string(Tcmp.controller_id), string(pareto2Ids));
+Tcmp = Tcmp(:, {'controller_id','SSE_total','SSdU_total','x1_IAE_total','wall_time_s','is_pareto2','is_black'});
 Tcmp = sortrows(Tcmp, "SSE_total", "ascend");
-fprintf("Benchmark, selected black controller, and colored controllers on SSE_total/SSdU_total Pareto set (sorted by SSE_total):\n");
+fprintf("Benchmark, selected black controller, and colored controllers (sorted by SSE_total; is_pareto2 indicates SSE_total/SSdU_total Pareto membership):\n");
 disp(Tcmp);
 
 Ttune = sortrows(TcmpFull, "SSE_total", "ascend");
@@ -343,6 +352,31 @@ Tpareto3 = movevars(Tpareto3, "x1_IAE_total", "After", "controller_id");
 Tpareto3 = sortrows(Tpareto3, ["SSdU_total","SSE_total","x1_IAE_total"], ["ascend","ascend","ascend"]);
 fprintf("Setpoint schedule 3-objective Pareto controllers (SSE_total, x1 IAE total, SSdU_total):\n");
 disp(Tpareto3);
+end
+
+function disp_schedule_pareto_relative_table(records, isPareto3)
+benchmarkRows = records(records.is_benchmark, :);
+if isempty(benchmarkRows)
+    fprintf("Setpoint schedule Pareto benchmark-relative table: benchmark not found\n");
+    return
+end
+
+Trel = records(isPareto3, :);
+if isempty(Trel)
+    fprintf("Setpoint schedule Pareto benchmark-relative table: no Pareto controllers\n");
+    return
+end
+
+benchmarkRow = benchmarkRows(1, :);
+benchmarkX1IAE = double(benchmarkRow.IAE_x1_c1(1)) + double(benchmarkRow.IAE_x1_c2(1));
+Trel.rel_SSE = double(Trel.SSE_total) ./ double(benchmarkRow.SSE_total(1));
+Trel.rel_SSdU = double(Trel.SSdU_total) ./ double(benchmarkRow.SSdU_total(1));
+Trel.rel_wall_time = double(Trel.wall_time_s) ./ double(benchmarkRow.wall_time_s(1));
+Trel.rel_x1_IAE = (double(Trel.IAE_x1_c1) + double(Trel.IAE_x1_c2)) ./ benchmarkX1IAE;
+Trel = Trel(:, {'controller_id','rel_SSE','rel_SSdU','rel_wall_time','rel_x1_IAE'});
+Trel = sortrows(Trel, "rel_SSE", "ascend");
+fprintf("Setpoint schedule 3-objective Pareto controllers relative to benchmark:\n");
+disp(Trel);
 end
 
 function isPareto = compute_pareto_mask_nd_local(objectives)
@@ -463,6 +497,77 @@ for c = 1:2
 end
 
 outStem = fullfile(graphicsDir, "setpoint_schedule_black_controller_inputs_" + scenario);
+exportgraphics(fig, outStem + ".png", "Resolution", 300);
+exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
+fprintf("Saved: %s\n", outStem + ".png");
+fprintf("Saved: %s\n", outStem + ".pdf");
+end
+
+function plot_modified_unmodified_boxplots(records, scenario, graphicsDir)
+if isempty(records)
+    return
+end
+
+ids = string(records.controller_id);
+isModified = endsWith(ids, "_modified");
+isBenchmark = logical(records.is_benchmark);
+unmodifiedIds = ids(~isModified & ~isBenchmark);
+modifiedIds = ids(isModified);
+baseIds = erase(modifiedIds, "_modified");
+hasBase = ismember(baseIds, ids);
+
+missingModifiedIds = setdiff(unmodifiedIds, baseIds, "stable");
+if ~isempty(missingModifiedIds)
+    warning("Unmodified controllers without modified counterpart are excluded from the paired boxplots: %s", ...
+        strjoin(cellstr(missingModifiedIds), ", "));
+end
+
+modifiedIds = modifiedIds(hasBase);
+baseIds = baseIds(hasBase);
+if isempty(baseIds)
+    warning("No modified/unmodified controller pairs found for boxplot comparison.");
+    return
+end
+
+baseVals = nan(numel(baseIds), 3);
+modVals = nan(numel(baseIds), 3);
+metricVars = ["SSE_total", "SSdU_total", "wall_time_s"];
+metricTitles = ["SSE", "SSdU", "Wall Time"];
+metricYLabels = ["SSE", "SSdU", "Wall time [s]"];
+
+for i = 1:numel(baseIds)
+    baseRow = records(ids == baseIds(i), :);
+    modRow = records(ids == modifiedIds(i), :);
+    if isempty(baseRow) || isempty(modRow)
+        continue
+    end
+    baseVals(i, :) = [double(baseRow.SSE_total(1)), double(baseRow.SSdU_total(1)), double(baseRow.wall_time_s(1))];
+    modVals(i, :) = [double(modRow.SSE_total(1)), double(modRow.SSdU_total(1)), double(modRow.wall_time_s(1))];
+end
+
+fig = figure("Color", "w", "Name", "Modified vs unmodified controller boxplots");
+tiledlayout(fig, 1, 3, "TileSpacing", "compact", "Padding", "compact");
+set(fig, "Position", [140 140 1300 420]);
+
+for m = 1:3
+    ax = nexttile; hold(ax, "on");
+    values = [baseVals(:, m); modVals(:, m)];
+    groups = [repmat("Unmodified", size(baseVals, 1), 1); repmat("Modified", size(modVals, 1), 1)];
+    validMask = isfinite(values);
+    if ~any(validMask)
+        title(ax, metricTitles(m));
+        text(ax, 0.5, 0.5, "No valid paired data", "HorizontalAlignment", "center");
+        axis(ax, "off");
+        continue
+    end
+    boxplot(ax, values(validMask), cellstr(groups(validMask)));
+    grid(ax, "on");
+    box(ax, "off");
+    title(ax, metricTitles(m));
+    ylabel(ax, metricYLabels(m));
+end
+
+outStem = fullfile(graphicsDir, "setpoint_schedule_modified_vs_unmodified_boxplots_" + scenario);
 exportgraphics(fig, outStem + ".png", "Resolution", 300);
 exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
 fprintf("Saved: %s\n", outStem + ".png");
