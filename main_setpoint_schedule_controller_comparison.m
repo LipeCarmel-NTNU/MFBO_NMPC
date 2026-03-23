@@ -7,7 +7,7 @@
 %
 % Controllers simulated:
 %   1) Benchmark reference controller
-%      m = 6, p = 61, Q = diag([10 1 1]), Rdu = diag([10 10 10]), P = 0
+%      m = 6, p = 61, Q = diag([10 1 1]), Ru = 0, Rdu = diag([10 10 10]), P = 0
 %   2) Controllers selected by timestamp file
 %      (defaults to results/txt results/final_pareto_frontier_timestamps_only.txt)
 %
@@ -138,8 +138,8 @@ function controllers = build_controller_set(source_root, timestamp_file)
         "is_benchmark", {});
 
     controllers(end+1) = struct( ... %#ok<AGROW>
-        "id", "benchmark_ref", ...
-        "source", "benchmark", ...
+        "id", "benchmark_fix", ...
+        "source", "benchmark_fix", ...
         "timestamp", "", ...
         "theta", benchmark_theta(), ...
         "is_benchmark", true);
@@ -188,9 +188,9 @@ function theta = benchmark_theta()
     theta_m = m - 1;
     theta_p = p - m;
     q_diag = [10 1 1];
-    ru_diag = [2 2 1];
+    ru_exp = -1000 * ones(1, 3); % 10^-1000 underflows to 0 in double precision
     rdu_diag = [10 10 10];
-    theta = [f, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)];
+    theta = [f, theta_p, theta_m, log10(q_diag), ru_exp, log10(rdu_diag)];
 end
 
 function timestamps = load_frontier_timestamps(path)
