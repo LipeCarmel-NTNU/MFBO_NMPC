@@ -467,9 +467,11 @@ for c = 1:nCase
         ylabel(ax, stateLabels(s), "Interpreter", "latex");
         if s == 1
             ylim(ax, [0.98, 1.1]);
+            ax.YTick = 0.98:0.02:1.10;
+            axes(ax);
+            format_tick([], 2);
         elseif s == 3
-            yl = ylim(ax);
-            ylim(ax, [0, yl(2)]);
+            ylim(ax, [0, 8]);
         end
         if s == 1
             title(ax, "$\mathbf{" + casePanelLabels(c) + "}$", "Interpreter", "latex");
@@ -492,8 +494,8 @@ mainPosS = stateAxes(2, 3).Position;
 insetPosS = [ ...
     mainPosS(1) + 0.56 * mainPosS(3), ...
     mainPosS(2) + 0.56 * mainPosS(4), ...
-    0.34 * mainPosS(3), ...
-    0.28 * mainPosS(4)];
+    0.40 * mainPosS(3), ...
+    0.34 * mainPosS(4)];
 add_state_inset(fig, stateAxes(2, 3), plotData, 2, 3, paretoIds, blackControllerId, plotColors, thinLineColor, NATURE_COLOR.Vermillion, [19.8, 21.6], [1.8, 3.2], insetPosS);
 
 outStem = fullfile(graphicsDir, "setpoint_schedule_all_cases_" + scenario);
@@ -586,7 +588,7 @@ insetAx = axes("Parent", fig, "Units", "normalized", "Position", insetPos, "Colo
 plot_state_panel_contents(insetAx, plotData, caseIdx, stateIdx, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor);
 xlim(insetAx, xWindow);
 ylim(insetAx, yWindow);
-set(insetAx, "FontSize", 10);
+set(insetAx, "FontSize", 12);
 insetAx.TickLabelInterpreter = "latex";
 grid(insetAx, "off");
 box(insetAx, "on");
@@ -649,6 +651,10 @@ for c = 1:2
     end
     xlabel(ax, xlabelText, "Interpreter", "latex");
     ylabel(ax, "$F_{in}$ [L/h]", "Interpreter", "latex");
+    ylim(ax, [0, 0.4]);
+    ax.YTick = 0:0.1:0.4;
+    axes(ax);
+    format_tick([], 1);
     title(ax, sprintf('$\\mathbf{%s}$', char(casePanelLabels(c))), "Interpreter", "latex");
     ax.TitleHorizontalAlignment = "left";
     ax.TickLabelInterpreter = "latex";
