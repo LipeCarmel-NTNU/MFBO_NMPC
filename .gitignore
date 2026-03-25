@@ -5,3 +5,4 @@
 *.lock
 /results/graphical_results/*
 .vscode
+/results/graphics

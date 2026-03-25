@@ -32,7 +32,7 @@ cfg.output_root = fullfile(project_root, "results", "setpoint_schedule_xsp_7_13_
 cfg.timestamp_file = fullfile(cfg.source_root, "txt results", "final_pareto_frontier_timestamps_only.txt");
 cfg.sigma_y = [0.001 0.1 0.1];
 cfg.use_parallel = true;
-cfg.num_workers = 31;
+cfg.num_workers = 2;
 cfg.Ts = 1/60;
 cfg.tf_h = 30;
 
