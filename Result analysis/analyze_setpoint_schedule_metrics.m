@@ -154,7 +154,9 @@ disp_black_controller_pick(records, blackControllerId);
 disp_selected_comparison_table(records, coloredControllerIds, blackControllerId, pareto2Ids);
 
 plot_setpoint_cases_all(plotData, cfg.scenario, cfg.graphics_dir, coloredControllerIds, blackControllerId, pareto2Ids);
-plot_black_controller_inputs(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
+% plot_black_controller_inputs(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
+% plot_black_controller_inputs_mls(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
+plot_selected_benchmark_fin_only(plotData, cfg.scenario, cfg.graphics_dir, blackControllerId);
 % plot_modified_unmodified_boxplots(records, cfg.scenario, cfg.graphics_dir);
 
 csvPath = fullfile(cfg.numerical_dir, "setpoint_schedule_metrics_" + cfg.scenario + ".csv");
@@ -435,54 +437,50 @@ function plot_setpoint_cases_all(plotData, scenario, graphicsDir, coloredControl
 if isempty(plotData)
     return
 end
+% coloredControllerIds is unused here; selected, benchmark, and Pareto
+% membership already determine the plotted trajectories.
 nCase = 2;
 nState = 3;
-stateNames = ["x1","x2","x3"];
-defaultColors = get(groot, "defaultAxesColorOrder");
+fontSize = 14;
+NATURE_COLOR = nature_methods_colors();
+plotColors = nature_methods_colors(3);
+stateLabels = ["$V$ [L]","$X$ [g/L]","$S$ [g/L]"];
+casePanelLabels = ["a","b"];
+thinLineColor = blend_color_with_white([0 0 0], 0.35);
 
 fig = figure("Color", "w", "Name", "Setpoint schedule all cases");
 tiledlayout(fig, nCase, nState, "TileSpacing", "compact", "Padding", "compact");
 set(fig, "Position", [80 80 1400 760]);
+stateAxes = gobjects(nCase, nState);
 
 for c = 1:nCase
     for s = 1:nState
         ax = nexttile; hold(ax, "on");
-        setpointDrawn = false;
-        for i = 1:numel(plotData)
-            if numel(plotData(i).cases) < c
-                continue
-            end
-            if ~ismember(string(plotData(i).id), paretoIds)
-                continue
-            end
-            t = plotData(i).T;
-            Y = plotData(i).cases(c).Y;
-            Ysp = plotData(i).cases(c).Ysp;
-            if isempty(t) || size(Y,2) < s || size(Ysp,2) < s
-                continue
-            end
-            if string(plotData(i).id) == string(blackControllerId)
-                plot(ax, t, Y(:, s), "-", "LineWidth", 1.6, "Color", [0 0 0]);
-            elseif plotData(i).is_benchmark
-                plot(ax, t, Y(:, s), "-", "LineWidth", 2.1, "Color", [1 0 0]);
-            elseif ismember(string(plotData(i).id), coloredControllerIds)
-                colorIdx = find(coloredControllerIds == string(plotData(i).id), 1, "first");
-                colorVal = defaultColors(mod(colorIdx - 1, size(defaultColors, 1)) + 1, :);
-                plot(ax, t, Y(:, s), "-", "LineWidth", 1.0, "Color", colorVal);
-            else
-                line(ax, t, Y(:, s), "LineStyle", "-", "LineWidth", 1.0, "Color", [0.65 0.65 0.65]);
-            end
-            if ~setpointDrawn
-                plot(ax, t, Ysp(:, s), "--", "LineWidth", 1.2, "Color", [0 0 0]);
-                setpointDrawn = true;
-            end
+        stateAxes(c, s) = ax;
+        plot_state_panel_contents(ax, plotData, c, s, paretoIds, blackControllerId, plotColors, thinLineColor, NATURE_COLOR.Vermillion);
+        if c < nCase
+            xlabelText = "";
+        else
+            xlabelText = "Time [h]";
         end
-        grid(ax, "on");
+        xlabel(ax, xlabelText, "Interpreter", "latex");
+        ylabel(ax, stateLabels(s), "Interpreter", "latex");
+        if s == 1
+            title(ax, "$\mathbf{" + casePanelLabels(c) + "}$", "Interpreter", "latex");
+            ax.TitleHorizontalAlignment = "left";
+        else
+            title(ax, "");
+        end
+        ax.TickLabelInterpreter = "latex";
+        set(ax, "FontSize", fontSize);
+        grid(ax, "off");
         box(ax, "off");
-        xlabel(ax, "Time [h]");
-        ylabel(ax, stateNames(s));
-        title(ax, sprintf("Case %d, %s", c, stateNames(s)));
     end
+end
+
+drawnow;
+for c = 1:nCase
+    add_biomass_inset(fig, stateAxes(c, 2), plotData, c, paretoIds, blackControllerId, plotColors, thinLineColor, NATURE_COLOR.Vermillion);
 end
 
 outStem = fullfile(graphicsDir, "setpoint_schedule_all_cases_" + scenario);
@@ -492,44 +490,312 @@ fprintf("Saved: %s\n", outStem + ".png");
 fprintf("Saved: %s\n", outStem + ".pdf");
 end
 
-function plot_black_controller_inputs(plotData, scenario, graphicsDir, blackControllerId)
-idx = find(string({plotData.id}) == string(blackControllerId), 1, "first");
-if isempty(idx)
-    warning("Black controller not found for input plot: %s", blackControllerId);
+function plot_state_panel_contents(ax, plotData, caseIdx, stateIdx, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor)
+[tSetpoint, yspMedian] = compute_case_median_setpoint(plotData, caseIdx, stateIdx, paretoIds, selectedControllerId);
+
+for pass = 1:3
+    for i = 1:numel(plotData)
+        if ~should_plot_schedule_controller(plotData(i), caseIdx, paretoIds, selectedControllerId)
+            continue
+        end
+        t = plotData(i).T;
+        Y = plotData(i).cases(caseIdx).Y;
+        if isempty(t) || size(Y, 2) < stateIdx
+            continue
+        end
+
+        controllerId = string(plotData(i).id);
+        if controllerId == string(selectedControllerId)
+            linePass = 3;
+            lineColor = plotColors(1, :);
+            lineWidth = 2.2;
+            lineStyle = "-";
+        elseif plotData(i).is_benchmark
+            linePass = 2;
+            lineColor = plotColors(2, :);
+            lineWidth = 2.0;
+            lineStyle = ":";
+        else
+            linePass = 1;
+            lineColor = thinLineColor;
+            lineWidth = 1.0;
+            lineStyle = "-";
+        end
+
+        if pass == linePass
+            plot(ax, t, Y(:, stateIdx), "LineStyle", lineStyle, "LineWidth", lineWidth, "Color", lineColor);
+        end
+    end
+end
+
+if ~isempty(tSetpoint) && ~isempty(yspMedian)
+    plot(ax, tSetpoint, yspMedian, "--", "LineWidth", 1.2, "Color", setpointColor);
+end
+end
+
+function add_biomass_inset(fig, mainAx, plotData, caseIdx, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor)
+switch caseIdx
+    case 1
+        xWindow = [17.75, 19.25];
+        yWindow = [12.95, 13.05];
+    case 2
+        xWindow = [6, 10];
+        yWindow = [6.95, 7.1];
+    otherwise
+        return
+end
+
+drawnow;
+mainPos = mainAx.Position;
+insetPos = [ ...
+    mainPos(1) + 0.52 * mainPos(3), ...
+    mainPos(2) + 0.06 * mainPos(4), ...
+    0.43 * mainPos(3), ...
+    0.40 * mainPos(4)];
+
+insetAx = axes("Parent", fig, "Units", "normalized", "Position", insetPos, "Color", "w"); hold(insetAx, "on");
+plot_state_panel_contents(insetAx, plotData, caseIdx, 2, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor);
+xlim(insetAx, xWindow);
+ylim(insetAx, yWindow);
+set(insetAx, "FontSize", 10);
+insetAx.TickLabelInterpreter = "latex";
+grid(insetAx, "off");
+box(insetAx, "on");
+end
+
+function plot_selected_benchmark_fin_only(plotData, scenario, graphicsDir, selectedControllerId)
+plotColors = nature_methods_colors(3);
+selectedIdx = find(string({plotData.id}) == string(selectedControllerId), 1, "first");
+if isempty(selectedIdx)
+    warning("Selected controller not found for F_in plot: %s", selectedControllerId);
+    return
+end
+benchmarkIdx = find([plotData.is_benchmark], 1, "first");
+if isempty(benchmarkIdx)
+    warning("Benchmark controller not found for F_in plot.");
     return
 end
 
-fig = figure("Color", "w", "Name", "Black controller inputs");
-tiledlayout(fig, 2, 3, "TileSpacing", "compact", "Padding", "compact");
-set(fig, "Position", [120 120 1400 760]);
+fontSize = 14;
+casePanelLabels = ["a","b"];
+
+fig = figure("Color", "w", "Name", "Selected and benchmark F_in");
+tiledlayout(fig, 2, 1, "TileSpacing", "compact", "Padding", "compact");
+set(fig, "Position", [160 120 760 760]);
 
 for c = 1:2
-    if numel(plotData(idx).cases) < c
+    if numel(plotData(selectedIdx).cases) < c || numel(plotData(benchmarkIdx).cases) < c
         continue
     end
-    t = plotData(idx).T;
-    U = plotData(idx).cases(c).U;
-    if isempty(t) || isempty(U)
+
+    tSelected = double(plotData(selectedIdx).T(:));
+    USelected = double(plotData(selectedIdx).cases(c).U);
+    tBenchmark = double(plotData(benchmarkIdx).T(:));
+    UBenchmark = double(plotData(benchmarkIdx).cases(c).U);
+    if isempty(tSelected) || isempty(USelected) || isempty(tBenchmark) || isempty(UBenchmark)
         continue
     end
-    nu = min(size(U, 2), 3);
-    for u = 1:nu
-        ax = nexttile((c - 1) * 3 + u); hold(ax, "on");
-        plot(ax, t, U(:, u), "-", "LineWidth", 1.6, "Color", [0 0 0]);
-        ylim([0 0.4])
-        grid(ax, "on");
-        box(ax, "off");
-        xlabel(ax, "Time [h]");
-        ylabel(ax, sprintf("u%d", u));
-        title(ax, sprintf("Case %d, u%d", c, u));
+
+    ax = nexttile; hold(ax, "on");
+    plot(ax, tSelected, USelected(:, 1), "-", "LineWidth", 1.8, ...
+        "Color", plotColors(1, :), "DisplayName", "Selected");
+
+    markerIdx = compute_fin_peak_marker_indices(tBenchmark, UBenchmark(:, 1));
+    benchmarkLine = plot(ax, tBenchmark, UBenchmark(:, 1), ":", ...
+        "LineWidth", 1.8, "Color", plotColors(2, :), ...
+        "Marker", ".", "MarkerSize", 14, "DisplayName", "Benchmark");
+    if ~isempty(markerIdx)
+        benchmarkLine.MarkerIndices = markerIdx;
+    end
+
+    if c < 2
+        xlabelText = "";
+    else
+        xlabelText = "Time [h]";
+    end
+    xlabel(ax, xlabelText, "Interpreter", "latex");
+    ylabel(ax, "$F_{in}$ [L/h]", "Interpreter", "latex");
+    title(ax, sprintf('$\\mathbf{%s}$', char(casePanelLabels(c))), "Interpreter", "latex");
+    ax.TitleHorizontalAlignment = "left";
+    ax.TickLabelInterpreter = "latex";
+    set(ax, "FontSize", fontSize);
+    grid(ax, "off");
+    box(ax, "off");
+    if c == 1
+        legend(ax, "Interpreter", "latex", "Location", "best", "Box", "off");
     end
 end
 
-outStem = fullfile(graphicsDir, "setpoint_schedule_black_controller_inputs_" + scenario);
+outStem = fullfile(graphicsDir, "setpoint_schedule_selected_benchmark_fin_only_" + scenario);
 exportgraphics(fig, outStem + ".png", "Resolution", 300);
 exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
 fprintf("Saved: %s\n", outStem + ".png");
 fprintf("Saved: %s\n", outStem + ".pdf");
+end
+
+function markerIdx = compute_fin_peak_marker_indices(t, fin)
+markerIdx = [];
+if isempty(t) || isempty(fin)
+    return
+end
+
+timeWindows = [9, 11; 19, 21];
+for k = 1:size(timeWindows, 1)
+    mask = t >= timeWindows(k, 1) & t <= timeWindows(k, 2);
+    if ~any(mask)
+        continue
+    end
+    localIdx = find(mask);
+    [~, iMax] = max(fin(localIdx));
+    markerIdx(end + 1) = localIdx(iMax); %#ok<AGROW>
+end
+markerIdx = unique(markerIdx);
+end
+
+function plot_black_controller_inputs(plotData, scenario, graphicsDir, blackControllerId)
+plotColors = nature_methods_colors(3);
+inputLabels = ["$F_{in}$ [L/h]","$F_m$ [L/h]","$F_{out}$ [L/h]"];
+plot_black_controller_inputs_scaled(plotData, scenario, graphicsDir, blackControllerId, ...
+    1, inputLabels, "setpoint_schedule_selected_controller_inputs_" + scenario, [0 0.4], ...
+    "Selected and benchmark controller inputs", plotColors(1, :), plotColors(2, :));
+end
+
+function plot_black_controller_inputs_mls(plotData, scenario, graphicsDir, blackControllerId)
+plotColors = nature_methods_colors(3);
+inputLabels = ["$F_{in}$ [mL/s]","$F_m$ [mL/s]","$F_{out}$ [mL/s]"];
+plot_black_controller_inputs_scaled(plotData, scenario, graphicsDir, blackControllerId, ...
+    1000 / 3600, inputLabels, "setpoint_schedule_selected_controller_inputs_mls_" + scenario, ...
+    [0 0.4] * (1000 / 3600), "Selected and benchmark controller inputs (mL/s)", ...
+    plotColors(1, :), plotColors(2, :));
+end
+
+function plot_black_controller_inputs_scaled(plotData, scenario, graphicsDir, blackControllerId, unitScale, inputLabels, outBaseName, yLimits, figName, selectedColor, benchmarkColor)
+selectedIdx = find(string({plotData.id}) == string(blackControllerId), 1, "first");
+if isempty(selectedIdx)
+    warning("Selected controller not found for input plot: %s", blackControllerId);
+    return
+end
+benchmarkIdx = find([plotData.is_benchmark], 1, "first");
+
+fontSize = 14;
+casePanelLabels = ["a","b"];
+
+fig = figure("Color", "w", "Name", figName);
+tiledlayout(fig, 2, 3, "TileSpacing", "compact", "Padding", "compact");
+set(fig, "Position", [120 120 1400 760]);
+
+for c = 1:2
+    if numel(plotData(selectedIdx).cases) < c
+        continue
+    end
+    tSelected = plotData(selectedIdx).T;
+    USelected = plotData(selectedIdx).cases(c).U;
+    if isempty(tSelected) || isempty(USelected)
+        continue
+    end
+    USelected = double(USelected) * unitScale;
+    nu = min(size(USelected, 2), 3);
+
+    hasBenchmark = ~isempty(benchmarkIdx) && numel(plotData(benchmarkIdx).cases) >= c;
+    if hasBenchmark
+        tBenchmark = plotData(benchmarkIdx).T;
+        UBenchmark = plotData(benchmarkIdx).cases(c).U;
+        hasBenchmark = ~isempty(tBenchmark) && ~isempty(UBenchmark);
+        if hasBenchmark
+            UBenchmark = double(UBenchmark) * unitScale;
+        end
+    end
+
+    for u = 1:nu
+        ax = nexttile((c - 1) * 3 + u); hold(ax, "on");
+        if hasBenchmark && size(UBenchmark, 2) >= u
+            plot(ax, tBenchmark, UBenchmark(:, u), ":", "LineWidth", 1.6, ...
+                "Color", benchmarkColor, "DisplayName", "Benchmark");
+        end
+        plot(ax, tSelected, USelected(:, u), "-", "LineWidth", 1.6, ...
+            "Color", selectedColor, "DisplayName", "Selected");
+        ylim(ax, yLimits)
+        if c < 2
+            xlabelText = "";
+        else
+            xlabelText = "Time [h]";
+        end
+        xlabel(ax, xlabelText, "Interpreter", "latex");
+        ylabel(ax, inputLabels(u), "Interpreter", "latex");
+        if u == 1
+            title(ax, "$\mathbf{" + casePanelLabels(c) + "}$", "Interpreter", "latex");
+            ax.TitleHorizontalAlignment = "left";
+        else
+            title(ax, "");
+        end
+        if c == 1 && u == 1
+            legend(ax, "Interpreter", "latex", "Location", "best", "Box", "off");
+        end
+        ax.TickLabelInterpreter = "latex";
+        set(ax, "FontSize", fontSize);
+        grid(ax, "off");
+        box(ax, "off");
+    end
+end
+
+outStem = fullfile(graphicsDir, outBaseName);
+exportgraphics(fig, outStem + ".png", "Resolution", 300);
+exportgraphics(fig, outStem + ".pdf", "ContentType", "vector");
+fprintf("Saved: %s\n", outStem + ".png");
+fprintf("Saved: %s\n", outStem + ".pdf");
+end
+
+function tf = should_plot_schedule_controller(controllerPlotData, caseIdx, paretoIds, selectedControllerId)
+tf = false;
+if numel(controllerPlotData.cases) < caseIdx
+    return
+end
+
+controllerId = string(controllerPlotData.id);
+tf = controllerPlotData.is_benchmark || ...
+    controllerId == string(selectedControllerId) || ...
+    ismember(controllerId, paretoIds);
+end
+
+function [tCommon, yspMedian] = compute_case_median_setpoint(plotData, caseIdx, stateIdx, paretoIds, selectedControllerId)
+tCommon = [];
+yspMedian = [];
+yspMatrix = [];
+
+for i = 1:numel(plotData)
+    if ~should_plot_schedule_controller(plotData(i), caseIdx, paretoIds, selectedControllerId)
+        continue
+    end
+
+    t = plotData(i).T;
+    Ysp = plotData(i).cases(caseIdx).Ysp;
+    if isempty(t) || size(Ysp, 2) < stateIdx
+        continue
+    end
+
+    yspCol = double(Ysp(:, stateIdx));
+    if isempty(tCommon)
+        tCommon = double(t(:));
+        yspMatrix = yspCol;
+        continue
+    end
+
+    if numel(t) ~= numel(tCommon) || any(abs(double(t(:)) - tCommon) > 1e-12)
+        continue
+    end
+
+    yspMatrix(:, end + 1) = yspCol; %#ok<AGROW>
+end
+
+if ~isempty(yspMatrix)
+    yspMedian = median(yspMatrix, 2, "omitnan");
+end
+end
+
+function blendedColor = blend_color_with_white(baseColor, alphaVal)
+baseColor = double(baseColor(:)).';
+alphaVal = double(alphaVal);
+blendedColor = alphaVal * baseColor + (1 - alphaVal) * [1 1 1];
 end
 
 function plot_modified_unmodified_boxplots(records, scenario, graphicsDir)
