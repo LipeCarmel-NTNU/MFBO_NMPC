@@ -466,6 +466,12 @@ for c = 1:nCase
         xlabel(ax, xlabelText, "Interpreter", "latex");
         ylabel(ax, stateLabels(s), "Interpreter", "latex");
         if s == 1
+            ylim(ax, [0.98, 1.1]);
+        elseif s == 3
+            yl = ylim(ax);
+            ylim(ax, [0, yl(2)]);
+        end
+        if s == 1
             title(ax, "$\mathbf{" + casePanelLabels(c) + "}$", "Interpreter", "latex");
             ax.TitleHorizontalAlignment = "left";
         else
@@ -482,6 +488,13 @@ drawnow;
 for c = 1:nCase
     add_biomass_inset(fig, stateAxes(c, 2), plotData, c, paretoIds, blackControllerId, plotColors, thinLineColor, NATURE_COLOR.Vermillion);
 end
+mainPosS = stateAxes(2, 3).Position;
+insetPosS = [ ...
+    mainPosS(1) + 0.56 * mainPosS(3), ...
+    mainPosS(2) + 0.56 * mainPosS(4), ...
+    0.34 * mainPosS(3), ...
+    0.28 * mainPosS(4)];
+add_state_inset(fig, stateAxes(2, 3), plotData, 2, 3, paretoIds, blackControllerId, plotColors, thinLineColor, NATURE_COLOR.Vermillion, [19.8, 21.6], [1.8, 3.2], insetPosS);
 
 outStem = fullfile(graphicsDir, "setpoint_schedule_all_cases_" + scenario);
 exportgraphics(fig, outStem + ".png", "Resolution", 300);
@@ -510,20 +523,33 @@ for pass = 1:3
             lineColor = plotColors(1, :);
             lineWidth = 2.2;
             lineStyle = "-";
+            markerSymbol = "d";
+            markerSize = 6;
+            markerIdx = compute_even_marker_indices(numel(t), 5);
         elseif plotData(i).is_benchmark
             linePass = 2;
             lineColor = plotColors(2, :);
             lineWidth = 2.0;
             lineStyle = ":";
+            markerSymbol = ".";
+            markerSize = 20;
+            markerIdx = compute_even_marker_indices(numel(t), 6);
         else
             linePass = 1;
             lineColor = thinLineColor;
             lineWidth = 1.0;
             lineStyle = "-";
+            markerSymbol = "none";
+            markerSize = 6;
+            markerIdx = [];
         end
 
         if pass == linePass
-            plot(ax, t, Y(:, stateIdx), "LineStyle", lineStyle, "LineWidth", lineWidth, "Color", lineColor);
+            lineObj = plot(ax, t, Y(:, stateIdx), "LineStyle", lineStyle, "LineWidth", lineWidth, ...
+                "Color", lineColor, "Marker", markerSymbol, "MarkerSize", markerSize);
+            if ~isempty(markerIdx)
+                lineObj.MarkerIndices = markerIdx;
+            end
         end
     end
 end
@@ -544,17 +570,20 @@ switch caseIdx
     otherwise
         return
 end
-
 drawnow;
 mainPos = mainAx.Position;
 insetPos = [ ...
     mainPos(1) + 0.52 * mainPos(3), ...
-    mainPos(2) + 0.06 * mainPos(4), ...
+    mainPos(2) + 0.16 * mainPos(4), ...
     0.43 * mainPos(3), ...
     0.40 * mainPos(4)];
 
+add_state_inset(fig, mainAx, plotData, caseIdx, 2, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor, xWindow, yWindow, insetPos);
+end
+
+function add_state_inset(fig, mainAx, plotData, caseIdx, stateIdx, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor, xWindow, yWindow, insetPos)
 insetAx = axes("Parent", fig, "Units", "normalized", "Position", insetPos, "Color", "w"); hold(insetAx, "on");
-plot_state_panel_contents(insetAx, plotData, caseIdx, 2, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor);
+plot_state_panel_contents(insetAx, plotData, caseIdx, stateIdx, paretoIds, selectedControllerId, plotColors, thinLineColor, setpointColor);
 xlim(insetAx, xWindow);
 ylim(insetAx, yWindow);
 set(insetAx, "FontSize", 10);
@@ -597,15 +626,20 @@ for c = 1:2
     end
 
     ax = nexttile; hold(ax, "on");
-    plot(ax, tSelected, USelected(:, 1), "-", "LineWidth", 1.8, ...
-        "Color", plotColors(1, :), "DisplayName", "Selected");
-
-    markerIdx = compute_fin_peak_marker_indices(tBenchmark, UBenchmark(:, 1));
+    benchmarkMarkerIdx = unique([compute_local_max_marker_indices(UBenchmark(:, 1), 12, 5, 0.15), ...
+        compute_fin_peak_marker_indices(tBenchmark, UBenchmark(:, 1))]);
     benchmarkLine = plot(ax, tBenchmark, UBenchmark(:, 1), ":", ...
         "LineWidth", 1.8, "Color", plotColors(2, :), ...
-        "Marker", ".", "MarkerSize", 14, "DisplayName", "Benchmark");
-    if ~isempty(markerIdx)
-        benchmarkLine.MarkerIndices = markerIdx;
+        "Marker", ".", "MarkerSize", 16, "DisplayName", "Benchmark");
+    if ~isempty(benchmarkMarkerIdx)
+        benchmarkLine.MarkerIndices = benchmarkMarkerIdx;
+    end
+    selectedMarkerIdx = compute_local_max_marker_indices(USelected(:, 1), 11, 5, 0.55);
+    selectedLine = plot(ax, tSelected, USelected(:, 1), "-", "LineWidth", 1.8, ...
+        "Color", plotColors(1, :), "Marker", "d", "MarkerSize", 6, ...
+        "DisplayName", "Selected");
+    if ~isempty(selectedMarkerIdx)
+        selectedLine.MarkerIndices = selectedMarkerIdx;
     end
 
     if c < 2
@@ -650,6 +684,68 @@ for k = 1:size(timeWindows, 1)
     markerIdx(end + 1) = localIdx(iMax); %#ok<AGROW>
 end
 markerIdx = unique(markerIdx);
+end
+
+function markerIdx = compute_even_marker_indices(nPoint, nMarker)
+if nPoint < 1 || nMarker < 1
+    markerIdx = [];
+    return
+end
+nMarker = min(nMarker, nPoint);
+markerIdx = unique(round(linspace(1, nPoint, nMarker)));
+end
+
+function markerIdx = compute_local_max_marker_indices(signalVec, nMarker, windowLength, shiftFrac)
+signalVec = double(signalVec(:));
+nPoint = numel(signalVec);
+if nPoint < 1 || nMarker < 1
+    markerIdx = [];
+    return
+end
+if nargin < 4
+    shiftFrac = 0;
+end
+
+seedIdx = compute_shifted_even_marker_indices(nPoint, nMarker, shiftFrac);
+halfWidth = floor((windowLength - 1) / 2);
+markerIdx = zeros(size(seedIdx));
+
+for k = 1:numel(seedIdx)
+    i0 = seedIdx(k);
+    leftIdx = max(1, i0 - halfWidth);
+    rightIdx = min(nPoint, i0 + halfWidth);
+    localIdx = leftIdx:rightIdx;
+    [~, iMax] = max(signalVec(localIdx));
+    markerIdx(k) = localIdx(iMax);
+end
+
+markerIdx = unique(markerIdx);
+end
+
+function markerIdx = compute_shifted_even_marker_indices(nPoint, nMarker, shiftFrac)
+if nPoint < 1 || nMarker < 1
+    markerIdx = [];
+    return
+end
+nMarker = min(nMarker, nPoint);
+if nMarker == 1
+    markerIdx = max(1, min(nPoint, round(1 + shiftFrac * max(nPoint - 1, 0))));
+    return
+end
+
+basePos = linspace(1, nPoint, nMarker);
+stepSize = (nPoint - 1) / max(nMarker - 1, 1);
+shiftedPos = basePos + shiftFrac * stepSize;
+shiftedPos = min(max(shiftedPos, 1), nPoint);
+markerIdx = unique(round(shiftedPos));
+
+while numel(markerIdx) < nMarker
+    candidate = compute_even_marker_indices(nPoint, nMarker + 1);
+    markerIdx = unique([markerIdx, candidate]); %#ok<AGROW>
+    if numel(markerIdx) > nMarker
+        markerIdx = markerIdx(1:nMarker);
+    end
+end
 end
 
 function plot_black_controller_inputs(plotData, scenario, graphicsDir, blackControllerId)
