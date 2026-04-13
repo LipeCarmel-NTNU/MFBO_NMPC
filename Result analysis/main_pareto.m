@@ -1116,7 +1116,7 @@ end
 function [Jtrack, JTV, found] = load_noisy_benchmark_point(projectRoot)
 %LOAD_NOISY_BENCHMARK_POINT Load noisy benchmark aggregate objectives.
 benchPath = fullfile(projectRoot, "results", "benchmark_reference_controller", ...
-    "benchmark_full_f1_same_noise", "out_benchmark.mat");
+    "benchmark_full_f1_same_noise_fix", "out_benchmark.mat");
 Jtrack = nan;
 JTV = nan;
 found = false;

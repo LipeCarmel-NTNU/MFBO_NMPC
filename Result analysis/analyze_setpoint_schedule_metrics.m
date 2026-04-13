@@ -25,6 +25,7 @@ files = dir(fullfile(runDir, "out_schedule_*.mat"));
 if isempty(files)
     error("No schedule output files found in %s", runDir);
 end
+files = prefer_fixed_schedule_benchmark_file(files);
 
 records = table();
 plotData = struct("id", {}, "is_benchmark", {}, "T", {}, "cases", {});
@@ -119,7 +120,6 @@ end
 
 %% SELECTED
 
-% blackControllerId = "benchmark_ref";
 blackControllerId = "ts_20260211_122653_modified";
 % Good alternative to benchmark
 % as long as 11.54% worse S tracking is acceptable. 
@@ -199,6 +199,17 @@ end
 if contains(lower(ctrlId), "benchmark")
     isBenchmark = true;
 end
+end
+
+function files = prefer_fixed_schedule_benchmark_file(files)
+names = string({files.name});
+fixedMask = names == "out_schedule_benchmark_fix.mat";
+if ~any(fixedMask)
+    return
+end
+
+legacyBenchmarkMask = startsWith(names, "out_schedule_benchmark") & ~fixedMask;
+files(legacyBenchmarkMask) = [];
 end
 
 function rec = append_controller_metadata(rec, ctrl)
@@ -466,8 +477,8 @@ for c = 1:nCase
         xlabel(ax, xlabelText, "Interpreter", "latex");
         ylabel(ax, stateLabels(s), "Interpreter", "latex");
         if s == 1
-            ylim(ax, [0.98, 1.1]);
-            ax.YTick = 0.98:0.02:1.10;
+            ylim(ax, [0.975, 1.11]);
+            ax.YTick = [0.975, 1.00, 1.025, 1.05, 1.075, 1.10];
             axes(ax);
             format_tick([], 2);
         elseif s == 3
@@ -565,10 +576,10 @@ function add_biomass_inset(fig, mainAx, plotData, caseIdx, paretoIds, selectedCo
 switch caseIdx
     case 1
         xWindow = [17.75, 19.25];
-        yWindow = [12.95, 13.05];
+        yWindow = [12.9, 13.05];
     case 2
         xWindow = [6, 10];
-        yWindow = [6.95, 7.1];
+        yWindow = [6.92, 7.075];
     otherwise
         return
 end
@@ -662,7 +673,7 @@ for c = 1:2
     grid(ax, "off");
     box(ax, "off");
     if c == 1
-        legend(ax, "Interpreter", "latex", "Location", "best", "Box", "off");
+        legend(ax, "Interpreter", "latex", "Location", "northeast", "Box", "off");
     end
 end
 
