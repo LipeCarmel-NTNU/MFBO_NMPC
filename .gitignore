@@ -6,3 +6,5 @@
 /results/graphical_results/*
 .vscode
 /results/graphics
+/dependencies/NMPC/LLM_refactor
+/.claude
