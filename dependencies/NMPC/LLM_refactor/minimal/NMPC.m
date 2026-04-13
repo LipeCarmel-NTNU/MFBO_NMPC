@@ -23,7 +23,15 @@ classdef NMPC < handle
 
     properties
         %% Model & horizon (required)
-        f                       % @(x,u) -> xdot   (1×nx out, x,u row vectors)
+        xdot                    % @(x,u) -> xdot   (1×nx out, x,u row vectors)
+        h_y = @(x) x            % output map; default y = x  (requires ny=nx)
+
+        %% Integrator (optional; default = fixed-step RK4)
+        % Any function handle  @(xdot_fn, x, u) -> x_next (1×nx row).
+        % Swap in the legacy legacy fixed-step RKF45 via:
+        %   nmpc.integrator = NMPC.rkf45_integrator(nmpc.Ts)
+        integrator = []
+        
         nx                      % # states
         nu                      % # inputs
         ny                      % # outputs (defaults to nx)
@@ -36,7 +44,6 @@ classdef NMPC < handle
         u_sp                    % 1×nu or m×nu input reference
         Q                       % ny×ny output weight
         R                       % nu×nu input weight
-        h_y = @(x) x            % output map; default y = x  (requires ny=nx)
 
         %% Bounds (required)
         Ymin                    % 1×nx
@@ -53,6 +60,9 @@ classdef NMPC < handle
         u_scale = []            % 1×nu, filled to ones in init
 
         %% Optional soft state bounds
+        % Soft-state slacks s are constrained s ≥ 0 (see bounds_scaled).
+        % The linear inequalities  x_i - s_i ≤ Ymax_i  and
+        % -x_i - s_i ≤ -Ymin_i  then enforce  Ymin_i - s_i ≤ x_i ≤ Ymax_i + s_i.
         soft_mask = []          % logical 1×nx, empty ⇒ no slacks
         rho_L1    = 0           % scalar or 1×n_soft
         rho_L2    = 0           % scalar or 1×n_soft
@@ -97,17 +107,17 @@ classdef NMPC < handle
         function obj = NMPC(opts)
             % NMPC  Construct via name=value pairs.
             %
-            %   nmpc = NMPC(f=@model, nx=4, nu=3, Ts=1/60, p=60, m=6, ...
+            %   nmpc = NMPC(xdot=@model, nx=4, nu=3, Ts=1/60, p=60, m=6, ...
             %               y_sp=ysp, u_sp=usp, Q=Q, R=R, ...
             %               Ymin=Ymin, Ymax=Ymax, umin=umin, umax=umax, ...);
             %
-            %   Optional: ny, h_y, P, x_sp_terminal, x_scale, u_scale,
-            %             soft_mask, rho_L1, rho_L2, S, dumax,
+            %   Optional: ny, h_y, integrator, P, x_sp_terminal, x_scale,
+            %             u_scale, soft_mask, rho_L1, rho_L2, S, dumax,
             %             optimizer_options, log_enabled.
 
             arguments
                 % Required: model & horizon
-                opts.f                  function_handle
+                opts.xdot               function_handle
                 opts.nx           (1,1) double {mustBeInteger, mustBePositive}
                 opts.nu           (1,1) double {mustBeInteger, mustBePositive}
                 opts.Ts           (1,1) double {mustBePositive, mustBeFinite}
@@ -129,6 +139,7 @@ classdef NMPC < handle
                 % Optional
                 opts.ny                  double = []
                 opts.h_y                 function_handle = @(x) x
+                opts.integrator          = []           % function_handle or []
                 opts.P                   double = []
                 opts.x_sp_terminal       double = []
                 opts.x_scale       (1,:) double = []
@@ -158,7 +169,7 @@ classdef NMPC < handle
 
             % Required fields. Name-value `arguments` entries are always
             % optional in MATLAB even without a default, so we re-check here.
-            req = {'f','nx','nu','Ts','p','m','y_sp','u_sp','Q','R', ...
+            req = {'xdot','nx','nu','Ts','p','m','y_sp','u_sp','Q','R', ...
                    'Ymin','Ymax','umin','umax'};
             for k = 1 : numel(req)
                 if isempty(obj.(req{k}))
@@ -170,6 +181,12 @@ classdef NMPC < handle
             if isempty(obj.ny);      obj.ny      = obj.nx;          end
             if isempty(obj.x_scale); obj.x_scale = ones(1, obj.nx); end
             if isempty(obj.u_scale); obj.u_scale = ones(1, obj.nu); end
+
+            % Default integrator: fixed-step RK4 (swap via NMPC.rkf45_integrator).
+            if isempty(obj.integrator)
+                Ts_ = obj.Ts;
+                obj.integrator = @(f, x, u) NMPC.rk4_step(f, x, u, Ts_);
+            end
 
             assert(numel(obj.x_scale) == obj.nx && all(obj.x_scale > 0), ...
                 'NMPC:x_scale', 'x_scale must be 1×nx and strictly positive.');
@@ -388,20 +405,9 @@ classdef NMPC < handle
             c   = [];
         end
 
-        %% One sampling step (RK4)
+        %% One sampling step (delegates to obj.integrator)
         function x_next = step(obj, x, u)
-            h = obj.Ts;
-            k1 = obj.fr(x,            u);
-            k2 = obj.fr(x + 0.5*h*k1, u);
-            k3 = obj.fr(x + 0.5*h*k2, u);
-            k4 = obj.fr(x +     h*k3, u);
-            x_next = x + (h/6) * (k1 + 2*k2 + 2*k3 + k4);
-        end
-
-        function v = fr(obj, x, u)
-            % Force the model output to a row vector so RK4 broadcasts cleanly
-            % regardless of the user's column/row convention.
-            v = reshape(obj.f(x, u), 1, []);
+            x_next = obj.integrator(obj.xdot, x, u);
         end
 
         %% Initial guess (physical)
@@ -411,7 +417,9 @@ classdef NMPC < handle
             else
                 u = u_init;
             end
-            u = max(u, 0);
+            % Clip initial guess to input bounds so the first evaluation
+            % starts feasible (no sign assumption).
+            u = min(max(u, obj.umin), obj.umax);
 
             x = zeros(obj.p + 1, obj.nx);
             x(1, :) = x_init;
@@ -640,6 +648,42 @@ classdef NMPC < handle
                 error('NMPC:rho_size', ...
                       'Slack weight must be scalar, 1×n_soft, or (p+1)*n_soft.');
             end
+        end
+
+        function h = rkf45_integrator(Ts)
+            % Return a function handle @(xdot_fn, x, u) -> x_next that
+            % uses the legacy RKF45_book integrator (one fixed step of
+            % size Ts). The handle can be assigned to nmpc.integrator.
+            %
+            % Note: RKF45_book clips negative states to zero (it was
+            % written for bioreactor models). Use with care for systems
+            % where states can legitimately be negative.
+            h = @(f, x, u) NMPC.rkf45_step(f, x, u, Ts);
+        end
+    end
+
+    methods (Static, Access = private)
+        function x_next = rk4_step(f, x, u, Ts)
+            % Fixed-step RK4; f(x,u) must return a 1×nx row (or column).
+            h = Ts;
+            k1 = NMPC.frow(f, x,            u);
+            k2 = NMPC.frow(f, x + 0.5*h*k1, u);
+            k3 = NMPC.frow(f, x + 0.5*h*k2, u);
+            k4 = NMPC.frow(f, x +     h*k3, u);
+            x_next = x + (h/6) * (k1 + 2*k2 + 2*k3 + k4);
+        end
+
+        function x_next = rkf45_step(f, x, u, Ts)
+            % Single-interval RKF45 step via RKF45_book.
+            % x is a 1×nx row; RKF45_book uses column vectors internally.
+            [~, y] = RKF45_book(@(t, xc) reshape(f(xc.', u), [], 1), ...
+                                 [0 Ts], x, Ts);
+            x_next = y(end, :);
+        end
+
+        function v = frow(f, x, u)
+            % Normalise model output to a 1×nx row vector.
+            v = reshape(f(x, u), 1, []);
         end
     end
 end
