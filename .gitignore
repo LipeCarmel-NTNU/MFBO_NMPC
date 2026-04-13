@@ -1,10 +1,12 @@
-*.asv
-/gptips2
 /__pycache__
+.vscode
+.claude
+
+*.asv
 *.txt
 *.lock
+
+/gptips2
+
 /results/graphical_results/*
-.vscode
 /results/graphics
-/dependencies/NMPC/LLM_refactor
-/.claude
