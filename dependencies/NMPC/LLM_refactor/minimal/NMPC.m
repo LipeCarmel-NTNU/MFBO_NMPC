@@ -431,12 +431,20 @@ classdef NMPC < handle
                 x(i + 1, :) = obj.step(x(i, :), uk);
             end
 
-            if obj.n_soft > 0
-                s = zeros(obj.p + 1, obj.n_soft);
-            else
-                s = [];
-            end
+            s = obj.soft_bound_violation(x);
             w0 = obj.pack_phys(x, u, s);
+        end
+
+        function s = soft_bound_violation(obj, x)
+            if obj.n_soft == 0
+                s = [];
+                return
+            end
+
+            xs = x(:, obj.soft_idx);
+            ymin = obj.Ymin(obj.soft_idx);
+            ymax = obj.Ymax(obj.soft_idx);
+            s = max(max(xs - ymax, ymin - xs), 0);
         end
 
         %% Pack / unpack with scaling
@@ -538,14 +546,14 @@ classdef NMPC < handle
                           [xs_lin(:); ss_lin(:)], ...
                           [sx_blk;   -sx_blk], ...
                           rows_per_block, cols);
-            b_up = repmat(obj.Ymax(obj.soft_idx).', N, 1);
+            b_up = reshape(repmat(obj.Ymax(obj.soft_idx), N, 1), [], 1);
 
             % Lower: -x_phys - s_phys ≤ -Ymin
             A_lo = sparse([r_idx; r_idx], ...
                           [xs_lin(:); ss_lin(:)], ...
                           [-sx_blk;  -sx_blk], ...
                           rows_per_block, cols);
-            b_lo = -repmat(obj.Ymin(obj.soft_idx).', N, 1);
+            b_lo = reshape(-repmat(obj.Ymin(obj.soft_idx), N, 1), [], 1);
 
             % fmincon's sqp algorithm doesn't support sparse A; convert.
             obj.A_soft = full([A_up; A_lo]);
