@@ -21,6 +21,7 @@ A single-class, single-file NMPC. Optimizes for *reading the controller end-to-e
 | Soft state bounds    | `soft_mask` non-empty             | `[]`        |
 | L1 slack penalty     | `rho_L1` (used iff slacks active) | `0`         |
 | L2 slack penalty     | `rho_L2` (used iff slacks active) | `0`         |
+| Input-reference cost | `R_u` non-empty                   | `[]`        |
 | Δu penalty / bound   | `R_du` / `dumax` non-empty        | `[]`        |
 | History logging      | `log_enabled` flag                | `false`     |
 
@@ -52,7 +53,7 @@ classdef NMPC < handle
 
         % ----- tracking targets & weights (required) -----
         x_sp, u_sp                % setpoints (vectors or per-step matrices)
-        Q, R_u                    % state and input-reference weights
+        Q, R_u                    % state and optional input-reference weights
 
         % ----- bounds (required) -----
         Xmin, Xmax

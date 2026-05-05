@@ -27,6 +27,17 @@ classdef test_objective < matlab.unittest.TestCase
             tc.verifyEqual(J, J_expected, 'AbsTol', 1e-10);
         end
 
+        function empty_R_u_skips_input_reference_penalty(tc)
+            nmpc = build_basic_nmpc(R_u=[], R_du=eye(2), u_sp=[10 20]);
+            x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
+            u = repmat([3 4], nmpc.m, 1);
+            ws = nmpc.pack_phys(x, u, []);
+
+            J = nmpc.objfun(ws, [3 4]);
+
+            tc.verifyEqual(J, 0, 'AbsTol', 1e-12);
+        end
+
         %% Terminal cost
         function terminal_cost_adds_when_P_set(tc)
             P = diag([3 7]);

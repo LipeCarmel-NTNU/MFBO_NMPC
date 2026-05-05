@@ -33,12 +33,12 @@ classdef NMPC < handle
         p                       % prediction horizon (steps)
         m                       % control horizon (steps), m <= p
 
-        %% Tracking targets and weights (required)
+        %% Tracking targets and weights
         x_sp                    % 1×nx or p×nx state setpoint
         u_sp                    % 1×nu or m×nu input reference
         Q                       % nx×nx state weight
-        R_u    = []             % nu×nu input-reference weight
-        R_du   = []             % nu×nu input-move weight
+        R_u    = []             % nu×nu input-reference weight, empty ⇒ skipped
+        R_du   = []             % nu×nu input-move weight, empty ⇒ skipped
 
         %% State and input bounds (required)
         Xmin                    % 1×nx state lower bound
@@ -242,7 +242,7 @@ classdef NMPC < handle
 
             % Required fields. Name-value `arguments` entries are always
             % optional in MATLAB even without a default, so we re-check here.
-            req = {'xdot','nx','nu','Ts','p','m','x_sp','u_sp','Q','R_u', ...
+            req = {'xdot','nx','nu','Ts','p','m','x_sp','u_sp','Q', ...
                    'Xmin','Xmax','umin','umax'};
             for k = 1 : numel(req)
                 if isempty(obj.(req{k}))
@@ -265,8 +265,10 @@ classdef NMPC < handle
                 'NMPC:ubounds', 'umin/umax must have length nu.');
             assert(isequal(size(obj.Q), [obj.nx obj.nx]), ...
                 'NMPC:Qsize', 'Q must be nx×nx because this minimal class assumes y = x.');
-            assert(isequal(size(obj.R_u), [obj.nu obj.nu]), ...
-                'NMPC:R_usize', 'R_u must be nu×nu.');
+            if ~isempty(obj.R_u)
+                assert(isequal(size(obj.R_u), [obj.nu obj.nu]), ...
+                    'NMPC:R_usize', 'R_u must be nu×nu.');
+            end
             if ~isempty(obj.P)
                 assert(isequal(size(obj.P), [obj.nx obj.nx]), ...
                     'NMPC:Psize', 'P must be nx×nx.');
@@ -392,10 +394,12 @@ classdef NMPC < handle
             end
 
             % Input reference penalty over the control horizon
-            usp = obj.expand_setpoint(obj.u_sp, obj.m, obj.nu);
-            for k = 1 : obj.m
-                ek = (u(k, :) - usp(k, :)).';
-                J  = J + ek.' * obj.R_u * ek;
+            if ~isempty(obj.R_u)
+                usp = obj.expand_setpoint(obj.u_sp, obj.m, obj.nu);
+                for k = 1 : obj.m
+                    ek = (u(k, :) - usp(k, :)).';
+                    J  = J + ek.' * obj.R_u * ek;
+                end
             end
 
             % Optional Δu cost
