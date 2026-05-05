@@ -8,8 +8,8 @@ A single-class, single-file NMPC. Optimizes for *reading the controller end-to-e
 - **Multiple shooting** with one shooting node per sampling interval. Continuity is enforced as nonlinear equality constraints (already the structure used by `NMPC_abstract.confun`).
 - **Scaling is always present** in the decision vector. Default scale = 1 ⇒ identity, but the code path is unconditional (no `if scaled`).
 - **fmincon** as the solver.
-- **RK4 / RKF45** as the integrator (one routine, fixed).
-- **Single tracking + terminal cost form**: `Σ ‖y - y_sp‖_Q² + Σ ‖u - u_sp‖_R² + ‖x_N - x_sp‖_P²`. `P = 0` ⇒ no terminal contribution; same code path.
+- **RKF45_book.m** as the fixed integrator. The minimal controller does not implement another integration scheme.
+- **State tracking + terminal cost form**: `Σ ‖x - x_sp‖_Q² + Σ ‖u - u_sp‖_R² + ‖x_N - x_sp‖_P²`. This minimal controller assumes the controlled output is the state itself (`y = x`) and does not support a separate output map `h(x)`. `P = 0` ⇒ no terminal contribution; same code path.
 
 ## Optional features (toggled by data, handled inline with `if`)
 
@@ -47,21 +47,19 @@ classdef NMPC < handle
     properties
         % ----- model & horizon (required) -----
         f                         % @(x,u) -> xdot
-        nx, nu, ny
+        nx, nu
         Ts, p, m
 
         % ----- tracking targets & weights (required) -----
-        y_sp, u_sp                % setpoints (vectors or per-step matrices)
+        x_sp, u_sp                % setpoints (vectors or per-step matrices)
         Q, R                      % weights
-        h_y                       % @(x) -> y, default identity (eye(ny,nx))
 
         % ----- bounds (required) -----
-        Ymin, Ymax
+        Xmin, Xmax
         umin, umax
 
         % ----- optional terminal cost -----
         P    = []                 % empty ⇒ skipped
-        x_sp = []
 
         % ----- optional scaling (default = 1) -----
         x_scale = []              % filled to ones(1,nx) on init
@@ -107,7 +105,7 @@ classdef NMPC < handle
         function [x, u, s] = unpack(obj, w)         % s = [] when no slacks
         function w         = pack(obj, x, u, s)
         function [A, b, wL, wU] = build_linear(obj) % bounds + soft-bound rows
-        function x_next    = step(obj, x, u)        % RK4 inside
+        function x_next    = step(obj, x, u)        % RKF45_book.m inside
         function record    = make_log_record(obj, ...)
     end
 end
@@ -117,7 +115,7 @@ end
 
 There are exactly four optional branches, all in obvious places:
 
-1. **`pack` / `unpack` / `build_linear`** — `if ~isempty(obj.soft_mask)` appends a slack block to `w`, adds linear rows `x − s ≤ Ymax`, `−x − s ≤ −Ymin` for the soft entries, and sets `s ≥ 0` in `wL`. Hard rows for non-soft entries stay in `wL`/`wU` as before.
+1. **`pack` / `unpack` / `build_linear`** — `if ~isempty(obj.soft_mask)` appends a slack block to `w`, adds linear rows `x − s ≤ Xmax`, `−x − s ≤ −Xmin` for the soft entries, and sets `s ≥ 0` in `wL`. Hard rows for non-soft entries stay in `wL`/`wU` as before.
 2. **`objfun`** — terminal: `if ~isempty(obj.P), J = J + (xN-x_sp)'*P*(xN-x_sp); end`. Slack penalty: `if ~isempty(s), J = J + obj.rho_L1*sum(s(:)) + s(:)'*diag(obj.rho_L2)*s(:); end`. Δu: `if ~isempty(obj.S), J = J + sum_k norm_S(du_k); end`.
 3. **Scaling** — applied *unconditionally* in `pack`/`unpack` (`x_phys = x_dec .* x_scale`). With default `x_scale = ones`, this is a no-op multiplication; no branch needed.
 4. **Logging** — `if obj.log_enabled, obj.log(end+1) = make_log_record(...); end` at the tail of `solve`.
@@ -149,7 +147,7 @@ Each `solve` appends one struct with these fields when `log_enabled = true`:
 
 ```
 t_wall, x_init, u_init,
-y_sp_k, u_sp_k, x_sp_k,
+x_sp_k, u_sp_k,
 Q, R, P, rho_L1, rho_L2, S,
 w0, w_opt, uk,
 flag, fval, iters, first_order_opt

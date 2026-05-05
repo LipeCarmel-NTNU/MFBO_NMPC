@@ -24,7 +24,7 @@ classdef test_solve < matlab.unittest.TestCase
 
         %% Closed-loop drives state to setpoint
         function closed_loop_converges_to_setpoint(tc)
-            % Steady-state inputs that hold y_sp = [1 2] are u_ss = [1 4]
+            % Steady-state inputs that hold x_sp = [1 2] are u_ss = [1 4]
             % (since A = diag(-1,-2), B = I). Use them as u_sp so the R
             % penalty doesn't bias the steady state.
             nmpc = build_basic_nmpc(u_sp=[1 4]);
@@ -36,7 +36,7 @@ classdef test_solve < matlab.unittest.TestCase
                 x  = nmpc.step(x, uk);
                 u_prev = uk;
             end
-            tc.verifyEqual(x, nmpc.y_sp, 'AbsTol', 5e-2, ...
+            tc.verifyEqual(x, nmpc.x_sp, 'AbsTol', 5e-2, ...
                 'Closed loop did not converge close to the setpoint.');
         end
 
@@ -47,6 +47,30 @@ classdef test_solve < matlab.unittest.TestCase
             uk = nmpc.solve([0 0], [0 0]);
             tc.verifyLessThanOrEqual(uk, nmpc.umax + 1e-8);
             tc.verifyGreaterThanOrEqual(uk, nmpc.umin - 1e-8);
+        end
+
+        %% dumax limits the setpoint-step input move
+        function dumax_limits_setpoint_step_input_move(tc)
+            x0 = 0;
+            u_prev = 0;
+
+            nmpc = scalar_step_nmpc();
+            uk_hold = nmpc.solve(x0, u_prev);
+
+            nmpc.x_sp = 1;
+            uk_free = nmpc.solve(x0, uk_hold);
+            du_free = abs(uk_free - uk_hold);
+            tc.verifyGreaterThan(du_free, 1e-3, ...
+                'Unconstrained setpoint step should require a nonzero input move.');
+
+            du_limit = 0.4 * du_free;
+            nmpc.dumax = du_limit;
+            uk_limited = nmpc.solve(x0, uk_hold);
+            du_limited = abs(uk_limited - uk_hold);
+
+            tc.verifyLessThanOrEqual(du_limited, du_limit + 1e-7);
+            tc.verifyEqual(du_limited, du_limit, 'AbsTol', 5e-6, ...
+                'The reduced dumax should be the active input-move constraint.');
         end
 
         %% Warm start: latest_wopt populated after a successful solve
@@ -68,4 +92,23 @@ classdef test_solve < matlab.unittest.TestCase
             tc.verifyTrue(isfield(nmpc.log, 'flag'));
         end
     end
+end
+
+function nmpc = scalar_step_nmpc()
+    xdot = @(x, u) -x(1) + u(1);
+    nmpc = NMPC( ...
+        xdot = xdot, ...
+        nx   = 1, ...
+        nu   = 1, ...
+        Ts   = 0.1, ...
+        p    = 12, ...
+        m    = 4, ...
+        x_sp = 0, ...
+        u_sp = 0, ...
+        Q    = 100, ...
+        R    = 0.1, ...
+        Xmin = -10, ...
+        Xmax =  10, ...
+        umin = -10, ...
+        umax =  10);
 end

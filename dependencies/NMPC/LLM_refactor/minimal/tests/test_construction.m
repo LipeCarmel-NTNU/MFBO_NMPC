@@ -5,12 +5,21 @@ classdef test_construction < matlab.unittest.TestCase
         %% Happy path
         function builds_with_defaults(tc)
             nmpc = build_basic_nmpc();
-            tc.verifyEqual(nmpc.ny, nmpc.nx, 'ny defaults to nx');
             tc.verifyEqual(nmpc.x_scale, ones(1, nmpc.nx));
             tc.verifyEqual(nmpc.u_scale, ones(1, nmpc.nu));
             tc.verifyTrue(isempty(nmpc.P));
             tc.verifyTrue(isempty(nmpc.S));
             tc.verifyEqual(nmpc.rho_L1, 0);
+        end
+
+        function legacy_y_sp_alias_sets_x_sp(tc)
+            nmpc = build_basic_nmpc(x_sp=[], y_sp=[3 4]);
+            tc.verifyEqual(nmpc.x_sp, [3 4]);
+        end
+
+        function conflicting_x_sp_and_y_sp_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(x_sp=[1 2], y_sp=[3 4]), ...
+                'NMPC:x_sp_alias');
         end
 
         function name_value_syntax_works(tc)
@@ -24,15 +33,30 @@ classdef test_construction < matlab.unittest.TestCase
             % Omit `f`. Name-value arguments are always optional in MATLAB,
             % so the cross-check in init() is what raises here.
             tc.verifyError(@() NMPC(nx=2, nu=2, Ts=0.1, p=5, m=2, ...
-                                    y_sp=[0 0], u_sp=[0 0], ...
+                                    x_sp=[0 0], u_sp=[0 0], ...
                                     Q=eye(2), R=eye(2), ...
-                                    Ymin=[-1 -1], Ymax=[1 1], ...
+                                    Xmin=[-1 -1], Xmax=[1 1], ...
                                     umin=[-1 -1], umax=[1 1]), ...
                 'NMPC:missing');
         end
 
         function unknown_field_errors(tc)
             tc.verifyError(@() build_basic_nmpc(nonsense_field=1), ...
+                'MATLAB:TooManyInputs');
+        end
+
+        function output_map_is_not_configurable(tc)
+            tc.verifyError(@() build_basic_nmpc(h_y=@(x) x), ...
+                'MATLAB:TooManyInputs');
+        end
+
+        function integrator_is_not_configurable(tc)
+            tc.verifyError(@() build_basic_nmpc(integrator=@(f, x, u) x), ...
+                'MATLAB:TooManyInputs');
+        end
+
+        function terminal_setpoint_is_not_configurable(tc)
+            tc.verifyError(@() build_basic_nmpc(x_sp_terminal=[0 0]), ...
                 'MATLAB:TooManyInputs');
         end
 
@@ -49,8 +73,24 @@ classdef test_construction < matlab.unittest.TestCase
             tc.verifyError(@() build_basic_nmpc(R=eye(3)), 'NMPC:Rsize');
         end
 
-        function bad_Ybounds_errors(tc)
-            tc.verifyError(@() build_basic_nmpc(Ymin=[0 0 0]), 'NMPC:Ybounds');
+        function legacy_Y_bounds_aliases_set_X_bounds(tc)
+            nmpc = build_basic_nmpc(Xmin=[], Xmax=[], Ymin=[-3 -4], Ymax=[3 4]);
+            tc.verifyEqual(nmpc.Xmin, [-3 -4]);
+            tc.verifyEqual(nmpc.Xmax, [3 4]);
+        end
+
+        function conflicting_Xmin_and_Ymin_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(Xmin=[-1 -2], Ymin=[-3 -4]), ...
+                'NMPC:Xmin_alias');
+        end
+
+        function conflicting_Xmax_and_Ymax_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(Xmax=[1 2], Ymax=[3 4]), ...
+                'NMPC:Xmax_alias');
+        end
+
+        function bad_Xbounds_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(Xmin=[0 0 0]), 'NMPC:Xbounds');
         end
 
         function bad_x_scale_errors(tc)

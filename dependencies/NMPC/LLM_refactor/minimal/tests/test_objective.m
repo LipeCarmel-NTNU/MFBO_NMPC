@@ -7,7 +7,7 @@ classdef test_objective < matlab.unittest.TestCase
         function tracking_and_input_only(tc)
             nmpc = build_basic_nmpc();
             % All states at setpoint, all inputs zero ⇒ cost = 0.
-            x = repmat(nmpc.y_sp, nmpc.p + 1, 1);
+            x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
             u = zeros(nmpc.m, nmpc.nu);
             ws = nmpc.pack_phys(x, u, []);
             J = nmpc.objfun(ws, zeros(1, nmpc.nu));
@@ -21,8 +21,8 @@ classdef test_objective < matlab.unittest.TestCase
             ws = nmpc.pack_phys(x, u, []);
             J = nmpc.objfun(ws, zeros(1, nmpc.nu));
 
-            % Hand computation: p tracking errors of value -y_sp.
-            e = -nmpc.y_sp.';
+            % Hand computation: p tracking errors of value -x_sp.
+            e = -nmpc.x_sp.';
             J_expected = nmpc.p * (e.' * nmpc.Q * e);
             tc.verifyEqual(J, J_expected, 'AbsTol', 1e-10);
         end
@@ -30,14 +30,15 @@ classdef test_objective < matlab.unittest.TestCase
         %% Terminal cost
         function terminal_cost_adds_when_P_set(tc)
             P = diag([3 7]);
-            xspT = [4 -1];
-            nmpc = build_basic_nmpc(P=P, x_sp_terminal=xspT);
-            x = repmat(nmpc.y_sp, nmpc.p + 1, 1);   % zero tracking
+            nmpc = build_basic_nmpc(P=P);
+            x = zeros(nmpc.p + 1, nmpc.nx);
+            x(1:nmpc.p, :) = repmat(nmpc.x_sp, nmpc.p, 1);   % zero stage tracking
+            x(end, :) = [4 -1];
             u = zeros(nmpc.m, nmpc.nu);
             ws = nmpc.pack_phys(x, u, []);
             J = nmpc.objfun(ws, zeros(1, nmpc.nu));
 
-            e = (nmpc.y_sp - xspT).';
+            e = (x(end, :) - nmpc.x_sp).';
             tc.verifyEqual(J, e.' * P * e, 'AbsTol', 1e-10);
         end
 
@@ -46,7 +47,7 @@ classdef test_objective < matlab.unittest.TestCase
             S = diag([2 4]);
             % Use R = 0 so we can isolate the Δu term.
             nmpc = build_basic_nmpc(S=S, R=zeros(2));
-            x = repmat(nmpc.y_sp, nmpc.p + 1, 1);
+            x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
 
             % Inputs constant and equal to u_prev ⇒ Δu = 0 throughout.
             u_prev = [1 2];
@@ -68,7 +69,7 @@ classdef test_objective < matlab.unittest.TestCase
         function slack_penalty_L1(tc)
             rho = 7;
             nmpc = build_basic_nmpc(soft_mask=[true false], rho_L1=rho);
-            x = repmat(nmpc.y_sp, nmpc.p + 1, 1);
+            x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
             u = zeros(nmpc.m, nmpc.nu);
             s = ones(nmpc.p + 1, 1);
             ws = nmpc.pack_phys(x, u, s);
@@ -79,7 +80,7 @@ classdef test_objective < matlab.unittest.TestCase
         function slack_penalty_L2(tc)
             rho = 5;
             nmpc = build_basic_nmpc(soft_mask=[true false], rho_L2=rho);
-            x = repmat(nmpc.y_sp, nmpc.p + 1, 1);
+            x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
             u = zeros(nmpc.m, nmpc.nu);
             s = 2 * ones(nmpc.p + 1, 1);   % each slack squared = 4
             ws = nmpc.pack_phys(x, u, s);

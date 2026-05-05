@@ -23,12 +23,12 @@ classdef test_slacks < matlab.unittest.TestCase
                 'Slacks should be zero when the hard problem is feasible.');
         end
 
-        %% Tight Ymax forces non-zero slacks (otherwise infeasible)
+        %% Tight Xmax forces non-zero slacks (otherwise infeasible)
         function slacks_activate_when_hard_bounds_infeasible(tc)
-            % Setpoint y_sp = [1 2]; pin Ymax(1) BELOW it so reaching the
+            % Setpoint x_sp = [1 2]; pin Xmax(1) BELOW it so reaching the
             % setpoint requires violating the hard upper bound.
             nmpc = build_basic_nmpc( ...
-                Ymax      = [0.2  10], ...
+                Xmax      = [0.2  10], ...
                 soft_mask = [true false], ...
                 rho_L1    = 1);
 
@@ -42,7 +42,7 @@ classdef test_slacks < matlab.unittest.TestCase
 
             [~, ~, s] = nmpc.unpack_phys(nmpc.latest_wopt);
             tc.verifyGreaterThan(max(s(:)), 1e-3, ...
-                'Soft bound should be violated (slack > 0) once the closed loop drives x past Ymax.');
+                'Soft bound should be violated (slack > 0) once the closed loop drives x past Xmax.');
         end
 
         %% Warm scalar solve: measured infeasibility is carried by slack
@@ -55,12 +55,12 @@ classdef test_slacks < matlab.unittest.TestCase
                 Ts        = 0.1, ...
                 p         = 5, ...
                 m         = 2, ...
-                y_sp      = 0, ...
+                x_sp      = 0, ...
                 u_sp      = 0, ...
                 Q         = 1, ...
                 R         = 0.1, ...
-                Ymin      = -1, ...
-                Ymax      = 1, ...
+                Xmin      = -1, ...
+                Xmax      = 1, ...
                 umin      = -2, ...
                 umax      = 2, ...
                 soft_mask = true, ...
@@ -73,7 +73,7 @@ classdef test_slacks < matlab.unittest.TestCase
             tc.verifyGreaterThanOrEqual(info.flag, 0);
             tc.verifyEqual(x(1), 2, 'AbsTol', 1e-8);
             tc.verifyEqual(s(1), 1, 'AbsTol', 1e-8, ...
-                'Initial slack should equal x_init - Ymax exactly.');
+                'Initial slack should equal x_init - Xmax exactly.');
         end
 
         %% Linear soft-bound rows have the right shape
@@ -103,6 +103,22 @@ classdef test_slacks < matlab.unittest.TestCase
             expected = 2 * nmpc.m * nmpc.nu;
             tc.verifyEqual(size(A, 1), expected);
             tc.verifyEqual(numel(b),   expected);
+        end
+
+        function infinite_dumax_adds_no_rows(tc)
+            nmpc = build_basic_nmpc(dumax=[Inf Inf]);
+            [A, b] = nmpc.linear_ineq([0 0]);
+            tc.verifyEqual(size(A, 1), 0);
+            tc.verifyEqual(numel(b), 0);
+        end
+
+        function mixed_finite_and_infinite_dumax_only_adds_finite_rows(tc)
+            nmpc = build_basic_nmpc(dumax=[0.1 Inf]);
+            [A, b] = nmpc.linear_ineq([0 0]);
+            expected = 2 * nmpc.m;
+            tc.verifyEqual(size(A, 1), expected);
+            tc.verifyEqual(numel(b), expected);
+            tc.verifyTrue(all(isfinite(b)));
         end
     end
 end

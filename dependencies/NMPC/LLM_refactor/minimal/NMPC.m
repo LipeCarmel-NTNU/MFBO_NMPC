@@ -5,13 +5,15 @@ classdef NMPC < handle
     %     - Continuous-time model xdot = f(x, u), single-shooting per Ts.
     %     - Multiple-shooting: each predicted state is a decision variable;
     %       continuity is enforced as nonlinear equality constraints.
+    %     - The tracked and constrained output is the state itself (y = x).
+    %       This minimal class does not support a separate output map h(x).
     %     - Decision variables live in scaled coordinates (x_scale = 1 by
     %       default ⇒ identity, no behavioural difference).
-    %     - fmincon as solver, RK4 as integrator.
+    %     - fmincon as solver, RKF45_book.m as integrator.
     %
     %   Optional features (toggled by leaving the related property empty
     %   or zero ⇒ no contribution):
-    %     - Terminal cost   .... P, x_sp_terminal
+    %     - Terminal cost   .... P
     %     - Soft state bnds .... soft_mask, rho_L1, rho_L2
     %     - Δu penalty ......... S
     %     - Δu hard bound ...... dumax
@@ -24,36 +26,27 @@ classdef NMPC < handle
     properties
         %% Model & horizon (required)
         xdot                    % @(x,u) -> xdot   (1×nx out, x,u row vectors)
-        h_y = @(x) x            % output map; default y = x  (requires ny=nx)
 
-        %% Integrator (optional; default = fixed-step RK4)
-        % Any function handle  @(xdot_fn, x, u) -> x_next (1×nx row).
-        % Swap in the legacy legacy fixed-step RKF45 via:
-        %   nmpc.integrator = NMPC.rkf45_integrator(nmpc.Ts)
-        integrator = []
-        
         nx                      % # states
         nu                      % # inputs
-        ny                      % # outputs (defaults to nx)
         Ts                      % sampling time
         p                       % prediction horizon (steps)
         m                       % control horizon (steps), m <= p
 
         %% Tracking targets and weights (required)
-        y_sp                    % 1×ny or p×ny setpoint
+        x_sp                    % 1×nx or p×nx state setpoint
         u_sp                    % 1×nu or m×nu input reference
-        Q                       % ny×ny output weight
+        Q                       % nx×nx state weight
         R                       % nu×nu input weight
 
-        %% Bounds (required)
-        Ymin                    % 1×nx
-        Ymax                    % 1×nx
+        %% State and input bounds (required)
+        Xmin                    % 1×nx state lower bound
+        Xmax                    % 1×nx state upper bound
         umin                    % 1×nu
         umax                    % 1×nu
 
         %% Optional terminal cost
         P              = []     % nx×nx, empty ⇒ skipped
-        x_sp_terminal  = []     % 1×nx; defaults to last row of y_sp if empty AND P is set
 
         %% Scaling (always present, default = ones)
         x_scale = []            % 1×nx, filled to ones in init
@@ -61,8 +54,8 @@ classdef NMPC < handle
 
         %% Optional soft state bounds
         % Soft-state slacks s are constrained s ≥ 0 (see bounds_scaled).
-        % The linear inequalities  x_i - s_i ≤ Ymax_i  and
-        % -x_i - s_i ≤ -Ymin_i  then enforce  Ymin_i - s_i ≤ x_i ≤ Ymax_i + s_i.
+        % The linear inequalities  x_i - s_i ≤ Xmax_i  and
+        % -x_i - s_i ≤ -Xmin_i  then enforce  Xmin_i - s_i ≤ x_i ≤ Xmax_i + s_i.
         soft_mask = []          % logical 1×nx, empty ⇒ no slacks
         rho_L1    = 0           % scalar or 1×n_soft
         rho_L2    = 0           % scalar or 1×n_soft
@@ -100,19 +93,64 @@ classdef NMPC < handle
         % Cached linear-constraint pieces (in scaled-decision-vector space).
         A_soft = []             % soft state-bound rows (full, not sparse)
         b_soft = []
+        constraints_initialized = false
     end
 
     methods
+        function set.Xmin(obj, value)
+            obj.Xmin = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.Xmax(obj, value)
+            obj.Xmax = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.umin(obj, value)
+            obj.umin = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.umax(obj, value)
+            obj.umax = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.x_scale(obj, value)
+            obj.x_scale = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.u_scale(obj, value)
+            obj.u_scale = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.soft_mask(obj, value)
+            if ~isempty(value)
+                value = logical(value(:).');
+            end
+            obj.soft_mask = value;
+            obj.refresh_constraint_cache(true);
+        end
+
+        function set.dumax(obj, value)
+            obj.dumax = value;
+            obj.refresh_constraint_cache(true);
+        end
+
         %% Construction
         function obj = NMPC(opts)
             % NMPC  Construct via name=value pairs.
             %
             %   nmpc = NMPC(xdot=@model, nx=4, nu=3, Ts=1/60, p=60, m=6, ...
-            %               y_sp=ysp, u_sp=usp, Q=Q, R=R, ...
-            %               Ymin=Ymin, Ymax=Ymax, umin=umin, umax=umax, ...);
+            %               x_sp=xsp, u_sp=usp, Q=Q, R=R, ...
+            %               Xmin=Xmin, Xmax=Xmax, umin=umin, umax=umax, ...);
             %
-            %   Optional: ny, h_y, integrator, P, x_sp_terminal, x_scale,
-            %             u_scale, soft_mask, rho_L1, rho_L2, S, dumax,
+            %   Optional: y_sp (legacy alias for x_sp), Ymin/Ymax (legacy
+            %             aliases for Xmin/Xmax), P, x_scale, u_scale,
+            %             soft_mask, rho_L1, rho_L2, S, dumax,
             %             optimizer_options, log_enabled.
 
             arguments
@@ -125,23 +163,22 @@ classdef NMPC < handle
                 opts.m            (1,1) double {mustBeInteger, mustBePositive}
 
                 % Required: tracking
-                opts.y_sp         double {mustBeNonempty}
+                opts.x_sp         double = []
                 opts.u_sp         double {mustBeNonempty}
                 opts.Q            double {mustBeNonempty}
                 opts.R            double {mustBeNonempty}
 
                 % Required: bounds
-                opts.Ymin   (1,:) double {mustBeNonempty}
-                opts.Ymax   (1,:) double {mustBeNonempty}
+                opts.Xmin   (1,:) double = []
+                opts.Xmax   (1,:) double = []
                 opts.umin   (1,:) double {mustBeNonempty}
                 opts.umax   (1,:) double {mustBeNonempty}
 
                 % Optional
-                opts.ny                  double = []
-                opts.h_y                 function_handle = @(x) x
-                opts.integrator          = []           % function_handle or []
+                opts.y_sp                double = []           % legacy alias for x_sp
+                opts.Ymin          (1,:) double = []           % legacy alias for Xmin
+                opts.Ymax          (1,:) double = []           % legacy alias for Xmax
                 opts.P                   double = []
-                opts.x_sp_terminal       double = []
                 opts.x_scale       (1,:) double = []
                 opts.u_scale       (1,:) double = []
                 opts.soft_mask           = []           % logical or numeric mask
@@ -155,22 +192,44 @@ classdef NMPC < handle
 
             fn = fieldnames(opts);
             for k = 1 : numel(fn)
+                if ismember(fn{k}, {'y_sp', 'Ymin', 'Ymax'})
+                    continue        % handled below as a legacy alias
+                end
                 v = opts.(fn{k});
                 if strcmp(fn{k}, 'optimizer_options') && isempty(v)
                     continue        % keep class default
                 end
                 obj.(fn{k}) = v;
             end
+            if isempty(obj.x_sp) && ~isempty(opts.y_sp)
+                obj.x_sp = opts.y_sp;
+            elseif ~isempty(obj.x_sp) && ~isempty(opts.y_sp)
+                assert(isequal(obj.x_sp, opts.y_sp), ...
+                    'NMPC:x_sp_alias', 'x_sp and legacy y_sp must match when both are supplied.');
+            end
+            if isempty(obj.Xmin) && ~isempty(opts.Ymin)
+                obj.Xmin = opts.Ymin;
+            elseif ~isempty(obj.Xmin) && ~isempty(opts.Ymin)
+                assert(isequal(obj.Xmin, opts.Ymin), ...
+                    'NMPC:Xmin_alias', 'Xmin and legacy Ymin must match when both are supplied.');
+            end
+            if isempty(obj.Xmax) && ~isempty(opts.Ymax)
+                obj.Xmax = opts.Ymax;
+            elseif ~isempty(obj.Xmax) && ~isempty(opts.Ymax)
+                assert(isequal(obj.Xmax, opts.Ymax), ...
+                    'NMPC:Xmax_alias', 'Xmax and legacy Ymax must match when both are supplied.');
+            end
             obj.init();
         end
 
         function init(obj)
             % Cross-field validation, default fill, cache static pieces.
+            obj.constraints_initialized = false;
 
             % Required fields. Name-value `arguments` entries are always
             % optional in MATLAB even without a default, so we re-check here.
-            req = {'xdot','nx','nu','Ts','p','m','y_sp','u_sp','Q','R', ...
-                   'Ymin','Ymax','umin','umax'};
+            req = {'xdot','nx','nu','Ts','p','m','x_sp','u_sp','Q','R', ...
+                   'Xmin','Xmax','umin','umax'};
             for k = 1 : numel(req)
                 if isempty(obj.(req{k}))
                     error('NMPC:missing', ...
@@ -178,27 +237,20 @@ classdef NMPC < handle
                 end
             end
 
-            if isempty(obj.ny);      obj.ny      = obj.nx;          end
             if isempty(obj.x_scale); obj.x_scale = ones(1, obj.nx); end
             if isempty(obj.u_scale); obj.u_scale = ones(1, obj.nu); end
-
-            % Default integrator: fixed-step RK4 (swap via NMPC.rkf45_integrator).
-            if isempty(obj.integrator)
-                Ts_ = obj.Ts;
-                obj.integrator = @(f, x, u) NMPC.rk4_step(f, x, u, Ts_);
-            end
 
             assert(numel(obj.x_scale) == obj.nx && all(obj.x_scale > 0), ...
                 'NMPC:x_scale', 'x_scale must be 1×nx and strictly positive.');
             assert(numel(obj.u_scale) == obj.nu && all(obj.u_scale > 0), ...
                 'NMPC:u_scale', 'u_scale must be 1×nu and strictly positive.');
             assert(obj.m <= obj.p, 'NMPC:horizon', 'Require m <= p.');
-            assert(numel(obj.Ymin) == obj.nx && numel(obj.Ymax) == obj.nx, ...
-                'NMPC:Ybounds', 'Ymin/Ymax must have length nx.');
+            assert(numel(obj.Xmin) == obj.nx && numel(obj.Xmax) == obj.nx, ...
+                'NMPC:Xbounds', 'Xmin/Xmax must have length nx.');
             assert(numel(obj.umin) == obj.nu && numel(obj.umax) == obj.nu, ...
                 'NMPC:ubounds', 'umin/umax must have length nu.');
-            assert(isequal(size(obj.Q), [obj.ny obj.ny]), ...
-                'NMPC:Qsize', 'Q must be ny×ny.');
+            assert(isequal(size(obj.Q), [obj.nx obj.nx]), ...
+                'NMPC:Qsize', 'Q must be nx×nx because this minimal class assumes y = x.');
             assert(isequal(size(obj.R), [obj.nu obj.nu]), ...
                 'NMPC:Rsize', 'R must be nu×nu.');
             if ~isempty(obj.P)
@@ -209,29 +261,12 @@ classdef NMPC < handle
                 assert(isequal(size(obj.S), [obj.nu obj.nu]), ...
                     'NMPC:Ssize', 'S must be nu×nu.');
             end
-            if ~isempty(obj.dumax)
-                assert(numel(obj.dumax) == obj.nu && all(obj.dumax > 0), ...
-                    'NMPC:dumax', 'dumax must be 1×nu and strictly positive.');
-            end
-
-            % Slack bookkeeping
-            if ~isempty(obj.soft_mask)
-                obj.soft_mask = logical(obj.soft_mask(:).');
-                assert(numel(obj.soft_mask) == obj.nx, ...
-                    'soft_mask must have length nx.');
-                obj.soft_idx = find(obj.soft_mask);
-                obj.n_soft   = numel(obj.soft_idx);
-            else
-                obj.soft_idx = [];
-                obj.n_soft   = 0;
-            end
-
-            obj.len_x = (obj.p + 1) * obj.nx;
-            obj.len_u =  obj.m      * obj.nu;
-            obj.len_s = (obj.p + 1) * obj.n_soft;
+            obj.validate_constraint_config();
+            obj.update_constraint_layout();
 
             % Build cached soft-bound linear rows (scaled space).
             obj.build_soft_rows();
+            obj.constraints_initialized = true;
         end
 
         %% Public solve  (mirrors NMPC_abstract.solve fallback flow)
@@ -334,11 +369,11 @@ classdef NMPC < handle
 
             J = 0;
 
-            % Tracking on outputs over the prediction horizon
-            ysp = obj.expand_setpoint(obj.y_sp, obj.p, obj.ny);
+            % State tracking over the prediction horizon. The minimal
+            % controller assumes the controlled output is exactly y = x.
+            xsp = obj.expand_setpoint(obj.x_sp, obj.p, obj.nx);
             for k = 1 : obj.p
-                yk = obj.h_y(x(k, :));
-                e  = (yk - ysp(k, :)).';
+                e  = (x(k, :) - xsp(k, :)).';
                 J  = J + e.' * obj.Q * e;
             end
 
@@ -360,12 +395,7 @@ classdef NMPC < handle
 
             % Optional terminal cost
             if ~isempty(obj.P)
-                if isempty(obj.x_sp_terminal)
-                    xsp_term = ysp(end, :);          % assumes ny == nx
-                else
-                    xsp_term = obj.x_sp_terminal;
-                end
-                e = (x(end, :) - xsp_term).';
+                e = (x(end, :) - xsp(end, :)).';
                 J = J + e.' * obj.P * e;
             end
 
@@ -405,9 +435,11 @@ classdef NMPC < handle
             c   = [];
         end
 
-        %% One sampling step (delegates to obj.integrator)
+        %% One sampling step via RKF45_book
         function x_next = step(obj, x, u)
-            x_next = obj.integrator(obj.xdot, x, u);
+            [~, y] = RKF45_book(@(t, xc) reshape(obj.xdot(xc.', u), [], 1), ...
+                                 [0 obj.Ts], x, obj.Ts);
+            x_next = y(end, :);
         end
 
         %% Initial guess (physical)
@@ -442,9 +474,9 @@ classdef NMPC < handle
             end
 
             xs = x(:, obj.soft_idx);
-            ymin = obj.Ymin(obj.soft_idx);
-            ymax = obj.Ymax(obj.soft_idx);
-            s = max(max(xs - ymax, ymin - xs), 0);
+            xmin = obj.Xmin(obj.soft_idx);
+            xmax = obj.Xmax(obj.soft_idx);
+            s = max(max(xs - xmax, xmin - xs), 0);
         end
 
         %% Pack / unpack with scaling
@@ -479,8 +511,8 @@ classdef NMPC < handle
         %% Bounds (scaled)
         function [wL, wU] = bounds_scaled(obj)
             % State bounds: relax soft entries to ±Inf (linear rows handle them).
-            xL = repmat(obj.Ymin, obj.p + 1, 1);
-            xU = repmat(obj.Ymax, obj.p + 1, 1);
+            xL = repmat(obj.Xmin, obj.p + 1, 1);
+            xU = repmat(obj.Xmax, obj.p + 1, 1);
             if obj.n_soft > 0
                 xL(:, obj.soft_idx) = -Inf;
                 xU(:, obj.soft_idx) =  Inf;
@@ -505,11 +537,59 @@ classdef NMPC < handle
             A = obj.A_soft;
             b = obj.b_soft;
 
-            if ~isempty(obj.dumax)
+            if ~isempty(obj.dumax) && any(isfinite(obj.dumax))
                 [Adu, bdu] = obj.build_du_rows(u_prev);
                 A = [A; Adu];
                 b = [b; bdu];
             end
+        end
+
+        function refresh_constraint_cache(obj, invalidate_warm_start)
+            if ~obj.constraints_initialized
+                return
+            end
+
+            obj.validate_constraint_config();
+            obj.update_constraint_layout();
+            obj.build_soft_rows();
+
+            if invalidate_warm_start
+                obj.latest_wopt = [];
+                obj.latest_flag = NaN;
+            end
+        end
+
+        function validate_constraint_config(obj)
+            assert(numel(obj.Xmin) == obj.nx && numel(obj.Xmax) == obj.nx, ...
+                'NMPC:Xbounds', 'Xmin/Xmax must have length nx.');
+            assert(numel(obj.umin) == obj.nu && numel(obj.umax) == obj.nu, ...
+                'NMPC:ubounds', 'umin/umax must have length nu.');
+            assert(numel(obj.x_scale) == obj.nx && all(obj.x_scale > 0), ...
+                'NMPC:x_scale', 'x_scale must be 1×nx and strictly positive.');
+            assert(numel(obj.u_scale) == obj.nu && all(obj.u_scale > 0), ...
+                'NMPC:u_scale', 'u_scale must be 1×nu and strictly positive.');
+            if ~isempty(obj.soft_mask)
+                assert(numel(obj.soft_mask) == obj.nx, ...
+                    'NMPC:soft_mask', 'soft_mask must have length nx.');
+            end
+            if ~isempty(obj.dumax)
+                assert(numel(obj.dumax) == obj.nu && all(obj.dumax > 0), ...
+                    'NMPC:dumax', 'dumax must be 1×nu and strictly positive.');
+            end
+        end
+
+        function update_constraint_layout(obj)
+            if ~isempty(obj.soft_mask)
+                obj.soft_idx = find(obj.soft_mask);
+                obj.n_soft   = numel(obj.soft_idx);
+            else
+                obj.soft_idx = [];
+                obj.n_soft   = 0;
+            end
+
+            obj.len_x = (obj.p + 1) * obj.nx;
+            obj.len_u =  obj.m      * obj.nu;
+            obj.len_s = (obj.p + 1) * obj.n_soft;
         end
 
         %% Build cached soft-bound rows (scaled, sparse)
@@ -536,8 +616,8 @@ classdef NMPC < handle
 
             rows_per_block = N * ns;
 
-            % Upper:  x_phys - s_phys ≤ Ymax
-            %  ⇒    sx*xs - sx*ss   ≤ Ymax
+            % Upper:  x_phys - s_phys ≤ Xmax
+            %  ⇒    sx*xs - sx*ss   ≤ Xmax
             r_idx  = (1 : rows_per_block).';
             sx_blk = repmat(sxs, N, 1);                  % N×ns column-major
             sx_blk = sx_blk(:);
@@ -546,14 +626,14 @@ classdef NMPC < handle
                           [xs_lin(:); ss_lin(:)], ...
                           [sx_blk;   -sx_blk], ...
                           rows_per_block, cols);
-            b_up = reshape(repmat(obj.Ymax(obj.soft_idx), N, 1), [], 1);
+            b_up = reshape(repmat(obj.Xmax(obj.soft_idx), N, 1), [], 1);
 
-            % Lower: -x_phys - s_phys ≤ -Ymin
+            % Lower: -x_phys - s_phys ≤ -Xmin
             A_lo = sparse([r_idx; r_idx], ...
                           [xs_lin(:); ss_lin(:)], ...
                           [-sx_blk;  -sx_blk], ...
                           rows_per_block, cols);
-            b_lo = reshape(-repmat(obj.Ymin(obj.soft_idx), N, 1), [], 1);
+            b_lo = reshape(-repmat(obj.Xmin(obj.soft_idx), N, 1), [], 1);
 
             % fmincon's sqp algorithm doesn't support sparse A; convert.
             obj.A_soft = full([A_up; A_lo]);
@@ -567,13 +647,20 @@ classdef NMPC < handle
             nu_  = obj.nu;
             mh   = obj.m;
 
-            % Dense; matrix is small (2*m*nu × cols) and SQP requires it.
-            A = zeros(2 * mh * nu_, cols);
-            b = zeros(2 * mh * nu_, 1);
+            active = isfinite(obj.dumax);
+
+            % Dense; matrix is small and SQP requires it. Inputs with
+            % dumax = Inf are unconstrained and do not get useless rows.
+            A = zeros(2 * mh * nnz(active), cols);
+            b = zeros(2 * mh * nnz(active), 1);
 
             row = 0;
             for k = 1 : mh
                 for j = 1 : nu_
+                    if ~active(j)
+                        continue
+                    end
+
                     % u is stored column-major as m × nu, so the linear
                     % index of u(k,j) inside the u block is (j-1)*m + k.
                     col_k = obj.len_x + (j - 1) * mh + k;
@@ -610,9 +697,8 @@ classdef NMPC < handle
                 'x_init',     x_init, ...
                 'u_init',     u_init, ...
                 'uk',         uk, ...
-                'y_sp',       obj.y_sp, ...
+                'x_sp',       obj.x_sp, ...
                 'u_sp',       obj.u_sp, ...
-                'x_sp_term',  obj.x_sp_terminal, ...
                 'Q',          obj.Q, ...
                 'R',          obj.R, ...
                 'P',          obj.P, ...
@@ -633,7 +719,11 @@ classdef NMPC < handle
 
     methods (Static)
         function M = expand_setpoint(sp, n_rows, n_cols)
-            % Accept 1×ncols (broadcast) or n_rows×ncols.
+            % Expand a constant or time-varying reference to one row per
+            % horizon step. This lets callers pass either a single
+            % 1×n_cols setpoint/reference, reused for every step, or an
+            % explicit n_rows×n_cols trajectory, while objective code can
+            % always index M(k, :) without branching.
             if size(sp, 1) == 1
                 M = repmat(sp, n_rows, 1);
             else
@@ -658,40 +748,5 @@ classdef NMPC < handle
             end
         end
 
-        function h = rkf45_integrator(Ts)
-            % Return a function handle @(xdot_fn, x, u) -> x_next that
-            % uses the legacy RKF45_book integrator (one fixed step of
-            % size Ts). The handle can be assigned to nmpc.integrator.
-            %
-            % Note: RKF45_book clips negative states to zero (it was
-            % written for bioreactor models). Use with care for systems
-            % where states can legitimately be negative.
-            h = @(f, x, u) NMPC.rkf45_step(f, x, u, Ts);
-        end
-    end
-
-    methods (Static, Access = private)
-        function x_next = rk4_step(f, x, u, Ts)
-            % Fixed-step RK4; f(x,u) must return a 1×nx row (or column).
-            h = Ts;
-            k1 = NMPC.frow(f, x,            u);
-            k2 = NMPC.frow(f, x + 0.5*h*k1, u);
-            k3 = NMPC.frow(f, x + 0.5*h*k2, u);
-            k4 = NMPC.frow(f, x +     h*k3, u);
-            x_next = x + (h/6) * (k1 + 2*k2 + 2*k3 + k4);
-        end
-
-        function x_next = rkf45_step(f, x, u, Ts)
-            % Single-interval RKF45 step via RKF45_book.
-            % x is a 1×nx row; RKF45_book uses column vectors internally.
-            [~, y] = RKF45_book(@(t, xc) reshape(f(xc.', u), [], 1), ...
-                                 [0 Ts], x, Ts);
-            x_next = y(end, :);
-        end
-
-        function v = frow(f, x, u)
-            % Normalise model output to a 1×nx row vector.
-            v = reshape(f(x, u), 1, []);
-        end
     end
 end
