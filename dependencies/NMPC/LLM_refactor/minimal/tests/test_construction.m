@@ -8,8 +8,28 @@ classdef test_construction < matlab.unittest.TestCase
             tc.verifyEqual(nmpc.x_scale, ones(1, nmpc.nx));
             tc.verifyEqual(nmpc.u_scale, ones(1, nmpc.nu));
             tc.verifyTrue(isempty(nmpc.P));
-            tc.verifyTrue(isempty(nmpc.S));
+            tc.verifyTrue(isempty(nmpc.R_du));
             tc.verifyEqual(nmpc.rho_L1, 0);
+        end
+
+        function legacy_R_alias_sets_R_u(tc)
+            nmpc = build_basic_nmpc(R_u=[], R=eye(2));
+            tc.verifyEqual(nmpc.R_u, eye(2));
+        end
+
+        function conflicting_R_u_and_R_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(R_u=eye(2), R=2*eye(2)), ...
+                'NMPC:R_u_alias');
+        end
+
+        function legacy_S_alias_sets_R_du(tc)
+            nmpc = build_basic_nmpc(S=eye(2));
+            tc.verifyEqual(nmpc.R_du, eye(2));
+        end
+
+        function conflicting_R_du_and_S_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(R_du=eye(2), S=2*eye(2)), ...
+                'NMPC:R_du_alias');
         end
 
         function legacy_y_sp_alias_sets_x_sp(tc)
@@ -34,7 +54,7 @@ classdef test_construction < matlab.unittest.TestCase
             % so the cross-check in init() is what raises here.
             tc.verifyError(@() NMPC(nx=2, nu=2, Ts=0.1, p=5, m=2, ...
                                     x_sp=[0 0], u_sp=[0 0], ...
-                                    Q=eye(2), R=eye(2), ...
+                                    Q=eye(2), R_u=eye(2), ...
                                     Xmin=[-1 -1], Xmax=[1 1], ...
                                     umin=[-1 -1], umax=[1 1]), ...
                 'NMPC:missing');
@@ -69,8 +89,12 @@ classdef test_construction < matlab.unittest.TestCase
             tc.verifyError(@() build_basic_nmpc(Q=eye(3)), 'NMPC:Qsize');
         end
 
-        function bad_R_size_errors(tc)
-            tc.verifyError(@() build_basic_nmpc(R=eye(3)), 'NMPC:Rsize');
+        function bad_R_u_size_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(R_u=eye(3)), 'NMPC:R_usize');
+        end
+
+        function bad_R_du_size_errors(tc)
+            tc.verifyError(@() build_basic_nmpc(R_du=eye(3)), 'NMPC:R_dusize');
         end
 
         function legacy_Y_bounds_aliases_set_X_bounds(tc)

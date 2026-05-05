@@ -9,7 +9,7 @@ A single-class, single-file NMPC. Optimizes for *reading the controller end-to-e
 - **Scaling is always present** in the decision vector. Default scale = 1 ⇒ identity, but the code path is unconditional (no `if scaled`).
 - **fmincon** as the solver.
 - **RKF45_book.m** as the fixed integrator. The minimal controller does not implement another integration scheme.
-- **State tracking + terminal cost form**: `Σ ‖x - x_sp‖_Q² + Σ ‖u - u_sp‖_R² + ‖x_N - x_sp‖_P²`. This minimal controller assumes the controlled output is the state itself (`y = x`) and does not support a separate output map `h(x)`. `P = 0` ⇒ no terminal contribution; same code path.
+- **State tracking + terminal cost form**: `Σ ‖x - x_sp‖_Q² + Σ ‖u - u_sp‖_R_u² + Σ ‖Δu‖_R_du² + ‖x_N - x_sp‖_P²`. This minimal controller assumes the controlled output is the state itself (`y = x`) and does not support a separate output map `h(x)`. `P = 0` ⇒ no terminal contribution; same code path.
 
 ## Optional features (toggled by data, handled inline with `if`)
 
@@ -21,7 +21,7 @@ A single-class, single-file NMPC. Optimizes for *reading the controller end-to-e
 | Soft state bounds    | `soft_mask` non-empty             | `[]`        |
 | L1 slack penalty     | `rho_L1` (used iff slacks active) | `0`         |
 | L2 slack penalty     | `rho_L2` (used iff slacks active) | `0`         |
-| Δu penalty / bound   | `S` / `dumax` non-empty           | `[]`        |
+| Δu penalty / bound   | `R_du` / `dumax` non-empty        | `[]`        |
 | History logging      | `log_enabled` flag                | `false`     |
 
 The class never branches on model type, solver type, or shooting type — those are fixed.
@@ -52,7 +52,7 @@ classdef NMPC < handle
 
         % ----- tracking targets & weights (required) -----
         x_sp, u_sp                % setpoints (vectors or per-step matrices)
-        Q, R                      % weights
+        Q, R_u                    % state and input-reference weights
 
         % ----- bounds (required) -----
         Xmin, Xmax
@@ -71,7 +71,7 @@ classdef NMPC < handle
         rho_L2    = 0
 
         % ----- optional input movement -----
-        S      = []
+        R_du   = []
         dumax  = []
 
         % ----- optional history log -----
@@ -116,7 +116,7 @@ end
 There are exactly four optional branches, all in obvious places:
 
 1. **`pack` / `unpack` / `build_linear`** — `if ~isempty(obj.soft_mask)` appends a slack block to `w`, adds linear rows `x − s ≤ Xmax`, `−x − s ≤ −Xmin` for the soft entries, and sets `s ≥ 0` in `wL`. Hard rows for non-soft entries stay in `wL`/`wU` as before.
-2. **`objfun`** — terminal: `if ~isempty(obj.P), J = J + (xN-x_sp)'*P*(xN-x_sp); end`. Slack penalty: `if ~isempty(s), J = J + obj.rho_L1*sum(s(:)) + s(:)'*diag(obj.rho_L2)*s(:); end`. Δu: `if ~isempty(obj.S), J = J + sum_k norm_S(du_k); end`.
+2. **`objfun`** — terminal: `if ~isempty(obj.P), J = J + (xN-x_sp)'*P*(xN-x_sp); end`. Slack penalty: `if ~isempty(s), J = J + obj.rho_L1*sum(s(:)) + s(:)'*diag(obj.rho_L2)*s(:); end`. Δu: `if ~isempty(obj.R_du), J = J + sum_k norm_R_du(du_k); end`.
 3. **Scaling** — applied *unconditionally* in `pack`/`unpack` (`x_phys = x_dec .* x_scale`). With default `x_scale = ones`, this is a no-op multiplication; no branch needed.
 4. **Logging** — `if obj.log_enabled, obj.log(end+1) = make_log_record(...); end` at the tail of `solve`.
 
@@ -148,7 +148,7 @@ Each `solve` appends one struct with these fields when `log_enabled = true`:
 ```
 t_wall, x_init, u_init,
 x_sp_k, u_sp_k,
-Q, R, P, rho_L1, rho_L2, S,
+Q, R_u, P, rho_L1, rho_L2, R_du,
 w0, w_opt, uk,
 flag, fval, iters, first_order_opt
 ```

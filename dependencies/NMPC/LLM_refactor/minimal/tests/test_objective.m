@@ -43,10 +43,10 @@ classdef test_objective < matlab.unittest.TestCase
         end
 
         %% Δu penalty
-        function du_cost_adds_when_S_set(tc)
-            S = diag([2 4]);
-            % Use R = 0 so we can isolate the Δu term.
-            nmpc = build_basic_nmpc(S=S, R=zeros(2));
+        function du_cost_adds_when_R_du_set(tc)
+            R_du = diag([2 4]);
+            % Use R_u = 0 so we can isolate the Δu term.
+            nmpc = build_basic_nmpc(R_du=R_du, R_u=zeros(2));
             x = repmat(nmpc.x_sp, nmpc.p + 1, 1);
 
             % Inputs constant and equal to u_prev ⇒ Δu = 0 throughout.
@@ -62,7 +62,7 @@ classdef test_objective < matlab.unittest.TestCase
             ws = nmpc.pack_phys(x, u, []);
             J = nmpc.objfun(ws, u_prev);
             duk = [1; 2];
-            tc.verifyEqual(J, duk.' * S * duk, 'AbsTol', 1e-10);
+            tc.verifyEqual(J, duk.' * R_du * duk, 'AbsTol', 1e-10);
         end
 
         %% Slack penalty (L1 + L2)

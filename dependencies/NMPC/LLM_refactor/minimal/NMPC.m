@@ -15,7 +15,7 @@ classdef NMPC < handle
     %   or zero ⇒ no contribution):
     %     - Terminal cost   .... P
     %     - Soft state bnds .... soft_mask, rho_L1, rho_L2
-    %     - Δu penalty ......... S
+    %     - Δu penalty ......... R_du
     %     - Δu hard bound ...... dumax
     %     - History log ........ log_enabled
     %
@@ -37,7 +37,8 @@ classdef NMPC < handle
         x_sp                    % 1×nx or p×nx state setpoint
         u_sp                    % 1×nu or m×nu input reference
         Q                       % nx×nx state weight
-        R                       % nu×nu input weight
+        R_u    = []             % nu×nu input-reference weight
+        R_du   = []             % nu×nu input-move weight
 
         %% State and input bounds (required)
         Xmin                    % 1×nx state lower bound
@@ -61,7 +62,6 @@ classdef NMPC < handle
         rho_L2    = 0           % scalar or 1×n_soft
 
         %% Optional input-movement cost / hard bound
-        S      = []             % nu×nu
         dumax  = []             % 1×nu (|Δu| ≤ dumax)
 
         %% Solver
@@ -145,12 +145,12 @@ classdef NMPC < handle
             % NMPC  Construct via name=value pairs.
             %
             %   nmpc = NMPC(xdot=@model, nx=4, nu=3, Ts=1/60, p=60, m=6, ...
-            %               x_sp=xsp, u_sp=usp, Q=Q, R=R, ...
+            %               x_sp=xsp, u_sp=usp, Q=Q, R_u=R_u, ...
             %               Xmin=Xmin, Xmax=Xmax, umin=umin, umax=umax, ...);
             %
             %   Optional: y_sp (legacy alias for x_sp), Ymin/Ymax (legacy
             %             aliases for Xmin/Xmax), P, x_scale, u_scale,
-            %             soft_mask, rho_L1, rho_L2, S, dumax,
+            %             soft_mask, rho_L1, rho_L2, R_du, dumax,
             %             optimizer_options, log_enabled.
 
             arguments
@@ -166,7 +166,7 @@ classdef NMPC < handle
                 opts.x_sp         double = []
                 opts.u_sp         double {mustBeNonempty}
                 opts.Q            double {mustBeNonempty}
-                opts.R            double {mustBeNonempty}
+                opts.R_u          double = []
 
                 % Required: bounds
                 opts.Xmin   (1,:) double = []
@@ -178,13 +178,15 @@ classdef NMPC < handle
                 opts.y_sp                double = []           % legacy alias for x_sp
                 opts.Ymin          (1,:) double = []           % legacy alias for Xmin
                 opts.Ymax          (1,:) double = []           % legacy alias for Xmax
+                opts.R                   double = []           % legacy alias for R_u
                 opts.P                   double = []
                 opts.x_scale       (1,:) double = []
                 opts.u_scale       (1,:) double = []
                 opts.soft_mask           = []           % logical or numeric mask
                 opts.rho_L1              double = 0
                 opts.rho_L2              double = 0
-                opts.S                   double = []
+                opts.R_du                double = []
+                opts.S                   double = []           % legacy alias for R_du
                 opts.dumax         (1,:) double = []
                 opts.optimizer_options          = []
                 opts.log_enabled   (1,1) logical = false
@@ -192,7 +194,7 @@ classdef NMPC < handle
 
             fn = fieldnames(opts);
             for k = 1 : numel(fn)
-                if ismember(fn{k}, {'y_sp', 'Ymin', 'Ymax'})
+                if ismember(fn{k}, {'y_sp', 'Ymin', 'Ymax', 'R', 'S'})
                     continue        % handled below as a legacy alias
                 end
                 v = opts.(fn{k});
@@ -219,6 +221,18 @@ classdef NMPC < handle
                 assert(isequal(obj.Xmax, opts.Ymax), ...
                     'NMPC:Xmax_alias', 'Xmax and legacy Ymax must match when both are supplied.');
             end
+            if isempty(obj.R_u) && ~isempty(opts.R)
+                obj.R_u = opts.R;
+            elseif ~isempty(obj.R_u) && ~isempty(opts.R)
+                assert(isequal(obj.R_u, opts.R), ...
+                    'NMPC:R_u_alias', 'R_u and legacy R must match when both are supplied.');
+            end
+            if isempty(obj.R_du) && ~isempty(opts.S)
+                obj.R_du = opts.S;
+            elseif ~isempty(obj.R_du) && ~isempty(opts.S)
+                assert(isequal(obj.R_du, opts.S), ...
+                    'NMPC:R_du_alias', 'R_du and legacy S must match when both are supplied.');
+            end
             obj.init();
         end
 
@@ -228,7 +242,7 @@ classdef NMPC < handle
 
             % Required fields. Name-value `arguments` entries are always
             % optional in MATLAB even without a default, so we re-check here.
-            req = {'xdot','nx','nu','Ts','p','m','x_sp','u_sp','Q','R', ...
+            req = {'xdot','nx','nu','Ts','p','m','x_sp','u_sp','Q','R_u', ...
                    'Xmin','Xmax','umin','umax'};
             for k = 1 : numel(req)
                 if isempty(obj.(req{k}))
@@ -251,15 +265,15 @@ classdef NMPC < handle
                 'NMPC:ubounds', 'umin/umax must have length nu.');
             assert(isequal(size(obj.Q), [obj.nx obj.nx]), ...
                 'NMPC:Qsize', 'Q must be nx×nx because this minimal class assumes y = x.');
-            assert(isequal(size(obj.R), [obj.nu obj.nu]), ...
-                'NMPC:Rsize', 'R must be nu×nu.');
+            assert(isequal(size(obj.R_u), [obj.nu obj.nu]), ...
+                'NMPC:R_usize', 'R_u must be nu×nu.');
             if ~isempty(obj.P)
                 assert(isequal(size(obj.P), [obj.nx obj.nx]), ...
                     'NMPC:Psize', 'P must be nx×nx.');
             end
-            if ~isempty(obj.S)
-                assert(isequal(size(obj.S), [obj.nu obj.nu]), ...
-                    'NMPC:Ssize', 'S must be nu×nu.');
+            if ~isempty(obj.R_du)
+                assert(isequal(size(obj.R_du), [obj.nu obj.nu]), ...
+                    'NMPC:R_dusize', 'R_du must be nu×nu.');
             end
             obj.validate_constraint_config();
             obj.update_constraint_layout();
@@ -381,15 +395,15 @@ classdef NMPC < handle
             usp = obj.expand_setpoint(obj.u_sp, obj.m, obj.nu);
             for k = 1 : obj.m
                 ek = (u(k, :) - usp(k, :)).';
-                J  = J + ek.' * obj.R * ek;
+                J  = J + ek.' * obj.R_u * ek;
             end
 
             % Optional Δu cost
-            if ~isempty(obj.S)
+            if ~isempty(obj.R_du)
                 du = diff([u_prev; u], [], 1);
                 for k = 1 : obj.m
                     duk = du(k, :).';
-                    J = J + duk.' * obj.S * duk;
+                    J = J + duk.' * obj.R_du * duk;
                 end
             end
 
@@ -700,9 +714,9 @@ classdef NMPC < handle
                 'x_sp',       obj.x_sp, ...
                 'u_sp',       obj.u_sp, ...
                 'Q',          obj.Q, ...
-                'R',          obj.R, ...
+                'R_u',        obj.R_u, ...
                 'P',          obj.P, ...
-                'S',          obj.S, ...
+                'R_du',       obj.R_du, ...
                 'rho_L1',     obj.rho_L1, ...
                 'rho_L2',     obj.rho_L2, ...
                 'w_opt',      obj.latest_wopt, ...
