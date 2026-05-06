@@ -58,8 +58,8 @@ classdef NMPC < handle
         % The linear inequalities  x_i - s_i ≤ Xmax_i  and
         % -x_i - s_i ≤ -Xmin_i  then enforce  Xmin_i - s_i ≤ x_i ≤ Xmax_i + s_i.
         soft_mask = []          % logical 1×nx, empty ⇒ no slacks
-        rho_L1    = 0           % scalar or 1×n_soft
-        rho_L2    = 0           % scalar or 1×n_soft
+        rho_L1    = 0           % scalar, 1×nx, or (p+1)*n_soft
+        rho_L2    = 0           % scalar, 1×nx, or (p+1)*n_soft
 
         %% Optional input-movement cost / hard bound
         dumax  = []             % 1×nu (|Δu| ≤ dumax)
@@ -138,6 +138,16 @@ classdef NMPC < handle
         function set.dumax(obj, value)
             obj.dumax = value;
             obj.refresh_constraint_cache(true);
+        end
+
+        function set.rho_L1(obj, value)
+            obj.rho_L1 = value;
+            obj.refresh_constraint_cache(false);
+        end
+
+        function set.rho_L2(obj, value)
+            obj.rho_L2 = value;
+            obj.refresh_constraint_cache(false);
         end
 
         %% Construction
@@ -279,6 +289,7 @@ classdef NMPC < handle
             end
             obj.validate_constraint_config();
             obj.update_constraint_layout();
+            obj.validate_slack_weights();
 
             % Build cached soft-bound linear rows (scaled space).
             obj.build_soft_rows();
@@ -421,10 +432,10 @@ classdef NMPC < handle
             if ~isempty(s)
                 [N_, ~] = size(s);
                 sv = s(:);
-                wL1 = NMPC.tile_weights(obj.rho_L1, N_, obj.n_soft);
+                wL1 = obj.tile_slack_weights(obj.rho_L1, N_);
                 J = J + sum(wL1 .* sv);
                 if any(obj.rho_L2(:) ~= 0)
-                    wL2 = NMPC.tile_weights(obj.rho_L2, N_, obj.n_soft);
+                    wL2 = obj.tile_slack_weights(obj.rho_L2, N_);
                     J = J + sv.' * (wL2 .* sv);
                 end
             end
@@ -569,6 +580,7 @@ classdef NMPC < handle
 
             obj.validate_constraint_config();
             obj.update_constraint_layout();
+            obj.validate_slack_weights();
             obj.build_soft_rows();
 
             if invalidate_warm_start
@@ -608,6 +620,41 @@ classdef NMPC < handle
             obj.len_x = (obj.p + 1) * obj.nx;
             obj.len_u =  obj.m      * obj.nu;
             obj.len_s = (obj.p + 1) * obj.n_soft;
+        end
+
+        function validate_slack_weights(obj)
+            obj.validate_one_slack_weight(obj.rho_L1, 'rho_L1');
+            obj.validate_one_slack_weight(obj.rho_L2, 'rho_L2');
+        end
+
+        function validate_one_slack_weight(obj, rho, name)
+            if isempty(rho) || isscalar(rho)
+                return
+            end
+
+            n = numel(rho);
+            ok_per_state = (n == obj.nx);
+            ok_full_slack = (obj.n_soft > 0 && n == (obj.p + 1) * obj.n_soft);
+            if ~(ok_per_state || ok_full_slack)
+                error('NMPC:rho_size', ...
+                    '%s must be scalar, length nx, or length (p+1)*n_soft.', name);
+            end
+        end
+
+        function w = tile_slack_weights(obj, rho, N)
+            if isempty(rho)
+                w = zeros(N * obj.n_soft, 1);
+            elseif isscalar(rho)
+                w = rho * ones(N * obj.n_soft, 1);
+            elseif numel(rho) == obj.nx
+                per_soft = rho(obj.soft_idx);
+                w = reshape(repmat(per_soft(:).', N, 1), [], 1);
+            elseif numel(rho) == N * obj.n_soft
+                w = rho(:);
+            else
+                error('NMPC:rho_size', ...
+                    'Slack weight must be scalar, length nx, or length (p+1)*n_soft.');
+            end
         end
 
         %% Build cached soft-bound rows (scaled, sparse)
@@ -748,21 +795,6 @@ classdef NMPC < handle
                 assert(size(sp, 1) == n_rows && size(sp, 2) == n_cols, ...
                     'Setpoint has incompatible size.');
                 M = sp;
-            end
-        end
-
-        function w = tile_weights(rho, N, ns)
-            % Expand a slack-penalty weight to a length-(N*ns) column vector.
-            % Accepts: scalar, 1×ns (per soft state), or already (N*ns)×1.
-            if isscalar(rho)
-                w = rho * ones(N * ns, 1);
-            elseif numel(rho) == ns
-                w = reshape(repmat(rho(:).', N, 1), [], 1);
-            elseif numel(rho) == N * ns
-                w = rho(:);
-            else
-                error('NMPC:rho_size', ...
-                      'Slack weight must be scalar, 1×n_soft, or (p+1)*n_soft.');
             end
         end
 

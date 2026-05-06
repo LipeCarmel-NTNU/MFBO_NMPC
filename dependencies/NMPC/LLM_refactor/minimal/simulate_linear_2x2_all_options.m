@@ -12,21 +12,22 @@ if isempty(which('fmincon'))
         'fmincon is required for this NMPC example.')
 end
 
-%% Stable 2x2 continuous-time plant: xdot = A*x + B*u
-A = [-0.8  0.0 0;
-      0.0 -1.1 0
-      0 0 0];
-B = [1.0 0.2;
-     0.1 0.8
-     0 1];
-xdot = @(x, u) (A * x(:) + B * u(:));
+%% Stable 3-state, 2-input continuous-time plant: xdot = A*x + B*u
+A = [-0.8  0.0  0.0;
+      0.0 -1.1  0.0;
+      0.0  0.0 -10];
+B = [2 0.2;
+     0.1 2;
+     0.3 0.4];
+
+xdot = @(x, u) (A * x(:) + B * u(:)).';
 
 Ts = 0.1;
-p  = 6;
+p  = 12;
 m  = 3;
 
-x_target = [1.0 0.25 0];
-u_target = steady_state_input(A, B, x_target);
+u_target = [0.6 0.2];
+x_target = [0.5 0.5 0];
 
 opts = optimoptions('fmincon', ...
     'Display', 'off', ...
@@ -44,18 +45,17 @@ nmpc = NMPC( ...
     Ts = Ts, ...
     p = p, ...
     m = m, ...
-    x_sp = [0 0], ...
+    x_sp = [0 0 0], ...
     u_sp = [0 0], ...
     Q = diag([25 20 1]), ...
-    R_u = diag([0.05 0.05])/10, ...
-    R_du = diag([1 1])/10, ...
+    R_du = diag([1 1])/1, ...
     dumax = [0.25 0.25], ...
     Xmin = [ 0.0 0.0 -inf], ...
     Xmax = [ 0.8 0.4 inf], ...
     umin = [-2 -2], ...
     umax = [ 2  2], ...
     soft_mask = [true true false], ...
-    rho_L2 = [1 1]*1e5, ...
+    rho_L2 = [1 1 0]*1e5, ...
     optimizer_options = opts, ...
     log_enabled = true);
 
@@ -69,7 +69,7 @@ du = zeros(n_steps,    nmpc.nu);
 slack_max = zeros(n_steps, nmpc.n_soft);
 flag = zeros(n_steps, 1);
 
-x(1, :) = [1 0];
+x(1, :) = [0 0 0];
 u_prev = [0 0];
 
 for k = 1:n_steps
@@ -94,17 +94,17 @@ end
 
 t = (0:n_steps).' * Ts;
 tu = (0:n_steps - 1).' * Ts;
-x_ref = zeros(n_steps + 1, 2);
+x_ref = zeros(n_steps + 1, nmpc.nx);
 x_ref(step_at + 1:end, :) = repmat(x_target, n_steps - step_at + 1, 1);
 
-fprintf('Final state:      [% .4f, % .4f]\n', x(end, 1), x(end, 2));
-fprintf('Target state:     [% .4f, % .4f]\n', x_target(1), x_target(2));
+fprintf('Final state:      [% .4f, % .4f, % .4f]\n', x(end, 1), x(end, 2), x(end, 3));
+fprintf('Target state:     [% .4f, % .4f, % .4f]\n', x_target(1), x_target(2), x_target(3));
 fprintf('Max abs(du):      [% .4f, % .4f]\n', max(abs(du(:, 1))), max(abs(du(:, 2))));
 fprintf('Max pred. slack:  [% .4f, % .4f]\n', max(slack_max(:, 1)), max(slack_max(:, 2)));
 fprintf('Solver flags: min=%g, max=%g\n', min(flag), max(flag));
 fprintf('Logged samples:   %d\n', numel(nmpc.log));
 
-figure('Name', 'NMPC 2x2 all options')
+figure('Name', 'NMPC all-options simulation')
 tiledlayout(3, 1)
 
 nexttile
@@ -113,7 +113,7 @@ hold on
 plot(t, x_ref, '--', 'LineWidth', 1.0)
 grid on
 ylabel('x')
-legend('x_1', 'x_2', 'x_{sp,1}', 'x_{sp,2}', 'Location', 'best')
+legend('x_1', 'x_2', 'x_3', 'x_{sp,1}', 'x_{sp,2}', 'x_{sp,3}', 'Location', 'best')
 
 nexttile
 stairs(tu, u, 'LineWidth', 1.2)
@@ -130,6 +130,6 @@ ylabel('|du|')
 xlabel('time')
 legend('|du_1|', '|du_2|', 'dumax', 'Location', 'best')
 
-function u_ss = steady_state_input(A, B, x_ss)
-    u_ss = (B \ (-A * x_ss(:))).';
+function x_ss = steady_state_state(A, B, u_ss)
+    x_ss = (- pinv(A) * (B * u_ss(:))).';
 end
