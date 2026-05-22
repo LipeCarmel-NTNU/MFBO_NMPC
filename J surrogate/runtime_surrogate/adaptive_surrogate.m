@@ -1,4 +1,4 @@
-%% Runtime adaptive Chebyshev surrogate fitting with L1 + K-fold CV
+%% Runtime adaptive Chebyshev surrogate fitting with ridge regression
 %
 % Pipeline
 %   1. Load all out_*.mat simulation pairs (each contains case 1 and 2).
@@ -6,38 +6,42 @@
 %      linearly interpolate onto the fixed grid z = 0:0.05:1, restricted to
 %      the z range actually covered by the simulation.
 %   3. Initialise the Chebyshev fit on the first 20 simulation pairs, warm
-%      started from c = [0, 1, 0, 0, 0] (T0 = 0, T1 = 1, T_{i>1} = 0).
+%      started from c = [0, 1, 0, 0, 0] (c0 derived, c1 = 1, c2..c4 = 0).
 %   4. Refit after every new pair is added, warm starting from the previous
 %      coefficients.
 %   5. Every refit selects lambda via K = 10 fold CV, with folds grouped by
 %      simulation pair so the held-out pairs are fully held out.
 %   6. Diagnostics tracked per step:
 %        lambda*       chosen regularisation strength
-%        coefficients  c0..c4 (c0 fixed at 0)
+%        coefficients  c0..c4 (c0 derived from f(0) = 0 constraint)
 %        seen R^2      coefficient of determination on training pool
 %        seen loss     residual SSE on training pool
 %        unseen R^2    coefficient of determination on remaining pairs
 %        unseen loss   residual SSE on remaining pairs
 %
 % Model
-%   y(z) = sum_{i=0..4} c_i * T_i(2 z - 1), c0 = 0.
+%   y(z) = sum_{i=0..4} c_i * T_i(2z - 1),  x = 2z - 1 in [-1, 1].
+%   T_k built via recurrence: T_0 = 1, T_1 = x, T_{k+1} = 2x*T_k - T_{k-1}.
 %
-% L1 fit
-%   c_free = argmin_{c1..c4}  || y - X*c ||^2 + lambda * sum |c_i|
-%   Implemented as a QP via the (u, v) split c_i = u_i - v_i with
-%   u_i, v_i >= 0, then sum |c_i| = 1' * (u + v). fmincon interior-point
-%   is used as requested, with an analytic gradient for speed.
+% Endpoint constraints (passed as nonlinear equalities via fmincon nonlcon):
+%   f(z=0) = 0  ->  ceq(1) = X(z=0) * c     = 0
+%   f(z=1) = 1  ->  ceq(2) = X(z=1) * c - 1 = 0
+%
+% Ridge fit
+%   c* = argmin_c  || y - X * c ||^2 + lambda * || c ||^2
+%        subject to  Aeq * c = beq  (the two endpoint constraints above)
+%   Solved as a general NLP with fmincon (sqp), analytic gradient.
 
 clear; clc; close all;
 
 %% Configuration
 fullHorizonHours   = 10.0;                  % T in z = t / T
 zStep              = 0.05;                  % uniform z resampling step
-nInit              = 20;                    % initial number of pairs
-K_cv               = 10;                    % K-fold CV folds
-chebOrder          = 4;                     % 4th order Chebyshev
-lambdaGrid         = logspace(-6, 1, 20);   % CV grid for lambda
-c0WarmStart        = [0; 1; 0; 0; 0];       % T0=0, T1=1, T_{i>1}=0
+nInit              = 5;                    % initial number of pairs
+K_cv               = 5;                    % K-fold CV folds
+chebOrder          = 20;                    % nth order Chebyshev
+lambdaGrid         = logspace(-3, 3, 7);    % CV grid for lambda
+c0WarmStart        = [0.5; 0.5; zeros(chebOrder - 1, 1)];  % satisfies f(0)=0 and f(1)=1 for any order
 rngSeed            = 1;                     % reproducibility of CV folds
 
 %% Paths
@@ -144,7 +148,7 @@ for step = 1:nSteps
     end
     c_prev_E = c_E;
 
-    if mod(step, 50) == 0 || step == 1 || step == nSteps
+    if mod(step, 1) == 0 || step == 1 || step == nSteps
         fprintf("Step %3d/%d | seen=%3d unseen=%3d | lambda_dU=%.2e lambda_E=%.2e | R2u_dU=%.3f R2u_E=%.3f\n", ...
             step, nSteps, nSeen, nPairs - nSeen, ...
             lam_dU, lam_E, history.unseenR2_dU(step), history.unseenR2_E(step));
@@ -157,6 +161,7 @@ plot_progression(history, "ratioSSdU", "$J_{TV}$", colSSdU, fontSize, ...
     "Adaptive Chebyshev surrogate -- SSdU");
 plot_progression(history, "ratioSSE",  "$J_{track}$", colSSE,  fontSize, ...
     "Adaptive Chebyshev surrogate -- SSE");
+plot_r2_comparison(history, colSSdU, colSSE, fontSize);
 %%
 plot_final_fit(zGridFull, Xgrid, pairs, history, "ratioSSdU", "$J_{TV}$", ...
     colSSdU, colAccent, fontSize, ...
@@ -319,15 +324,19 @@ end
 
 function X = cheb_features(z, order)
 %CHEB_FEATURES Build the Chebyshev design matrix on the [0,1] -> [-1,1] map.
+%
+% Evaluates T_0(x) .. T_order(x) with x = 2*z - 1.
+% Columns built via the three-term recurrence:
+%   T_0 = 1,  T_1 = x,  T_{k+1} = 2*x*T_k - T_{k-1}.
     z = z(:);
     x = 2 * z - 1;
     X = zeros(numel(z), order + 1);
-    X(:, 1) = 1;                 % T0
-    if order >= 1; X(:, 2) = x;                       end
-    if order >= 2; X(:, 3) = 2*x.^2 - 1;              end
-    if order >= 3; X(:, 4) = 4*x.^3 - 3*x;            end
-    if order >= 4; X(:, 5) = 8*x.^4 - 8*x.^2 + 1;     end
-    if order >= 5; X(:, 6) = 16*x.^5 - 20*x.^3 + 5*x; end
+    X(:, 1) = 1;
+    if order < 1; return; end
+    X(:, 2) = x;
+    for k = 2:order
+        X(:, k+1) = 2 * x .* X(:, k) - X(:, k-1);
+    end
 end
 
 function [X, y] = stack_pairs(pairs, yField, chebOrder)
@@ -344,63 +353,86 @@ function [X, y] = stack_pairs(pairs, yField, chebOrder)
     X = cheb_features(z, chebOrder);
 end
 
-function c = fit_l1_cheb(X, y, lambda, cWarm, chebOrder)
-%FIT_L1_CHEB Solve the L1-regularised Cheb fit with c0 = 0.
+function c = fit_ridge_cheb(X, y, lambda, cWarm, chebOrder)
+%FIT_RIDGE_CHEB Ridge regression Chebyshev fit with two endpoint constraints.
 %
-% Variables: theta = [u; v] with u, v in R^chebOrder, u, v >= 0.
-% Free coefficients c_free = u - v. Full coefficient vector is [0; c_free].
-% Objective: || y - X_free * c_free ||^2 + lambda * 1' * (u + v)
-%          = theta' * (A'A) * theta - 2 y' A theta + y'y + lambda * 1' theta
-% where A = [X_free, -X_free].
-    nFree = chebOrder;
-    Xfree = X(:, 2:end);
+% Constraints enforced via fmincon nonlcon (nonlinear equalities):
+%   f(z=0) = 0  ->  ceq(1) = X(z=0) * c       = 0
+%   f(z=1) = 1  ->  ceq(2) = X(z=1) * c - 1   = 0
+%
+% Objective (general NLP, solved with fmincon sqp):
+%   min_c  || y - X * c ||^2 + lambda * || c ||^2
+%   Analytic gradient supplied.
 
-    A = [Xfree, -Xfree];
-    H = 2 * (A' * A);                      % symmetric PSD
-    f = -2 * (A' * y) + lambda * ones(2*nFree, 1);
-
-    u0 = max(cWarm(2:end), 0);
-    v0 = max(-cWarm(2:end), 0);
-    theta0 = [u0; v0];
-
-    lb = zeros(2*nFree, 1);
+    X0 = cheb_features(0, chebOrder);   % 1 x (order+1), evaluated at z = 0
+    X1 = cheb_features(1, chebOrder);   % 1 x (order+1), evaluated at z = 1
 
     opts = optimoptions('fmincon', ...
         'Algorithm', 'sqp', ...
         'Display', 'off', ...
         'SpecifyObjectiveGradient', true, ...
-        'OptimalityTolerance', 1e-6, ...
-        'StepTolerance', 1e-6, ...
+        'OptimalityTolerance', 1e-8, ...
+        'StepTolerance', 1e-8, ...
         'MaxIterations', 400, ...
-        'MaxFunctionEvaluations', 4000, ...
-        'UseParallel', true);
+        'MaxFunctionEvaluations', 4000);
 
-    theta = fmincon(@(th) qp_obj(th, H, f), theta0, ...
-        [], [], [], [], lb, [], [], opts);
-
-    u = theta(1:nFree);
-    v = theta(nFree + 1:end);
-    c = [0; u - v];
+    c = fmincon(@(c) ridge_obj(c, X, y, lambda), cWarm, ...
+        [], [], [], [], [], [], @(c) endpoint_con(c, X0, X1), opts);
 end
 
-function [val, grad] = qp_obj(theta, H, f)
-%QP_OBJ Quadratic objective in theta = [u; v] (constant y'y dropped).
-    Htheta = H * theta;
-    val = 0.5 * theta' * Htheta + f' * theta;
+function [cineq, ceq] = endpoint_con(c, X0, X1)
+%ENDPOINT_CON Nonlinear equality constraints: f(z=0) = 0, f(z=1) = 1.
+    c     = c(:);
+    cineq = [];
+    ceq   = [X0 * c; X1 * c - 1];
+end
+
+function [val, grad] = ridge_obj(c, X, y, lambda)
+%RIDGE_OBJ L2 loss + L2 regularisation with analytic gradient.
+    c = c(:);
+    r = y - X * c;
+    val = r' * r + lambda * (c' * c);
     if nargout > 1
-        grad = Htheta + f;
+        grad = -2 * (X' * r) + 2 * lambda * c;
     end
 end
 
 function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
     pairsSeen, yField, cWarm, chebOrder, lambdaGrid, K)
 %FIT_WITH_CV Choose lambda by K-fold CV (grouped by simulation pair),
-% then refit on the full seen set.
-    nP = numel(pairsSeen);
+% then refit on the full seen set with the chosen lambda.
+%
+% Folds are assigned by simulation pair so every point from a held-out
+% pair is excluded together. Within each fold the lambda grid is swept
+% from largest to smallest so each fit warm-starts from the previous
+% (more regularised) solution along the regularisation path.
+%
+% CV is skipped when:
+%   numel(lambdaGrid) == 1  ->  that lambda is used directly.
+%   K < 2                   ->  lambda = 0 is used.
+    nP   = numel(pairsSeen);
+    nLam = numel(lambdaGrid);
+
+    [Xall, yall] = stack_pairs(pairsSeen, yField, chebOrder);
+
+    if nLam == 1
+        lambdaBest      = lambdaGrid(1);
+        cvLossPerLambda = NaN;
+        c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
+        return
+    end
+
+    if K < 2
+        lambdaBest      = 0;
+        cvLossPerLambda = NaN(nLam, 1);
+        c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
+        return
+    end
+
     Keff = min(K, nP);
 
-    % Shuffle pair indices, then split into Keff folds.
-    perm = randperm(nP);
+    % Shuffle pair indices and assign fold labels.
+    perm     = randperm(nP);
     foldSize = floor(nP / Keff);
     leftover = nP - foldSize * Keff;
     foldAssign = zeros(nP, 1);
@@ -412,47 +444,40 @@ function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
         cursor = cursor + nThis;
     end
 
-    nLam = numel(lambdaGrid);
+    % Sweep lambdas largest-to-smallest (regularisation path ordering).
+    [lamSorted, sortIdx] = sort(lambdaGrid, 'descend');
+
     cvLossPerLambda = zeros(nLam, 1);
 
-    % Track a per-lambda warm start to make the lambda sweep cheaper.
-    cWarmPerLambda = repmat(cWarm, 1, nLam);
+    for f = 1:Keff
+        valIdx = find(foldAssign == f);
+        trnIdx = find(foldAssign ~= f);
+        if isempty(valIdx) || isempty(trnIdx); continue; end
 
-    % for f = 1:Keff
-    %     valIdx = find(foldAssign == f);
-    %     trnIdx = find(foldAssign ~= f);
-    %     if isempty(valIdx) || isempty(trnIdx); continue; end
-    % 
-    %     [Xtr, ytr] = stack_pairs(pairsSeen(trnIdx), yField, chebOrder);
-    %     [Xva, yva] = stack_pairs(pairsSeen(valIdx), yField, chebOrder);
-    %     if isempty(ytr) || isempty(yva); continue; end
-    % 
-    %     % Sweep lambdas from largest to smallest, warm starting per lambda.
-    %     [lamSorted, sortIdx] = sort(lambdaGrid, 'descend');
-    %     cFold = cWarm;
-    %     cByLam = zeros(numel(cWarm), nLam);
-    %     for li = 1:nLam
-    %         cFold = fit_l1_cheb(Xtr, ytr, lamSorted(li), cFold, chebOrder);
-    %         cByLam(:, sortIdx(li)) = cFold;
-    %     end
-    % 
-    %     for li = 1:nLam
-    %         c = cByLam(:, li);
-    %         res = yva - Xva * c;
-    %         cvLossPerLambda(li) = cvLossPerLambda(li) + sum(res.^2);
-    %         cWarmPerLambda(:, li) = c;  % cheap reuse for final fit
-    %     end
-    % end
-    % 
-    % [~, bestIdx] = min(cvLossPerLambda);
-    % lambdaBest = lambdaGrid(bestIdx);
+        [Xtr, ytr] = stack_pairs(pairsSeen(trnIdx), yField, chebOrder);
+        [Xva, yva] = stack_pairs(pairsSeen(valIdx), yField, chebOrder);
+        if isempty(ytr) || isempty(yva); continue; end
+
+        % Fit along the lambda path for this fold.
+        cPath  = cWarm;
+        cByLam = zeros(numel(cWarm), nLam);
+        for li = 1:nLam
+            cPath = fit_ridge_cheb(Xtr, ytr, lamSorted(li), cPath, chebOrder);
+            cByLam(:, sortIdx(li)) = cPath;
+        end
+
+        % Accumulate held-out squared error for each lambda.
+        for li = 1:nLam
+            res = yva - Xva * cByLam(:, li);
+            cvLossPerLambda(li) = cvLossPerLambda(li) + sum(res.^2);
+        end
+    end
+
+    [~, bestIdx] = min(cvLossPerLambda);
+    lambdaBest = lambdaGrid(bestIdx);
 
     % Final fit on the full seen pool with the chosen lambda.
-    [Xall, yall] = stack_pairs(pairsSeen, yField, chebOrder);
-    % cInit = cWarmPerLambda(:, bestIdx);
-    lambdaBest = 0;
-    cInit = cWarm;
-    c = fit_l1_cheb(Xall, yall, lambdaBest, cInit, chebOrder);
+    c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
 end
 
 function [r2, lossSSE] = eval_on_pairs(pairsEval, yField, c)
@@ -544,6 +569,28 @@ function plot_progression(H, yField, yLabelTex, baseColor, fontSize, figTitle)
     if exist('set_fig_size', 'file') == 2
         set_fig_size(900, 850);
     end
+end
+
+function plot_r2_comparison(H, colSSdU, colSSE, fontSize)
+%PLOT_R2_COMPARISON Seen and unseen R^2 for both surrogates on one figure.
+    nSeen = H.nSeen;
+
+    figure('Name', 'R^2 comparison -- SSdU vs SSE'); hold on
+    plot(nSeen, H.seenR2_dU,   '-', 'LineWidth', 1.6, 'Color', [colSSdU, 0.45]);
+    plot(nSeen, H.unseenR2_dU, '-', 'LineWidth', 2.2, 'Color', colSSdU);
+    plot(nSeen, H.seenR2_E,    '-', 'LineWidth', 1.6, 'Color', [colSSE,  0.45]);
+    plot(nSeen, H.unseenR2_E,  '-', 'LineWidth', 2.2, 'Color', colSSE);
+    yline(0, ':', 'Color', [0.4 0.4 0.4]);
+    legend({"$J_{TV}$ seen", "$J_{TV}$ unseen", ...
+            "$J_{track}$ seen", "$J_{track}$ unseen"}, ...
+        "Location", "best");
+    xlabel("Number of seen simulation pairs");
+    ylabel("$R^2$");
+    title("Surrogate generalisation: $J_{TV}$ vs $J_{track}$", ...
+        "Interpreter", "latex");
+    grid on; box on
+    if exist('set_font_size', 'file') == 2; set_font_size(fontSize); end
+    if exist('set_fig_size', 'file') == 2;  set_fig_size(900, 400);  end
 end
 
 function plot_final_fit(zGrid, Xgrid, pairs, H, yField, yLabelTex, ...
