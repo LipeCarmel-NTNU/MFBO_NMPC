@@ -80,8 +80,13 @@ Q = \mathrm{diag}(10^{q_1}, 10^{q_2}, 10^{q_3}), \quad
 R_u = \mathrm{diag}(10^{r_{u,1}}, 10^{r_{u,2}}, 10^{r_{u,3}}), \quad
 R_{\Delta u} = \mathrm{diag}(10^{r_{\Delta u,1}}, 10^{r_{\Delta u,2}}, 10^{r_{\Delta u,3}}).
 \end{equation}
-In the BO runs driven by \texttt{main.py}, free log-weight exponents are bounded in $[-3,3]$, so the corresponding diagonal entries range from $10^{-3}$ to $10^3$. The first state-weight exponent is fixed at $q_1=0$ in the Python optimization layer, hence $Q_{11}=1$ for the reported BO search even though the MATLAB evaluator itself simply decodes whatever exponent is supplied. This distinction matters because some standalone MATLAB DOE/debug and benchmark configurations use different fixed state weights, for example $Q=\mathrm{diag}(10,1,1)$. The two BO cases also differ in the input penalty: Case~1 pins $r_u=-1000$ so $R_u$ is effectively zero, while Case~2 treats $r_u$ as a free vector in $[-3,3]^3$.
 Horizons are encoded as $\Nc = \theta_m + 1$ and $\Np = \theta_p + \Nc$ with integer variables $\theta_p \in [0, 15]$, $\theta_m \in [0, 7]$.
+
+Free log-weight exponents are bounded in $[-3,3]$, so the corresponding diagonal entries range from $10^{-3}$ to $10^3$. 
+
+\paragraph{Case 1} All variables are free.
+\paragraph{Case 2} The first state-weight exponent is fixed at $q_1=0$, hence $Q_{11}=1$. $r_u=-1000$ so $R_u$ underflows to zero.
+
 
 \paragraph{Terminal cost from an offline LQR design.}
 The terminal cost matrix $P$ is built offline. Linearizing the plant about its steady-state target yields $(A, B)$, which are discretized in incremental form to $(A_i, B_i)$ at sample time $\Ts = 1/60$~h. A discrete LQR gain $K$ is computed via \texttt{dlqr} using design weights $(Q_{\mathrm{lqr}}, R_{u,\mathrm{lqr}}, R_{\Delta u,\mathrm{lqr}})$ whose log-exponents are obtained by an offline outer optimization (\texttt{TerminalCost/LQR\_tuning.m}) that minimizes the closed-loop integrated squared error plus regularization terms over two representative initial conditions, $x_{0,\mathrm{lqr}}^{(1)} = [1.1, 5, 1]^\top$ (off-volume, low biomass, low substrate; tests start-up tracking) and $x_{0,\mathrm{lqr}}^{(2)} = [1, X_{sp,\mathrm{lqr}}+2, 0]^\top$ with $X_{sp,\mathrm{lqr}} = 15$ (overshoot configuration that tests regulatory recovery from above the biomass setpoint). The resulting LQR tuning vector $\eta_{\mathrm{lqr}} = [-1.998, 0.0003, 1.485, 0.527, -0.974, 0.043, 0.107, -0.118]$ is hard-coded as the design weights used for terminal-cost construction.
