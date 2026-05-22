@@ -14,7 +14,7 @@ Ts = 1/60;
 Tf = 40;
 
 % Monte Carlo settings
-N_lin = 100;      % number of random linearisation points (random steady states)
+N_lin = 10;      % number of random linearisation points (random steady states)
 N_ic  = 20;       % number of random initial conditions per linearisation
 dev_frac = 0.50;  % up to 50% deviation from steady-state (non-negative)
 
@@ -25,6 +25,9 @@ X_rng = [2, 20];
 % Storage
 SSE       = nan(N_lin, N_ic);
 E1_gt_End = false(N_lin, N_ic);
+E0        = nan(N_lin, N_ic);
+Eend      = nan(N_lin, N_ic);
+Eratio    = nan(N_lin, N_ic);
 
 % Store some details for the worst case
 worst.SSE = -inf;
@@ -100,6 +103,9 @@ for i = 1:N_lin
         e  = Yode - xss(:).';
         e2 = sum(e.^2, 2);
         SSE(i,j) = sum(e2);
+        E0(i,j) = e2(1);
+        Eend(i,j) = e2(end);
+        Eratio(i,j) = e2(end) / max(e2(1), eps);
         E1_gt_End(i,j) = (e2(1) > e2(end));
 
         if SSE(i,j) > worst.SSE
@@ -125,7 +131,7 @@ for i = 1:N_lin
                     plot(worst.T, worst.Y(:,s), 'LineWidth', 1.8); hold on
                     yline(worst.xss(s), '--', 'LineWidth', 1.2);
                     grid on; box on
-                    ylabel(sprintf('x_%d', s))
+                    ylabel(sprintf('x_{%d}', s), 'Interpreter','tex')
                     if s == 1
                         title(sprintf('Worst case: lin %d, ic %d, SSE = %.4g', worst.i_lin, worst.i_ic, worst.SSE))
                         legend({'state','x_{ss}'}, 'Location','best')
@@ -151,6 +157,54 @@ SSE_vec = SSE(valid);
 fprintf('SSE: mean = %.4g, median = %.4g, min = %.4g, max = %.4g\n', ...
     mean(SSE_vec), median(SSE_vec), min(SSE_vec), max(SSE_vec));
 
+E0_vec = E0(valid);
+Eend_vec = Eend(valid);
+Eratio_vec = Eratio(valid);
+fprintf('Initial e^2: mean = %.4g, median = %.4g, min = %.4g, max = %.4g\n', ...
+    mean(E0_vec), median(E0_vec), min(E0_vec), max(E0_vec));
+fprintf('Final e^2: mean = %.4g, median = %.4g, min = %.4g, max = %.4g\n', ...
+    mean(Eend_vec), median(Eend_vec), min(Eend_vec), max(Eend_vec));
+fprintf('Final/initial e^2 ratio: mean = %.4g, median = %.4g, p95 = %.4g, max = %.4g\n', ...
+    mean(Eratio_vec), median(Eratio_vec), pctile(Eratio_vec, 95), max(Eratio_vec));
+fprintf('Final e^2 reduction: median = %.2f%%, p95 ratio reduction = %.2f%%\n', ...
+    100*(1 - median(Eratio_vec)), 100*(1 - pctile(Eratio_vec, 95)));
+
+figure(3); clf
+x_plot = max(E0_vec, eps);
+y_plot = max(Eend_vec, eps);
+loglog(x_plot, y_plot, '.', 'MarkerSize', 10); hold on
+lims = [min([x_plot; y_plot]), max([x_plot; y_plot])];
+if lims(1) == lims(2)
+    lims = lims .* [0.5 2];
+end
+loglog(lims, lims, 'k--', 'LineWidth', 1.2)
+grid on; box on
+xlabel('Initial nonlinear error e^2(0)')
+ylabel(sprintf('Final nonlinear error e^2(%.1f h)', Tf))
+title('Initial vs final nonlinear closed-loop error')
+legend({'simulation','e^2(0) = e^2(T)'}, 'Location','best')
+xlim(lims)
+ylim(lims)
+axis square
+%%
+figure(4); clf
+x_plot = max(E0_vec, eps);
+y_plot = max(Eend_vec, eps);
+plot(x_plot, y_plot, '.', 'MarkerSize', 10); hold on
+lims = [min([x_plot; y_plot]), max([x_plot; y_plot])];
+if lims(1) == lims(2)
+    lims = lims .* [0.5 2];
+end
+%plot(lims, lims, 'k--', 'LineWidth', 1.2)
+grid on; box on
+xlabel('Initial nonlinear error e^2(0)')
+ylabel(sprintf('Final nonlinear error e^2(%.1f h)', Tf))
+title('Initial vs final nonlinear closed-loop error')
+legend({'simulation','e^2(0) = e^2(T)'}, 'Location','best')
+xlim(lims)
+%ylim(lims)
+axis square
+
 % Count of runs where e2(1) > e2(end)
 dec_mask = not(E1_gt_End & valid);
 nonzero = nnz(dec_mask);
@@ -171,4 +225,22 @@ function x0 = sample_ic_nonneg(xss, frac)
 
     x0 = lb + (ub - lb).*rand(size(xss));
     x0 = max(x0, 0);
+end
+
+function p = pctile(x, q)
+    x = sort(x(:));
+    x = x(isfinite(x));
+    if isempty(x)
+        p = NaN;
+        return
+    end
+
+    idx = 1 + (numel(x) - 1) * q/100;
+    lo = floor(idx);
+    hi = ceil(idx);
+    if lo == hi
+        p = x(lo);
+    else
+        p = x(lo) + (idx - lo) * (x(hi) - x(lo));
+    end
 end
