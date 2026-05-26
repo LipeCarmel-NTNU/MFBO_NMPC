@@ -39,8 +39,8 @@ fullHorizonHours   = 10.0;                  % T in z = t / T
 zStep              = 0.05;                  % uniform z resampling step
 nInit              = 5;                    % initial number of pairs
 K_cv               = 5;                    % K-fold CV folds
-chebOrder          = 3;                    % nth order Chebyshev
-lambdaGrid         = logspace(-3, 3, 7);    % CV grid for lambda
+chebOrder          = 4;                    % nth order Chebyshev
+lambdaGrid         = logspace(-3, 0, 4);    % CV grid for lambda
 c0WarmStart        = [0.5; 0.5; zeros(chebOrder - 1, 1)];  % satisfies f(0)=0 and f(1)=1 for any order
 rngSeed            = 1;                     % reproducibility of CV folds
 
@@ -84,8 +84,8 @@ end
 fprintf("Loaded %d simulation pairs (initial %d, then %d adaptive updates).\n", ...
     nPairs, nInit, nPairs - nInit);
 
-%% Model definition — swap this one line to change the surrogate structure
-model = @(z, c) cheb_features(z, chebOrder) * c;
+%% Pre-compute Cheb features for the full z grid (for plotting)
+Xgrid = cheb_features(zGridFull, chebOrder);
 
 %% Progressive fitting
 % Step k = 1 uses pairs 1..nInit (initial fit).
@@ -108,7 +108,7 @@ for step = 1:nSteps
 
     % SSdU
     [c_dU, lam_dU, cv_dU] = fit_with_cv( ...
-        pairs(seenIdx), 'ratioSSdU', model, c_prev_dU, lambdaGrid, K_cv);
+        pairs(seenIdx), 'ratioSSdU', c_prev_dU, chebOrder, lambdaGrid, K_cv);
 
     history.step(step)        = step;
     history.nSeen(step)       = nSeen;
@@ -117,11 +117,11 @@ for step = 1:nSteps
     history.cvLoss_dU(:, step) = cv_dU(:);
 
     [history.seenR2_dU(step), history.seenLoss_dU(step)] = eval_on_pairs( ...
-        pairs(seenIdx), 'ratioSSdU', model, c_dU);
+        pairs(seenIdx), 'ratioSSdU', c_dU);
 
     if ~isempty(unseenIdx)
         [history.unseenR2_dU(step), history.unseenLoss_dU(step)] = ...
-            eval_on_pairs(pairs(unseenIdx), 'ratioSSdU', model, c_dU);
+            eval_on_pairs(pairs(unseenIdx), 'ratioSSdU', c_dU);
     else
         history.unseenR2_dU(step)   = NaN;
         history.unseenLoss_dU(step) = NaN;
@@ -130,18 +130,18 @@ for step = 1:nSteps
 
     % SSE
     [c_E, lam_E, cv_E] = fit_with_cv( ...
-        pairs(seenIdx), 'ratioSSE', model, c_prev_E, lambdaGrid, K_cv);
+        pairs(seenIdx), 'ratioSSE', c_prev_E, chebOrder, lambdaGrid, K_cv);
 
     history.lambda_E(step)   = lam_E;
     history.coef_E(:, step)  = c_E;
     history.cvLoss_E(:, step) = cv_E(:);
 
     [history.seenR2_E(step), history.seenLoss_E(step)] = eval_on_pairs( ...
-        pairs(seenIdx), 'ratioSSE', model, c_E);
+        pairs(seenIdx), 'ratioSSE', c_E);
 
     if ~isempty(unseenIdx)
         [history.unseenR2_E(step), history.unseenLoss_E(step)] = ...
-            eval_on_pairs(pairs(unseenIdx), 'ratioSSE', model, c_E);
+            eval_on_pairs(pairs(unseenIdx), 'ratioSSE', c_E);
     else
         history.unseenR2_E(step)   = NaN;
         history.unseenLoss_E(step) = NaN;
@@ -163,10 +163,10 @@ plot_progression(history, "ratioSSE",  "$J_{track}$", colSSE,  fontSize, ...
     "Adaptive Chebyshev surrogate -- SSE");
 plot_r2_comparison(history, colSSdU, colSSE, fontSize);
 %%
-plot_final_fit(zGridFull, model, pairs, history, "ratioSSdU", "$J_{TV}$", ...
+plot_final_fit(zGridFull, Xgrid, pairs, history, "ratioSSdU", "$J_{TV}$", ...
     colSSdU, colAccent, fontSize, ...
     "Final adaptive Chebyshev fit -- SSdU");
-plot_final_fit(zGridFull, model, pairs, history, "ratioSSE",  "$J_{track}$", ...
+plot_final_fit(zGridFull, Xgrid, pairs, history, "ratioSSE",  "$J_{track}$", ...
     colSSE,  colAccent, fontSize, ...
     "Final adaptive Chebyshev fit -- SSE");
 
@@ -339,9 +339,9 @@ function X = cheb_features(z, order)
     end
 end
 
-function [z, y] = stack_pairs(pairs, yField)
-%STACK_PAIRS Concatenate (z, y) across the given simulation pairs.
-    if isempty(pairs); z = []; y = []; return; end
+function [X, y] = stack_pairs(pairs, yField, chebOrder)
+%STACK_PAIRS Concatenate (X, y) across the given simulation pairs.
+    if isempty(pairs); X = []; y = []; return; end
     zCells = cell(numel(pairs), 1);
     yCells = cell(numel(pairs), 1);
     for i = 1:numel(pairs)
@@ -350,48 +350,55 @@ function [z, y] = stack_pairs(pairs, yField)
     end
     z = vertcat(zCells{:});
     y = vertcat(yCells{:});
+    X = cheb_features(z, chebOrder);
 end
 
-function c = fit_ridge(model, z, y, lambda, cWarm)
-%FIT_RIDGE General ridge regression fit for an arbitrary model f(z, c).
+function c = fit_ridge_cheb(X, y, lambda, cWarm, chebOrder)
+%FIT_RIDGE_CHEB Ridge regression Chebyshev fit with two endpoint constraints.
 %
-% Minimises:
-%   sum( (y - model(z, c)).^2 ) + lambda * ||c||^2
+% Constraints enforced via fmincon nonlcon (nonlinear equalities):
+%   f(z=0) = 0  ->  ceq(1) = X(z=0) * c       = 0
+%   f(z=1) = 1  ->  ceq(2) = X(z=1) * c - 1   = 0
 %
-% Subject to nonlinear endpoint constraints:
-%   model(0, c) = 0
-%   model(1, c) = 1
-%
-% model is a function handle @(z, c) returning a prediction vector the
-% same length as z. Swap to any model without touching this function.
+% Objective (general NLP, solved with fmincon sqp):
+%   min_c  || y - X * c ||^2 + lambda * || c ||^2
+%   Analytic gradient supplied.
+
+    X0 = cheb_features(0, chebOrder);   % 1 x (order+1), evaluated at z = 0
+    X1 = cheb_features(1, chebOrder);   % 1 x (order+1), evaluated at z = 1
 
     opts = optimoptions('fmincon', ...
         'Algorithm', 'sqp', ...
         'Display', 'off', ...
-        'OptimalityTolerance', 1e-8, ...
-        'StepTolerance', 1e-8, ...
+        'SpecifyObjectiveGradient', true, ...
+        'OptimalityTolerance', 1e-6, ...
+        'StepTolerance', 1e-6, ...
         'MaxIterations', 400, ...
         'MaxFunctionEvaluations', 4000);
 
-    c = fmincon(@(c) ridge_obj(c, model, z, y, lambda), cWarm(:), ...
-        [], [], [], [], [], [], @(c) endpoint_con(c, model), opts);
+    c = fmincon(@(c) ridge_obj(c, X, y, lambda), cWarm, ...
+        [], [], [], [], [], [], @(c) endpoint_con(c, X0, X1), opts);
 end
 
-function [cineq, ceq] = endpoint_con(c, model)
-%ENDPOINT_CON Nonlinear equality constraints: f(0,c) = 0, f(1,c) = 1.
+function [cineq, ceq] = endpoint_con(c, X0, X1)
+%ENDPOINT_CON Nonlinear equality constraints: f(z=0) = 0, f(z=1) = 1.
+    c     = c(:);
     cineq = [];
-    ceq   = [model(0, c(:)); model(1, c(:)) - 1];
+    ceq   = [X0 * c; X1 * c - 1];
 end
 
-function val = ridge_obj(c, model, z, y, lambda)
-%RIDGE_OBJ Squared loss + L2 regularisation.
-    c   = c(:);
-    r   = y - model(z, c);
+function [val, grad] = ridge_obj(c, X, y, lambda)
+%RIDGE_OBJ L2 loss + L2 regularisation with analytic gradient.
+    c = c(:);
+    r = y - X * c;
     val = r' * r + lambda * (c' * c);
+    if nargout > 1
+        grad = -2 * (X' * r) + 2 * lambda * c;
+    end
 end
 
 function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
-    pairsSeen, yField, model, cWarm, lambdaGrid, K)
+    pairsSeen, yField, cWarm, chebOrder, lambdaGrid, K)
 %FIT_WITH_CV Choose lambda by K-fold CV (grouped by simulation pair),
 % then refit on the full seen set with the chosen lambda.
 %
@@ -406,19 +413,19 @@ function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
     nP   = numel(pairsSeen);
     nLam = numel(lambdaGrid);
 
-    [zAll, yAll] = stack_pairs(pairsSeen, yField);
+    [Xall, yall] = stack_pairs(pairsSeen, yField, chebOrder);
 
     if nLam == 1
         lambdaBest      = lambdaGrid(1);
         cvLossPerLambda = NaN;
-        c = fit_ridge(model, zAll, yAll, lambdaBest, cWarm);
+        c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
         return
     end
 
     if K < 2
         lambdaBest      = 0;
         cvLossPerLambda = NaN(nLam, 1);
-        c = fit_ridge(model, zAll, yAll, lambdaBest, cWarm);
+        c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
         return
     end
 
@@ -447,21 +454,21 @@ function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
         trnIdx = find(foldAssign ~= f);
         if isempty(valIdx) || isempty(trnIdx); continue; end
 
-        [zTr, yTr] = stack_pairs(pairsSeen(trnIdx), yField);
-        [zVa, yVa] = stack_pairs(pairsSeen(valIdx), yField);
-        if isempty(yTr) || isempty(yVa); continue; end
+        [Xtr, ytr] = stack_pairs(pairsSeen(trnIdx), yField, chebOrder);
+        [Xva, yva] = stack_pairs(pairsSeen(valIdx), yField, chebOrder);
+        if isempty(ytr) || isempty(yva); continue; end
 
         % Fit along the lambda path for this fold.
         cPath  = cWarm;
         cByLam = zeros(numel(cWarm), nLam);
         for li = 1:nLam
-            cPath = fit_ridge(model, zTr, yTr, lamSorted(li), cPath);
+            cPath = fit_ridge_cheb(Xtr, ytr, lamSorted(li), cPath, chebOrder);
             cByLam(:, sortIdx(li)) = cPath;
         end
 
         % Accumulate held-out squared error for each lambda.
         for li = 1:nLam
-            res = yVa - model(zVa, cByLam(:, li));
+            res = yva - Xva * cByLam(:, li);
             cvLossPerLambda(li) = cvLossPerLambda(li) + sum(res.^2);
         end
     end
@@ -470,16 +477,17 @@ function [c, lambdaBest, cvLossPerLambda] = fit_with_cv( ...
     lambdaBest = lambdaGrid(bestIdx);
 
     % Final fit on the full seen pool with the chosen lambda.
-    c = fit_ridge(model, zAll, yAll, lambdaBest, cWarm);
+    c = fit_ridge_cheb(Xall, yall, lambdaBest, cWarm, chebOrder);
 end
 
-function [r2, lossSSE] = eval_on_pairs(pairsEval, yField, model, c)
+function [r2, lossSSE] = eval_on_pairs(pairsEval, yField, c)
 %EVAL_ON_PAIRS Pool all points across the given pairs, return R^2 and SSE.
-    [z, y] = stack_pairs(pairsEval, yField);
+    chebOrder = numel(c) - 1;
+    [X, y] = stack_pairs(pairsEval, yField, chebOrder);
     if isempty(y)
         r2 = NaN; lossSSE = NaN; return
     end
-    yhat = model(z, c);
+    yhat = X * c;
     res = y - yhat;
     lossSSE = sum(res.^2);
     sse_tot = sum((y - mean(y)).^2);
@@ -585,7 +593,7 @@ function plot_r2_comparison(H, colSSdU, colSSE, fontSize)
     if exist('set_fig_size', 'file') == 2;  set_fig_size(900, 400);  end
 end
 
-function plot_final_fit(zGrid, model, pairs, H, yField, yLabelTex, ...
+function plot_final_fit(zGrid, Xgrid, pairs, H, yField, yLabelTex, ...
     baseColor, accentColor, fontSize, figTitle)
 %PLOT_FINAL_FIT Overlay all pair trajectories and the final fitted curve.
     isSSdU = strcmp(yField, "ratioSSdU");
@@ -595,7 +603,7 @@ function plot_final_fit(zGrid, model, pairs, H, yField, yLabelTex, ...
         cFinal = H.coef_E(:,  end);
     end
 
-    yhat = model(zGrid, cFinal);
+    yhat = Xgrid * cFinal;
 
     figure('Name', figTitle); hold on
     for i = 1:numel(pairs)
