@@ -307,7 +307,7 @@ for k = 1:2
     xlim(ax, [1e-2, 1e2]);
     ylim(ax, [1e4, 1.3e5]);
     colormap(ax, seqMap);
-    caxis(ax, [0, 1]);
+    caxis(ax, [0.5, 1]);
     xlabel(ax, "$J_{\mathrm{TV}}$");
     ylabel(ax, "$J_{\mathrm{track}}$");
     title(ax, "$\mathbf{" + panelLabels(k) + "}$", "Interpreter", "latex");
