@@ -19,6 +19,9 @@ addpath(genpath(fullfile(projectRoot, "dependencies")));
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
+s = settings;
+s.matlab.appearance.figure.GraphicsTheme.TemporaryValue = "light";
+
 fontSize = 16;
 NATURE_COLOR = nature_methods_colors();
 plotColors = [NATURE_COLOR.Blue; NATURE_COLOR.BluishGreen; NATURE_COLOR.ReddishPurple];
@@ -202,10 +205,10 @@ set_fig_size(1200, 900);
 plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir), mkdir(plotDir); end
 
-print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.png"), "-dpng", "-r300");
-print(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.pdf"), "-dpdf", "-bestfit");
-print(fig95, fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.png"), "-dpng", "-r300");
-print(fig95, fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.pdf"), "-dpdf", "-bestfit");
+exportgraphics(fig, fullfile(plotDir, "surrogate_test_ratio_vs_time.png"), "Resolution", 300);
+save_figure(char(fullfile(plotDir, "surrogate_test_ratio_vs_time.pdf")), fig, false);
+exportgraphics(fig95, fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.png"), "Resolution", 300);
+save_figure(char(fullfile(plotDir, "surrogate_test_ratio_vs_time_95band.pdf")), fig95, false);
 
 % Numeric summary
 numDir = fullfile(projectRoot, "results", "numerical results");

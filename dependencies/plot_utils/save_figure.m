@@ -7,13 +7,20 @@ function save_figure(filename, fig_number, fig_bckp)
         fig_bckp = true;
     end
 
-    if isnan(fig_number)
-        % No number, get current
-        fig = gcf;
-    elseif ishandle(fig_number)
+    
+    if isa(fig_number, 'matlab.ui.Figure')
+        % Figure handle object passed directly
+        fig = fig_number;
+    elseif isnumeric(fig_number) && isscalar(fig_number) && ~isnan(fig_number) ...
+            && ishandle(fig_number)
+        % Numeric figure number
         fig = figure(fig_number);
     else
-        warning('Figure %d not found.', fig_number);
+        % No valid target, fall back to current figure
+        if ~(isnumeric(fig_number) && isscalar(fig_number) && isnan(fig_number))
+            warning('Figure target not found; using current figure.');
+        end
+        fig = gcf;
     end
 
     % Ensure the figure uses its on-screen size when exporting

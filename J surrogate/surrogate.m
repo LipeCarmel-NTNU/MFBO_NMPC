@@ -18,6 +18,9 @@ addpath(genpath(fullfile(projectRoot, "dependencies")));
 set(groot, "defaultTextInterpreter", "latex");
 set(groot, "defaultAxesTickLabelInterpreter", "latex");
 set(groot, "defaultLegendInterpreter", "latex");
+s = settings;
+s.matlab.appearance.figure.GraphicsTheme.TemporaryValue = "light";
+
 fontSize = 18;
 NATURE_COLOR = nature_methods_colors();
 plotColors = [NATURE_COLOR.Blue; [0 0 0]];
@@ -309,6 +312,7 @@ end
 
 function save_figure_pair(figHandle, fileStem)
 %SAVE_FIGURE_PAIR Save one figure to PNG and PDF as a single combined layout.
+
     exportgraphics(figHandle, fileStem + ".png", "Resolution", 300);
-    exportgraphics(figHandle, fileStem + ".pdf", "ContentType", "vector");
+    save_figure(char(fileStem + ".pdf"), figHandle, false);
 end
