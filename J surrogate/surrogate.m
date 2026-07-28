@@ -183,6 +183,7 @@ plot_case_envelope_with_fit(f_ref, SSE_min, SSE_max, SSE_mean, SSE_hat_ref, ...
     'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{track}}(z)}{\left.J_{\mathrm{track}}\right|_{z=1}}$', ...
     'b', plotColors, fontSize, true);
 set_fig_size(1300, 520);
+enlarge_ylabels(fig_side, fontSize + 6);
 
 fig_stack = figure;
 subplot(2,1,1);
@@ -195,6 +196,7 @@ plot_case_envelope_with_fit(f_ref, SSE_min, SSE_max, SSE_mean, SSE_hat_ref, ...
     'Fidelity $z$ (dimensionless)', '$\frac{J_{\mathrm{track}}(z)}{\left.J_{\mathrm{track}}\right|_{z=1}}$', ...
     'b', plotColors, fontSize, true);
 set_fig_size(920, 900);
+enlarge_ylabels(fig_stack, fontSize + 6);
 
 plotDir = fullfile(projectRoot, "results", "graphical_results");
 if ~isfolder(plotDir)
@@ -294,7 +296,9 @@ function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab,
     plot(f, y_hat, '--', 'LineWidth', 2.2, 'Color', plotColors(fitColorIdx,:));
 
     xlim([0, 1]);
+    xticks(0:0.2:1.0);
     ylim([0, 1.005]);
+    yticks(0:0.2:1.0);
     if showXLabel
         xlabel(xlab);
     else
@@ -308,6 +312,15 @@ function plot_case_envelope_with_fit(f, y_min, y_max, y_mean, y_hat, xlab, ylab,
     grid off; box off
     set_font_size(fontSize);
     format_tick(1, 1);
+end
+
+function enlarge_ylabels(figHandle, fs)
+%ENLARGE_YLABELS Set the y-axis label font size on every axes in a figure.
+% Applied after set_font_size, which resets label sizes across the whole figure.
+    ax = findall(figHandle, 'type', 'axes');
+    for i = 1:numel(ax)
+        ax(i).YLabel.FontSize = fs;
+    end
 end
 
 function save_figure_pair(figHandle, fileStem)
