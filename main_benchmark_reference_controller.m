@@ -1,8 +1,7 @@
-%% Benchmark reference controller (full horizon) with and without measurement noise
+%% Benchmark reference controller fix (full horizon) with and without measurement noise
 %
 % Benchmark definition:
-%   m = 6, p = 61, P = 0, Q = diag([10 1 1]), Rdu = diag([10 10 10])
-%   Ru uses the same default as NMPC_terminal: diag([2 2 1]).
+%   m = 6, p = 61, P = 0, Q = diag([10 1 1]), Ru = 0, Rdu = diag([10 10 10])
 %
 % Conditions match the prior full-fidelity tests:
 %   - Two initial-condition cases
@@ -10,7 +9,7 @@
 %   - Same model/solver stack as main_BO / main_NMPC_test_runs
 %
 % Outputs are stored under:
-%   results/benchmark_reference_controller/<scenario>/
+%   results/benchmark_fix/<scenario>/
 % where <scenario> is one of:
 %   - benchmark_full_f1_no_noise
 %   - benchmark_full_f1_same_noise
@@ -22,7 +21,7 @@ current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir));
 
 cfg = struct();
-cfg.output_root = fullfile("results", "benchmark_reference_controller");
+cfg.output_root = fullfile("results", "benchmark_fix");
 cfg.tf_h = 10;
 cfg.Ts = 1/60;
 cfg.use_parallel = true;
@@ -91,10 +90,10 @@ function theta = benchmark_theta()
     theta_p = p - m;
 
     q_diag = [10 1 1];
-    ru_diag = [2 2 1];
+    ru_exp = -1000 * ones(1, 3); % 10^-1000 underflows to 0 in double precision
     rdu_diag = [10 10 10];
 
-    theta = [f, theta_p, theta_m, log10(q_diag), log10(ru_diag), log10(rdu_diag)];
+    theta = [f, theta_p, theta_m, log10(q_diag), ru_exp, log10(rdu_diag)];
 end
 
 function base = init_base(sigma_y, Ts, tf_h)
