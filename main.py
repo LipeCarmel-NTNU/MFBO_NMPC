@@ -1,4 +1,21 @@
+"""Two-phase multi-fidelity Bayesian optimization driver.
+
+Phase "init" evaluates the Sobol initialization design and stops. Those runs
+carry no surrogate: MATLAB reports the cost measured at the simulated fidelity
+and saves the per-step cost trends. Fit the fidelity surrogate from them with
+
+    python "J surrogate/runtime_surrogate/fit_runtime_surrogate.py" results/init
+
+Phase "bo" then runs the acquisition loop. MATLAB loads the fitted coefficients
+and refuses to start without them, so no BO result can be scaled by a surrogate
+from an earlier vintage.
+
+    python main.py init      # with main_initialization.m running in MATLAB
+    python main.py bo        # with main_BO.m running in MATLAB
+"""
+
 import csv
+import sys
 import time
 import subprocess
 from pathlib import Path
@@ -18,9 +35,15 @@ from botorch.acquisition.multi_objective.logei import qLogNoisyExpectedHypervolu
 from botorch.acquisition.acquisition import AcquisitionFunction
 
 # Usa tua interface existente
-from matlab_interface import send_theta, read_results, RESULTS_FILE
+from matlab_interface import (
+    send_theta,
+    read_results,
+    results_file,
+    INIT_RESULTS_FILE,
+    BO_RESULTS_FILE,
+)
 
-print("[debug] God.py module loaded", flush=True)
+print("[debug] main.py module loaded", flush=True)
 
 
 # ============================================================
@@ -29,9 +52,14 @@ print("[debug] God.py module loaded", flush=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DTYPE = torch.double
 
-N_INIT = 20          # pontos iniciais (DOE)
+N_INIT = 20          # pontos iniciais (DOE) — must match cfg_run.n_init in main_initialization.m
 N_ITER = 40000          # iterações BO (após DOE)
 Q_BATCH = 1          # q candidates por iteração (1 = sequencial)
+
+# Coefficient file that main_BO.m loads. Phase "bo" refuses to start before the
+# fit has produced it, so the phase boundary is checked on both sides.
+CHEB_COEFFS_FILE = Path(__file__).resolve().parent / "results" / "surrogate" / "cheb_coeffs.mat"
+FIT_SCRIPT = "J surrogate/runtime_surrogate/fit_runtime_surrogate.py"
 
 POLL_S = 1.0         # polling do results.csv
 WAIT_MATLAB_S = 2.0  # espera caso results.csv ainda não exista
@@ -65,6 +93,9 @@ BASE_DIR = Path(__file__).resolve().parent
 TRACE_FILE = BASE_DIR / "results" / "opt_trace.csv"   # histórico “do Python” (DOE+OPT)
 TRACE_FLUSH_EVERY = 1                                # escreve a cada nova avaliação
 
+# CSV that MATLAB is currently appending to. Set by main() from the phase.
+ACTIVE_RESULTS_FILE = BO_RESULTS_FILE
+
 
 # ============================================================
 # Utils
@@ -97,22 +128,25 @@ def theta_to_opt(X_theta: torch.Tensor) -> torch.Tensor:
 
 
 def wait_for_matlab_ready():
-    """Espera o results/results.csv existir (MATLAB cria no início)."""
-    print(f"[debug] Checking if MATLAB already created {RESULTS_FILE} ...")
+    """Espera o CSV da fase ativa existir (MATLAB cria no início)."""
+    print(f"[debug] Checking if MATLAB already created {ACTIVE_RESULTS_FILE} ...")
     t0 = time.time()
     while True:
-        if Path(RESULTS_FILE).exists():
-            print(f"[debug] Found {RESULTS_FILE}, continuing.")
+        if Path(ACTIVE_RESULTS_FILE).exists():
+            print(f"[debug] Found {ACTIVE_RESULTS_FILE}, continuing.")
             return
         if MAX_WAIT_MATLAB_S is not None and (time.time() - t0) > MAX_WAIT_MATLAB_S:
-            print(f"[warn] Timeout waiting for {RESULTS_FILE}. Continuing without it.")
+            print(f"[warn] Timeout waiting for {ACTIVE_RESULTS_FILE}. Continuing without it.")
             return
-        print(f"[wait] esperando MATLAB criar {RESULTS_FILE} ...")
+        print(f"[wait] esperando MATLAB criar {ACTIVE_RESULTS_FILE} ...")
         time.sleep(WAIT_MATLAB_S)
 
 
 def last_nrows() -> int:
-    ts, *_ = read_results()
+    try:
+        ts, *_ = read_results(ACTIVE_RESULTS_FILE)
+    except FileNotFoundError:
+        return 0
     return len(ts)
 
 
@@ -132,9 +166,9 @@ def wait_for_new_row(prev_rows: int, target_theta: torch.Tensor, timeout_s: floa
             raise TimeoutError("Timeout esperando results.csv atualizar.")
 
         try:
-            ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+            ts, sse, ssd_u, cost, runtime, theta_mat = read_results(ACTIVE_RESULTS_FILE)
         except FileNotFoundError:
-            print(f"[debug] results.csv still missing: {RESULTS_FILE}")
+            print(f"[debug] results csv still missing: {ACTIVE_RESULTS_FILE}")
             time.sleep(POLL_S)
             continue
 
@@ -164,41 +198,59 @@ def evaluate_theta(theta: torch.Tensor) -> Tuple[float, float, float, float]:
     return sse, ssd, jval, rt
 
 
-def load_history_from_results() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+def _empty_history() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    X = torch.empty((0, THETA_D), dtype=DTYPE, device=DEVICE)
+    Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
+    Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
+    return X, Y_obj, Y_time, 0
+
+
+def load_history_from_results(paths=None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
-    Lê o results.csv (via read_results) e reconstrói:
+    Lê os CSVs indicados e reconstrói:
       X       : (n, d)
       Y_obj   : (n, 2)   = -[SSE, SSdU]
       Y_time  : (n, 1)   = runtime_s (positivo)
     Retorna também n (número de linhas).
-    """
-    print(f"[debug] Reading history from {RESULTS_FILE}")
-    try:
-        ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
-    except FileNotFoundError:
-        print(f"[debug] results.csv not found yet: {RESULTS_FILE}")
-        d = THETA_D
-        X = torch.empty((0, d), dtype=DTYPE, device=DEVICE)
-        Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
-        Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
-        return X, Y_obj, Y_time, 0
-    n = len(ts)
-    if n == 0:
-        d = THETA_D
-        X = torch.empty((0, d), dtype=DTYPE, device=DEVICE)
-        Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
-        Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
-        return X, Y_obj, Y_time, 0
 
-    X = torch.tensor(theta_mat, dtype=DTYPE, device=DEVICE)
-    X = snap_theta(X)
+    paths is read in order, so passing [init, bo] puts the initialization rows
+    first and keeps the DOE/OPT row indices aligned with N_INIT. A missing or
+    empty file contributes no rows.
+    """
+    if paths is None:
+        paths = [ACTIVE_RESULTS_FILE]
+
+    theta_rows: List[List[float]] = []
+    sse_all: List[float] = []
+    ssd_all: List[float] = []
+    rt_all: List[float] = []
+
+    for path in paths:
+        print(f"[debug] Reading history from {path}")
+        try:
+            ts, sse, ssd_u, cost, runtime, theta_mat = read_results(path)
+        except FileNotFoundError:
+            print(f"[debug] results csv not found yet: {path}")
+            continue
+        if not ts:
+            continue
+        theta_rows.extend(theta_mat)
+        sse_all.extend(sse)
+        ssd_all.extend(ssd_u)
+        rt_all.extend(runtime)
+
+    n = len(theta_rows)
+    if n == 0:
+        return _empty_history()
+
+    X = snap_theta(torch.tensor(theta_rows, dtype=DTYPE, device=DEVICE))
 
     Y_obj = torch.stack(
-        [-torch.tensor(sse, dtype=DTYPE, device=DEVICE),
-         -torch.tensor(ssd_u, dtype=DTYPE, device=DEVICE)],
+        [-torch.tensor(sse_all, dtype=DTYPE, device=DEVICE),
+         -torch.tensor(ssd_all, dtype=DTYPE, device=DEVICE)],
         dim=-1
     )
-    rt = torch.tensor(runtime, dtype=DTYPE, device=DEVICE).clamp_min(EPS)
+    rt = torch.tensor(rt_all, dtype=DTYPE, device=DEVICE).clamp_min(EPS)
     Y_time = rt.view(-1, 1)
     print(f"[debug] Loaded history com n={n}, X={tuple(X.shape)}, Y_obj={tuple(Y_obj.shape)}, Y_time={tuple(Y_time.shape)}")
     return X, Y_obj, Y_time, n
@@ -243,9 +295,9 @@ def append_trace_row(row: Dict):
         ])
 
 
-def sync_trace_with_existing_results(X: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor):
+def sync_trace_with_existing_results(X: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor, paths=None):
     """
-    Se já existir results.csv com linhas antigas, garante que o opt_trace.csv tenha
+    Se já existirem linhas antigas nos CSVs, garante que o opt_trace.csv tenha
     pelo menos essas mesmas linhas (para retomada limpa).
     Para linhas antigas, acq_value fica vazio.
     """
@@ -255,8 +307,24 @@ def sync_trace_with_existing_results(X: torch.Tensor, Y_obj: torch.Tensor, Y_tim
     if n_trace >= n_res:
         return
 
-    # Precisamos também de SSE/SSdU/J do CSV — read_results já tem.
-    ts, sse, ssd_u, cost, runtime, theta_mat = read_results()
+    if paths is None:
+        paths = [ACTIVE_RESULTS_FILE]
+
+    sse: List[float] = []
+    ssd_u: List[float] = []
+    cost: List[float] = []
+    runtime: List[float] = []
+    theta_mat: List[List[float]] = []
+    for path in paths:
+        try:
+            _ts, _sse, _ssd, _cost, _rt, _theta = read_results(path)
+        except FileNotFoundError:
+            continue
+        sse.extend(_sse)
+        ssd_u.extend(_ssd)
+        cost.extend(_cost)
+        runtime.extend(_rt)
+        theta_mat.extend(_theta)
 
     for idx in range(n_trace, n_res):
         phase = "DOE" if idx < N_INIT else "OPT"
@@ -483,13 +551,14 @@ def sobol_unique_points(n_new: int, existing_X: torch.Tensor, seed: int = 1234) 
     return torch.cat(pts, dim=0)
 
 
-def maybe_start_matlab():
+def maybe_start_matlab(phase: str):
     if not START_MATLAB:
         return
-    print("[info] tentando iniciar MATLAB automaticamente...")
+    script = "main_initialization" if phase == "init" else "main_BO"
+    print(f"[info] tentando iniciar MATLAB automaticamente ({script})...")
     try:
         subprocess.Popen(
-            [MATLAB_CMD, "-batch", "try, main_BO; catch ME, disp(getReport(ME)); end;"],
+            [MATLAB_CMD, "-batch", f"try, {script}; catch ME, disp(getReport(ME)); end;"],
             cwd=str(BASE_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -498,44 +567,39 @@ def maybe_start_matlab():
         print("[info] MATLAB iniciado (modo batch).")
     except Exception as e:
         print(f"[warn] falhou iniciar MATLAB automaticamente: {e}")
-        print("[warn] inicie o MATLAB manualmente e rode main_BO.")
+        print(f"[warn] inicie o MATLAB manualmente e rode {script}.")
 
 
 # ============================================================
 # Main
 # ============================================================
-def main():
-    print("[debug] Entered main()", flush=True)
-    torch.set_default_dtype(DTYPE)
+def run_initialization():
+    """Phase 1: evaluate the Sobol design, then stop for the surrogate fit."""
+    global ACTIVE_RESULTS_FILE
+    ACTIVE_RESULTS_FILE = INIT_RESULTS_FILE
 
-    # 1) carrega histórico (DOE + OPT) do results.csv
-    X, Y_obj, Y_time, n_rows = load_history_from_results()
-
-    # 2) garante trace alinhado com o que já existe no results.csv
+    X, Y_obj, Y_time, n_rows = load_history_from_results([INIT_RESULTS_FILE])
     if n_rows > 0:
-        sync_trace_with_existing_results(X, Y_obj, Y_time)
+        sync_trace_with_existing_results(X, Y_obj, Y_time, [INIT_RESULTS_FILE])
 
-    n_doe_done = min(n_rows, N_INIT)
-    n_opt_done = max(0, n_rows - N_INIT)
+    print(f"[resume] {n_rows} linhas em {INIT_RESULTS_FILE} -> DOE: {n_rows}/{N_INIT}")
 
-    print(f"[resume] encontrado {n_rows} linhas em {Path(RESULTS_FILE)} -> DOE: {n_doe_done}/{N_INIT}, OPT: {n_opt_done}/{N_ITER}")
-
-    # 3) completa DOE se necessário
-    if n_rows < N_INIT:
+    if n_rows >= N_INIT:
+        print("[init] design já completo.")
+    else:
         n_missing = N_INIT - n_rows
-        print(f"[doe] faltam {n_missing} pontos para completar DOE (N_INIT={N_INIT}) ...")
+        print(f"[init] faltam {n_missing} pontos (N_INIT={N_INIT}) ...")
 
         X_new_opt = sobol_unique_points(n_missing, existing_X=theta_to_opt(X), seed=1234)
         for i in range(n_missing):
-            theta_opt = X_new_opt[i]
-            theta = opt_to_theta(theta_opt)
+            theta = opt_to_theta(X_new_opt[i])
             sse, ssd, jval, rt = evaluate_theta(theta)
             X = torch.cat([X, theta.view(1, -1)], dim=0)
             Y_obj = torch.cat([Y_obj, torch.tensor([[-sse, -ssd]], dtype=DTYPE, device=DEVICE)], dim=0)
             Y_time = torch.cat([Y_time, torch.tensor([[rt]], dtype=DTYPE, device=DEVICE)], dim=0)
 
             global_row = X.shape[0]
-            row = {
+            append_trace_row({
                 "row_idx": global_row,
                 "phase": "DOE",
                 "doe_idx": global_row,
@@ -552,14 +616,47 @@ def main():
                 "J": float(jval),
                 "runtime_s": float(rt),
                 "theta_list": [float(v) for v in theta.view(-1).detach().cpu().tolist()],
-            }
-            append_trace_row(row)
+            })
 
             print(f"  DOE {global_row:02d}/{N_INIT}: SSE={sse:.4g}, SSdU={ssd:.4g}, rt={rt:.2f}s, f={theta[0].item():.3f}")
 
-        n_opt_done = max(0, X.shape[0] - N_INIT)
+    print("\n[init] fase de inicialização concluída.")
+    print("Próximos passos:")
+    print(f'  1) python "{FIT_SCRIPT}" "{INIT_RESULTS_FILE.parent}"')
+    print(f"  2) grave os coeficientes em {CHEB_COEFFS_FILE}")
+    print("  3) rode main_BO.m no MATLAB e 'python main.py bo' aqui")
+    return X, Y_obj, Y_time
 
-    # 4) continua BO do ponto onde parou
+
+def run_bo():
+    """Phase 2: the acquisition loop, on top of the initialization history."""
+    global ACTIVE_RESULTS_FILE
+    ACTIVE_RESULTS_FILE = BO_RESULTS_FILE
+
+    if not CHEB_COEFFS_FILE.exists():
+        raise FileNotFoundError(
+            f"Fidelity surrogate coefficients not found: {CHEB_COEFFS_FILE}\n"
+            f'Run "python main.py init" with main_initialization.m, then fit with\n'
+            f'  python "{FIT_SCRIPT}" "{INIT_RESULTS_FILE.parent}"'
+        )
+
+    # The GP trains on the initialization rows and the BO rows together, in that
+    # order, so row index < N_INIT still identifies a DOE point.
+    history_paths = [INIT_RESULTS_FILE, BO_RESULTS_FILE]
+    X, Y_obj, Y_time, n_rows = load_history_from_results(history_paths)
+    if n_rows > 0:
+        sync_trace_with_existing_results(X, Y_obj, Y_time, history_paths)
+
+    n_init_done = min(n_rows, N_INIT)
+    if n_init_done < N_INIT:
+        raise RuntimeError(
+            f"only {n_init_done} of {N_INIT} initialization points found in {INIT_RESULTS_FILE}. "
+            'Finish phase "init" first.'
+        )
+
+    n_opt_done = max(0, n_rows - N_INIT)
+    print(f"[resume] {n_rows} linhas -> DOE: {n_init_done}/{N_INIT}, OPT: {n_opt_done}/{N_ITER}")
+
     remaining = max(0, N_ITER - n_opt_done)
     if remaining == 0:
         print("[bo] nada a fazer: já completou todas as iterações.")
@@ -601,25 +698,43 @@ def main():
 
         print(f"  OPT {bo_idx:03d}/{N_ITER}: SSE={sse:.4g}, SSdU={ssd:.4g}, rt={rt:.2f}s, f={cand[0].item():.3f}, acq={acq_val:.3g}")
 
-    # 5) Resumo
-    if X.shape[0] > 0:
-        SSE_all = (-Y_obj[:, 0]).detach().cpu()
-        SSdU_all = (-Y_obj[:, 1]).detach().cpu()
+    return X, Y_obj, Y_time
 
-        best_sse_idx = torch.argmin(SSE_all)
-        best_ssdu_idx = torch.argmin(SSdU_all)
 
-        print("\n[done] resumo:")
-        print(f"  Melhor SSE:  {SSE_all[best_sse_idx].item():.6g}  (linha {best_sse_idx.item()+1})")
-        print(f"  Melhor SSdU: {SSdU_all[best_ssdu_idx].item():.6g}  (linha {best_ssdu_idx.item()+1})")
-        print(f"  results.csv : {Path(RESULTS_FILE)}")
-        print(f"  trace.csv   : {TRACE_FILE}")
+def print_summary(X: torch.Tensor, Y_obj: torch.Tensor):
+    if X.shape[0] == 0:
+        print("[done] nenhum dado nos CSVs.")
+        return
+
+    SSE_all = (-Y_obj[:, 0]).detach().cpu()
+    SSdU_all = (-Y_obj[:, 1]).detach().cpu()
+
+    best_sse_idx = torch.argmin(SSE_all)
+    best_ssdu_idx = torch.argmin(SSdU_all)
+
+    print("\n[done] resumo:")
+    print(f"  Melhor SSE:  {SSE_all[best_sse_idx].item():.6g}  (linha {best_sse_idx.item()+1})")
+    print(f"  Melhor SSdU: {SSdU_all[best_ssdu_idx].item():.6g}  (linha {best_ssdu_idx.item()+1})")
+    print(f"  results.csv : {ACTIVE_RESULTS_FILE}")
+    print(f"  trace.csv   : {TRACE_FILE}")
+
+
+def main(phase: str = "bo"):
+    print(f"[debug] Entered main(phase={phase!r})", flush=True)
+    torch.set_default_dtype(DTYPE)
+
+    if phase == "init":
+        X, Y_obj, _ = run_initialization()
+    elif phase == "bo":
+        X, Y_obj, _ = run_bo()
     else:
-        print("[done] nenhum dado em results.csv.")
+        raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
+
+    print_summary(X, Y_obj)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "bo")
 
 
 

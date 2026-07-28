@@ -34,8 +34,13 @@ classdef NMPC_mono_dilution < NMPC_abstract
         %% Integrator and Optimizer
         min_integrator_step = 0.007;    % Minimum integration step size required to solve the ode (h)
 
+        % FiniteDifferenceType is 'central': the objective and constraint
+        % gradients are obtained by finite differences, and forward
+        % differences are too inaccurate near the flat regions of this
+        % problem.
         optimizer_options = optimoptions('fmincon','Display','Iter','Algorithm','sqp',...
-                'MaxFunEvals',Inf, 'MaxIterations', 100);
+                'MaxFunEvals',Inf, 'MaxIterations', 100, ...
+                'FiniteDifferenceType','central');
 
         latest_wopt
 

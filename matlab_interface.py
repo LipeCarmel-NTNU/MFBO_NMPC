@@ -11,7 +11,25 @@ import time
 BASE_DIR = Path(__file__).resolve().parent
 LOCK_FILE = BASE_DIR / "matlab.lock"
 THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
-RESULTS_FILE = BASE_DIR / "results" / "results.csv"
+
+# The initialization phase and the BO phase write separate summary files, so
+# that the exact costs of the initialization runs stay distinguishable from the
+# surrogate-scaled costs of the BO runs.
+INIT_RESULTS_FILE = BASE_DIR / "results" / "init" / "results.csv"
+BO_RESULTS_FILE = BASE_DIR / "results" / "results.csv"
+
+# Default target of read_results, kept for callers that do not pass a path.
+RESULTS_FILE = BO_RESULTS_FILE
+
+
+def results_file(phase: str) -> Path:
+    """Return the summary CSV that MATLAB writes for the given phase."""
+
+    if phase == "init":
+        return INIT_RESULTS_FILE
+    if phase == "bo":
+        return BO_RESULTS_FILE
+    raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
 
 
 def _is_integer_value(value: object) -> bool:
@@ -126,15 +144,20 @@ def write_theta(theta: Sequence[float]) -> None:
         fh.write("\n")
 
 
-def read_results() -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
-    """Read optimization results ensuring lock coordination."""
+def read_results(path: Path | str | None = None) -> tuple[list[str], list[float], list[float], list[float], list[float], list[list[float]]]:
+    """Read optimization results ensuring lock coordination.
+
+    path selects the summary CSV. It defaults to the BO phase file.
+    """
+
+    results_path = Path(path) if path is not None else RESULTS_FILE
 
     wait_start = time.time()
     while LOCK_FILE.exists():
         time.sleep(5)
 
-    if not RESULTS_FILE.exists():
-        raise FileNotFoundError(f"Results file not found: {RESULTS_FILE}")
+    if not results_path.exists():
+        raise FileNotFoundError(f"Results file not found: {results_path}")
 
     timestamp: list[str] = []
     sse: list[float] = []
@@ -143,7 +166,7 @@ def read_results() -> tuple[list[str], list[float], list[float], list[float], li
     runtime: list[float] = []
     theta_matrix: list[list[float]] = []
 
-    with RESULTS_FILE.open("r", encoding="ascii", newline="") as fh:
+    with results_path.open("r", encoding="ascii", newline="") as fh:
         reader = csv.DictReader(fh)
         required_columns = [
             "timestamp",
