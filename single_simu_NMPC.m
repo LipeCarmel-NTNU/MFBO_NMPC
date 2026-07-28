@@ -7,7 +7,7 @@ addpath(genpath(current_dir))
 USE_PARALLEL = true;
 p = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 8;
+    NumWorkers = 2;
     if isempty(p) || p.NumWorkers ~= NumWorkers
         if ~isempty(p)
             delete(p);
@@ -46,12 +46,12 @@ NMPC.Ts = dt;
 
 % Update optimisation horizons
 NMPC.p = 5;
-NMPC.m = 3;
+NMPC.m = 2;
 
 % Weights
-Q_V = 10;
+Q_V = 1;
 Q_X = 1;
-Q_S = 2;
+Q_S = 1;
 NMPC.Q = diag([Q_V, Q_X, Q_S]);
 
 % Update constraint vectors used by the optimiser
@@ -63,9 +63,9 @@ NMPC.constraints();
 help NMPC.solve
 
 %% Initial conditions
-tf = 5/60;                % h
+tf = 10;                % h
 
-V_0   = 100;
+V_0   = 1;
 X_0   = 15;
 S_0   = 0;
 x0_plant = [V_0, X_0, S_0];
