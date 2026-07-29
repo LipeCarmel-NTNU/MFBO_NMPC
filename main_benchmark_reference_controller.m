@@ -66,9 +66,14 @@ for s = 1:numel(scenarios)
     ts = char(datetime("now", "TimeZone", "Europe/Oslo", "Format", "yyyyMMdd_HHmmss"));
     save(fullfile(out_dir, "out_benchmark.mat"), "ts", "out", "theta", "scenario", "cfg", "base");
 
+    % One row, under the same schema as the optimisation runs. The run is at
+    % full horizon with no surrogate, so beta_vintage is NaN and the two
+    % fraction columns are 1: the row states that its costs were measured
+    % rather than scaled.
     results_csv = fullfile(out_dir, "results_benchmark.csv");
+    check_results_header(results_csv, numel(theta));
     init_results_csv(results_csv, numel(theta));
-    append_results_row(results_csv, ts, out.SSE, out.SSdU, J, out.runtime_s, theta);
+    append_results_row(results_csv, 1, ts, "BENCH", out, theta);
 
     write_metadata(out_dir, theta, scenario, out);
 end

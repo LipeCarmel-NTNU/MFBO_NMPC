@@ -1,743 +1,628 @@
-"""Two-phase multi-fidelity Bayesian optimization driver.
+"""Two-phase runtime-aware multi-fidelity Bayesian optimisation driver.
 
-Phase "init" evaluates the Sobol initialization design and stops. Those runs
-carry no surrogate: MATLAB reports the cost measured at the simulated fidelity
-and saves the per-step cost trends. Fit the fidelity surrogate from them with
+Phase "init" evaluates the Sobol design and stops. Those evaluations carry no
+surrogate: MATLAB reports the cost measured at the simulated fidelity and stores
+the per-step cost trends. The fidelity surrogate f(z) = I_z(a, b) is then fitted
+from them as vintage 0.
 
-    python "J surrogate/runtime_surrogate/fit_runtime_surrogate.py" results/init
+Phase "bo" runs the acquisition loop against that surrogate, refitting every
+refit_every iterations. A refit does not rescale earlier rows: an objective
+value keeps the estimate produced by the vintage in force when it was measured,
+and every row records which vintage that was, so the whole history can be
+recomputed under any single fit afterwards.
 
-Phase "bo" then runs the acquisition loop. MATLAB loads the fitted coefficients
-and refuses to start without them, so no BO result can be scaled by a surrogate
-from an earlier vintage.
+    python main.py init --case case1     # with main_initialization.m in MATLAB
+    python main.py bo   --case case1     # with main_BO.m in MATLAB
 
-    python main.py init      # with main_initialization.m running in MATLAB
-    python main.py bo        # with main_BO.m running in MATLAB
+Both phases resume. State is rebuilt from the results CSV, which MATLAB writes,
+reconciled against the driver's own ledger, and the run continues from the first
+evaluation that neither records. Proposals are seeded per iteration, so a
+resumed run proposes what an uninterrupted one would have.
 """
 
-import csv
+from __future__ import annotations
+
 import sys
 import time
-import subprocess
+import traceback
 from pathlib import Path
-from typing import Tuple, Optional, List, Dict
+from typing import Dict, List, Optional, Tuple
 
 import torch
-
-from gpytorch.mlls import ExactMarginalLogLikelihood
+from botorch.acquisition.acquisition import AcquisitionFunction
+from botorch.acquisition.multi_objective.logei import (
+    qLogNoisyExpectedHypervolumeImprovement,
+)
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.transforms import Normalize, Standardize
 from botorch.optim import optimize_acqf
 from botorch.sampling.normal import SobolQMCNormalSampler
-from botorch.utils.multi_objective.box_decompositions.non_dominated import FastNondominatedPartitioning
+from gpytorch.mlls import ExactMarginalLogLikelihood
 
-from botorch.acquisition.multi_objective.logei import qLogNoisyExpectedHypervolumeImprovement
-from botorch.acquisition.acquisition import AcquisitionFunction
-
-# Usa tua interface existente
 from matlab_interface import (
-    send_theta,
+    BETA_COEFFS_FILE,
+    EvaluationFailed,
+    failures_file,
+    out_dir,
     read_results,
     results_file,
-    INIT_RESULTS_FILE,
-    BO_RESULTS_FILE,
+    send_request,
+    wait_for_matlab_ready,
+    wait_for_result,
+)
+from provenance import Registry, summarise_gp
+from run_config import INTEGER_IDXS, THETA_D, RunConfig, parse_args
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "J surrogate" / "runtime_surrogate"))
+from fit_beta_surrogate import (  # noqa: E402
+    fit_all_targets,
+    write_coefficients,
+    write_vintage_record,
 )
 
-print("[debug] main.py module loaded", flush=True)
-
-
-# ============================================================
-# CONFIG (ajuste aqui)
-# ============================================================
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BASE_DIR = Path(__file__).resolve().parent
+DEVICE = torch.device("cpu")
 DTYPE = torch.double
 
-N_INIT = 20          # pontos iniciais (DOE) — must match cfg_run.n_init in main_initialization.m
-N_ITER = 40000          # iterações BO (após DOE)
-Q_BATCH = 1          # q candidates por iteração (1 = sequencial)
 
-# Coefficient file that main_BO.m loads. Phase "bo" refuses to start before the
-# fit has produced it, so the phase boundary is checked on both sides.
-CHEB_COEFFS_FILE = Path(__file__).resolve().parent / "results" / "surrogate" / "cheb_coeffs.mat"
-FIT_SCRIPT = "J surrogate/runtime_surrogate/fit_runtime_surrogate.py"
+# ---------------------------------------------------------------------------
+# Search space helpers
+# ---------------------------------------------------------------------------
 
-POLL_S = 1.0         # polling do results.csv
-WAIT_MATLAB_S = 2.0  # espera caso results.csv ainda não exista
-MAX_WAIT_MATLAB_S = 120.0  # tempo máx. aguardando results.csv (None para infinito)
+class Space:
+    """Bounds, fixed components and the projection between full and free theta."""
 
-# Aquisição: log-space
-ELL_Z = 0.25         # kernel Z (largura)
-GAMMA_TIME = 1.0     # peso da penalização de tempo
-EPS = 1e-6           # estabilidade numérica
-WZ = 1.0             # peso do termo z no log
-WT = 1.0             # peso do termo tempo no log
+    def __init__(self, cfg: RunConfig):
+        lb, ub = cfg.bounds()
+        self.cfg = cfg
+        self.spec = cfg.spec()
+        self.lb = torch.tensor(lb, dtype=DTYPE, device=DEVICE)
+        self.ub = torch.tensor(ub, dtype=DTYPE, device=DEVICE)
+        self.opt_idxs = self.spec.opt_idxs
+        self.lb_opt = self.lb[self.opt_idxs]
+        self.ub_opt = self.ub[self.opt_idxs]
 
-# Bounds (teu theta)
-# theta = [f, theta_p, theta_m, q1..q3, r_u1..r_u3, r_du1..r_du3]
-LB = torch.tensor([0.01, 0.0, 0.0] + [-3.0] * 9, dtype=DTYPE, device=DEVICE)
-UB = torch.tensor([1.00, 15.0, 7.0] + [3.0] * 9, dtype=DTYPE, device=DEVICE)
-FIXED_THETA: Dict[int, float] = {3: 0.0, 6: -1000.0, 7: -1000.0, 8: -1000.0}
-for _idx in (6, 7, 8):
-    LB[_idx] = -1000.0
-THETA_D = int(LB.numel())
-OPT_IDXS = [i for i in range(THETA_D) if i not in FIXED_THETA]
-LB_OPT = LB[OPT_IDXS]
-UB_OPT = UB[OPT_IDXS]
+    def snap(self, X: torch.Tensor) -> torch.Tensor:
+        """Clamp to bounds, round the integer components, reimpose the fixed ones."""
+        X = X.clone()
+        X = torch.max(torch.min(X, self.ub), self.lb)
+        for idx in INTEGER_IDXS:
+            X[..., idx] = torch.round(X[..., idx])
+        for idx, val in self.spec.fixed.items():
+            X[..., idx] = val
+        return X
 
-# Se quiser tentar iniciar MATLAB automaticamente (Windows):
-START_MATLAB = False
-MATLAB_CMD = "matlab"  # ou caminho completo
+    def to_full(self, X_opt: torch.Tensor) -> torch.Tensor:
+        shape = X_opt.shape[:-1] + (THETA_D,)
+        X = torch.empty(shape, dtype=DTYPE, device=DEVICE)
+        X[..., self.opt_idxs] = X_opt
+        for idx, val in self.spec.fixed.items():
+            X[..., idx] = val
+        return self.snap(X)
 
-# Log extra (além do results.csv do MATLAB)
-BASE_DIR = Path(__file__).resolve().parent
-TRACE_FILE = BASE_DIR / "results" / "opt_trace.csv"   # histórico “do Python” (DOE+OPT)
-TRACE_FLUSH_EVERY = 1                                # escreve a cada nova avaliação
+    def to_opt(self, X_full: torch.Tensor) -> torch.Tensor:
+        return self.snap(X_full)[..., self.opt_idxs]
 
-# CSV that MATLAB is currently appending to. Set by main() from the phase.
-ACTIVE_RESULTS_FILE = BO_RESULTS_FILE
+    def acq_bounds(self) -> torch.Tensor:
+        return torch.stack([self.lb_opt, self.ub_opt])
 
 
-# ============================================================
-# Utils
-# ============================================================
-def snap_theta(X: torch.Tensor) -> torch.Tensor:
-    """Clamp + arredonda variáveis inteiras (theta_p, theta_m)."""
-    X = X.clone()
-    X[..., 0] = torch.clamp(X[..., 0], LB[0], UB[0])  # f
-    X[..., 1] = torch.round(torch.clamp(X[..., 1], LB[1], UB[1]))  # theta_p int
-    X[..., 2] = torch.round(torch.clamp(X[..., 2], LB[2], UB[2]))  # theta_m int
-    X[..., 3:] = torch.clamp(X[..., 3:], LB[3:], UB[3:])
-    for idx, val in FIXED_THETA.items():
-        X[..., idx] = val
-    return X
+def sobol_design(space: Space, n: int, seed: int) -> torch.Tensor:
+    """The full initialisation design, drawn once and indexed by position.
 
-
-def opt_to_theta(X_opt: torch.Tensor) -> torch.Tensor:
-    """Map optimization-space points to full 12D theta."""
-    shp = X_opt.shape[:-1] + (THETA_D,)
-    X_theta = torch.empty(shp, dtype=DTYPE, device=DEVICE)
-    X_theta[..., OPT_IDXS] = X_opt
-    for idx, val in FIXED_THETA.items():
-        X_theta[..., idx] = val
-    return snap_theta(X_theta)
-
-
-def theta_to_opt(X_theta: torch.Tensor) -> torch.Tensor:
-    """Project full 12D theta to optimization dimensions."""
-    return snap_theta(X_theta)[..., OPT_IDXS]
-
-
-def wait_for_matlab_ready():
-    """Espera o CSV da fase ativa existir (MATLAB cria no início)."""
-    print(f"[debug] Checking if MATLAB already created {ACTIVE_RESULTS_FILE} ...")
-    t0 = time.time()
-    while True:
-        if Path(ACTIVE_RESULTS_FILE).exists():
-            print(f"[debug] Found {ACTIVE_RESULTS_FILE}, continuing.")
-            return
-        if MAX_WAIT_MATLAB_S is not None and (time.time() - t0) > MAX_WAIT_MATLAB_S:
-            print(f"[warn] Timeout waiting for {ACTIVE_RESULTS_FILE}. Continuing without it.")
-            return
-        print(f"[wait] esperando MATLAB criar {ACTIVE_RESULTS_FILE} ...")
-        time.sleep(WAIT_MATLAB_S)
-
-
-def last_nrows() -> int:
-    try:
-        ts, *_ = read_results(ACTIVE_RESULTS_FILE)
-    except FileNotFoundError:
-        return 0
-    return len(ts)
-
-
-def _theta_close(a: torch.Tensor, b: torch.Tensor, atol: float = 1e-9) -> bool:
-    return torch.allclose(a.view(-1), b.view(-1), atol=atol, rtol=0.0)
-
-
-def wait_for_new_row(prev_rows: int, target_theta: torch.Tensor, timeout_s: float = 1e9) -> Tuple[float, float, float, float]:
+    Every point of the design is generated regardless of how many have already
+    been evaluated, and the resumed run takes the ones it still needs by index.
+    Drawing only the missing points would advance the Sobol stream by a
+    different amount after each interruption, so the design would depend on when
+    the run was interrupted.
     """
-    Espera o MATLAB adicionar uma nova linha.
-    Retorna (SSE, SSdU, J, runtime_s) da linha que bate com o theta enviado.
-    """
-    t0 = time.time()
-    print(f"[debug] Waiting for new MATLAB rows beyond index {prev_rows} ...")
-    while True:
-        if time.time() - t0 > timeout_s:
-            raise TimeoutError("Timeout esperando results.csv atualizar.")
+    d = len(space.opt_idxs)
+    engine = torch.quasirandom.SobolEngine(dimension=d, scramble=True, seed=seed)
+    raw = engine.draw(n * 4).to(device=DEVICE, dtype=DTYPE)
+    candidates = space.lb_opt + (space.ub_opt - space.lb_opt) * raw
 
-        try:
-            ts, sse, ssd_u, cost, runtime, theta_mat = read_results(ACTIVE_RESULTS_FILE)
-        except FileNotFoundError:
-            print(f"[debug] results csv still missing: {ACTIVE_RESULTS_FILE}")
-            time.sleep(POLL_S)
-            continue
+    chosen: List[torch.Tensor] = []
+    for i in range(candidates.shape[0]):
+        point = space.to_opt(space.to_full(candidates[i]))
+        if any(torch.allclose(point, p, atol=1e-12) for p in chosen):
+            continue                       # duplicate after rounding the integers
+        chosen.append(point)
+        if len(chosen) == n:
+            break
 
-        if len(ts) <= prev_rows:
-            time.sleep(POLL_S)
-            continue
-
-        print(f"[debug] Detected {len(ts) - prev_rows} new row(s); matching theta ...")
-        # pode ter mais de 1 linha nova; procura a que bate com o theta
-        for k in range(prev_rows, len(ts)):
-            th = torch.tensor(theta_mat[k], dtype=DTYPE, device=DEVICE)
-            if _theta_close(th, target_theta):
-                return float(sse[k]), float(ssd_u[k]), float(cost[k]), float(runtime[k])
-
-        print("[debug] New rows did not match target theta yet; sleeping ...")
-        time.sleep(POLL_S)
+    if len(chosen) < n:
+        raise RuntimeError(
+            f"the Sobol design produced only {len(chosen)} distinct points of the "
+            f"{n} requested; widen the integer bounds or lower n_init")
+    return torch.stack(chosen)
 
 
-def evaluate_theta(theta: torch.Tensor) -> Tuple[float, float, float, float]:
-    """Envia theta -> MATLAB e espera SSE/SSdU/J/runtime."""
-    theta = snap_theta(theta).view(-1)
-    prev = last_nrows()
-    print(f"[debug] Evaluating theta {theta.detach().cpu().tolist()} (prev_rows={prev})")
-    send_theta(theta.detach().cpu().tolist())
-    sse, ssd, jval, rt = wait_for_new_row(prev, theta)
-    print(f"[debug] MATLAB returned SSE={sse:.4g}, SSdU={ssd:.4g}, J={jval:.4g}, runtime={rt:.2f}s")
-    return sse, ssd, jval, rt
+# ---------------------------------------------------------------------------
+# Models and acquisition
+# ---------------------------------------------------------------------------
 
+def build_models(space: Space, X_opt: torch.Tensor, Y_obj: torch.Tensor,
+                 Y_time: torch.Tensor, eps: float):
+    """Fit the objective GP and the log-runtime GP on the accumulated data."""
+    bounds = space.acq_bounds().to(device=DEVICE, dtype=DTYPE)
+    Y_time_log = torch.log(Y_time.clamp_min(eps))
 
-def _empty_history() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
-    X = torch.empty((0, THETA_D), dtype=DTYPE, device=DEVICE)
-    Y_obj = torch.empty((0, 2), dtype=DTYPE, device=DEVICE)
-    Y_time = torch.empty((0, 1), dtype=DTYPE, device=DEVICE)
-    return X, Y_obj, Y_time, 0
-
-
-def load_history_from_results(paths=None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
-    """
-    Lê os CSVs indicados e reconstrói:
-      X       : (n, d)
-      Y_obj   : (n, 2)   = -[SSE, SSdU]
-      Y_time  : (n, 1)   = runtime_s (positivo)
-    Retorna também n (número de linhas).
-
-    paths is read in order, so passing [init, bo] puts the initialization rows
-    first and keeps the DOE/OPT row indices aligned with N_INIT. A missing or
-    empty file contributes no rows.
-    """
-    if paths is None:
-        paths = [ACTIVE_RESULTS_FILE]
-
-    theta_rows: List[List[float]] = []
-    sse_all: List[float] = []
-    ssd_all: List[float] = []
-    rt_all: List[float] = []
-
-    for path in paths:
-        print(f"[debug] Reading history from {path}")
-        try:
-            ts, sse, ssd_u, cost, runtime, theta_mat = read_results(path)
-        except FileNotFoundError:
-            print(f"[debug] results csv not found yet: {path}")
-            continue
-        if not ts:
-            continue
-        theta_rows.extend(theta_mat)
-        sse_all.extend(sse)
-        ssd_all.extend(ssd_u)
-        rt_all.extend(runtime)
-
-    n = len(theta_rows)
-    if n == 0:
-        return _empty_history()
-
-    X = snap_theta(torch.tensor(theta_rows, dtype=DTYPE, device=DEVICE))
-
-    Y_obj = torch.stack(
-        [-torch.tensor(sse_all, dtype=DTYPE, device=DEVICE),
-         -torch.tensor(ssd_all, dtype=DTYPE, device=DEVICE)],
-        dim=-1
+    model_obj = SingleTaskGP(
+        X_opt, Y_obj,
+        input_transform=Normalize(d=X_opt.shape[-1], bounds=bounds),
+        outcome_transform=Standardize(m=Y_obj.shape[-1]),
     )
-    rt = torch.tensor(rt_all, dtype=DTYPE, device=DEVICE).clamp_min(EPS)
-    Y_time = rt.view(-1, 1)
-    print(f"[debug] Loaded history com n={n}, X={tuple(X.shape)}, Y_obj={tuple(Y_obj.shape)}, Y_time={tuple(Y_time.shape)}")
-    return X, Y_obj, Y_time, n
+    model_time = SingleTaskGP(
+        X_opt, Y_time_log,
+        input_transform=Normalize(d=X_opt.shape[-1], bounds=bounds),
+        outcome_transform=Standardize(m=1),
+    )
+
+    fit_gpytorch_mll(ExactMarginalLogLikelihood(model_obj.likelihood, model_obj))
+    fit_gpytorch_mll(ExactMarginalLogLikelihood(model_time.likelihood, model_time))
+    return model_obj, model_time
 
 
-def ensure_trace_header():
-    TRACE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if TRACE_FILE.exists():
-        return
-    with TRACE_FILE.open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            "row_idx", "phase", "doe_idx", "bo_idx",
-            "timestamp_py", "acq_value",
-            "ELL_Z", "GAMMA_TIME", "WZ", "WT",
-            "t_floor",
-            "SSE", "SSdU", "J", "runtime_s",
-            *[f"theta_{i+1}" for i in range(THETA_D)],
-        ])
+class RuntimeAwareLogAcq(AcquisitionFunction):
+    """log alpha = log qLogNEHVI + w_z log(a_z + eps) - w_t gamma log(E[t] + eps).
 
+    The fidelity bias a_z is centred at z = 1 and rewards candidates closer to
+    full fidelity. The runtime term penalises candidates whose predicted
+    evaluation cost is large. The runtime GP is fitted on log t, so the
+    expectation is taken in lognormal form.
 
-def count_trace_rows() -> int:
-    if not TRACE_FILE.exists():
-        return 0
-    with TRACE_FILE.open("r", newline="") as f:
-        r = csv.reader(f)
-        rows = list(r)
-    return max(0, len(rows) - 1)  # exclui header
-
-
-def append_trace_row(row: Dict):
-    ensure_trace_header()
-    with TRACE_FILE.open("a", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            row["row_idx"], row["phase"], row["doe_idx"], row["bo_idx"],
-            row["timestamp_py"], row["acq_value"],
-            row["ELL_Z"], row["GAMMA_TIME"], row["WZ"], row["WT"],
-            row["t_floor"],
-            row["SSE"], row["SSdU"], row["J"], row["runtime_s"],
-            *row["theta_list"],
-        ])
-
-
-def sync_trace_with_existing_results(X: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor, paths=None):
+    The two terms are not commensurable: qLogNEHVI carries the units of the
+    hypervolume in standardised objective space and drifts in magnitude as the
+    frontier fills in, so the effective weight of the runtime penalty is not
+    constant over a run.
     """
-    Se já existirem linhas antigas nos CSVs, garante que o opt_trace.csv tenha
-    pelo menos essas mesmas linhas (para retomada limpa).
-    Para linhas antigas, acq_value fica vazio.
-    """
-    ensure_trace_header()
-    n_trace = count_trace_rows()
-    n_res = X.shape[0]
-    if n_trace >= n_res:
-        return
 
-    if paths is None:
-        paths = [ACTIVE_RESULTS_FILE]
-
-    sse: List[float] = []
-    ssd_u: List[float] = []
-    cost: List[float] = []
-    runtime: List[float] = []
-    theta_mat: List[List[float]] = []
-    for path in paths:
-        try:
-            _ts, _sse, _ssd, _cost, _rt, _theta = read_results(path)
-        except FileNotFoundError:
-            continue
-        sse.extend(_sse)
-        ssd_u.extend(_ssd)
-        cost.extend(_cost)
-        runtime.extend(_rt)
-        theta_mat.extend(_theta)
-
-    for idx in range(n_trace, n_res):
-        phase = "DOE" if idx < N_INIT else "OPT"
-        doe_idx = idx + 1 if idx < N_INIT else ""
-        bo_idx = (idx - N_INIT + 1) if idx >= N_INIT else ""
-        row = {
-            "row_idx": idx + 1,
-            "phase": phase,
-            "doe_idx": doe_idx,
-            "bo_idx": bo_idx,
-            "timestamp_py": "",          # não temos (foi gerado antes)
-            "acq_value": "",             # não temos
-            "ELL_Z": ELL_Z,
-            "GAMMA_TIME": GAMMA_TIME,
-            "WZ": WZ,
-            "WT": WT,
-            "t_floor": float(torch.tensor(runtime[:idx+1]).min().clamp_min(EPS).item()),
-            "SSE": float(sse[idx]),
-            "SSdU": float(ssd_u[idx]),
-            "J": float(cost[idx]),
-            "runtime_s": float(runtime[idx]),
-            "theta_list": [float(v) for v in theta_mat[idx]],
-        }
-        append_trace_row(row)
-
-
-# ============================================================
-# Model + Acq (corrigidos para tempo)
-# ============================================================
-def build_models(X_opt: torch.Tensor, Y_obj: torch.Tensor, Y_time: torch.Tensor):
-    """
-    2 GPs:
-      - model_obj: Y_obj = -[SSE, SSdU] (standardized)
-      - model_time_log: log(runtime) (standardized)  -> garante positividade via lognormal
-    """
-    bounds = torch.stack([LB_OPT, UB_OPT]).to(device=DEVICE, dtype=DTYPE)
-    input_tf = Normalize(d=X_opt.shape[-1], bounds=bounds)
-    obj_tf = Standardize(m=2)
-    time_tf = Standardize(m=1)
-
-    # runtime positivo -> log
-    Y_time_log = torch.log(Y_time.clamp_min(EPS))
-
-    model_obj = SingleTaskGP(X_opt, Y_obj, input_transform=input_tf, outcome_transform=obj_tf)
-    model_time_log = SingleTaskGP(X_opt, Y_time_log, input_transform=input_tf, outcome_transform=time_tf)
-
-    mll_obj = ExactMarginalLogLikelihood(model_obj.likelihood, model_obj)
-    mll_time = ExactMarginalLogLikelihood(model_time_log.likelihood, model_time_log)
-
-    fit_gpytorch_mll(mll_obj)
-    fit_gpytorch_mll(mll_time)
-
-    return model_obj, model_time_log
-
-
-class MFMOLogAcq(AcquisitionFunction):
-    """
-    log_alpha = qLogNEHVI + WZ*log(az+eps) - WT*gamma*log(E[t]+eps)
-
-    Tempo:
-      o GP é treinado em log(t). Assumindo lognormal:
-        E[t] = exp(mu + 0.5*var)
-    """
-    def __init__(
-        self,
-        qlognehvi,
-        model_time_log,
-        ell_z=0.25,
-        gamma=1.0,
-        eps=1e-6,
-        wz=1.0,
-        wt=1.0,
-        t_floor: float = 1e-6,
-        max_log_et: float = 50.0,
-    ):
+    def __init__(self, qlognehvi, model_time_log, *, ell_z: float, gamma: float,
+                 eps: float, w_z: float, w_t: float, t_floor: float,
+                 max_log_et: float = 50.0):
         super().__init__(model=qlognehvi.model)
         self.qlognehvi = qlognehvi
         self.model_time_log = model_time_log
         self.ell_z = ell_z
         self.gamma = gamma
         self.eps = eps
-        self.wz = wz
-        self.wt = wt
+        self.w_z = w_z
+        self.w_t = w_t
         self.t_floor = float(t_floor)
         self.max_log_et = float(max_log_et)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        # (1) termo multiobjetivo: já é LOG
-        log_hv = self.qlognehvi(X)  # (batch)
-        log_hv = torch.nan_to_num(log_hv, neginf=-1e6, posinf=1e6)
+        log_hv = torch.nan_to_num(self.qlognehvi(X), neginf=-1e6, posinf=1e6)
 
-        # (2) Kernel Z em log
-        f = X[..., 0]  # (batch x q)
-        az = torch.exp(-((1.0 - f) ** 2) / (2.0 * (self.ell_z ** 2)))  # (batch x q) em (0,1]
-        az = az.mean(dim=-1)  # (batch)
-        log_az = torch.log(az + self.eps)
-        log_az = torch.nan_to_num(log_az, neginf=-1e6, posinf=1e6)
+        z = X[..., 0]
+        a_z = torch.exp(-((1.0 - z) ** 2) / (2.0 * self.ell_z ** 2)).mean(dim=-1)
+        log_az = torch.nan_to_num(torch.log(a_z + self.eps), neginf=-1e6, posinf=1e6)
 
-        # (3) penalização de tempo em log, com GP em log(t)
         post = self.model_time_log.posterior(X)
-        mu = post.mean          # (batch x q x 1)
-        var = post.variance     # (batch x q x 1)
-
-        # log(E[t]) = mu + 0.5*var (lognormal)
-        log_et = (mu + 0.5 * var).mean(dim=-2).squeeze(-1)  # (batch)
+        log_et = (post.mean + 0.5 * post.variance).mean(dim=-2).squeeze(-1)
         log_et = torch.nan_to_num(log_et, neginf=-1e6, posinf=1e6).clamp_max(self.max_log_et)
-
-        # E[t] (para aplicar piso observado)
         et = torch.exp(log_et).clamp_min(self.t_floor)
+        log_pen = torch.nan_to_num(-self.gamma * torch.log(et + self.eps),
+                                   neginf=-1e6, posinf=1e6)
 
-        log_time_pen = -self.gamma * torch.log(et + self.eps)
-        log_time_pen = torch.nan_to_num(log_time_pen, neginf=-1e6, posinf=1e6)
-
-        out = log_hv + self.wz * log_az + self.wt * log_time_pen
-        return torch.nan_to_num(out, neginf=-1e6, posinf=1e6)
+        return torch.nan_to_num(log_hv + self.w_z * log_az + self.w_t * log_pen,
+                                neginf=-1e6, posinf=1e6)
 
 
-def propose_candidate(
-    X: torch.Tensor,
-    Y_obj: torch.Tensor,
-    Y_time: torch.Tensor,
-    q: int = 1
-) -> Tuple[torch.Tensor, float, float, List[float]]:
+def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
+            Y_time: torch.Tensor, seed: int) -> Tuple[torch.Tensor, Dict]:
+    """Fit the surrogates, maximise the acquisition, return the candidate.
+
+    The seed is set from the iteration index rather than left to accumulate, so
+    a proposal depends on the data and the index alone. A resumed run therefore
+    proposes what an uninterrupted one would have proposed at the same index.
     """
-    Retorna:
-      cand_opt: (q, d_opt) snapped
-      acq_value: float (já avaliado no snapped)
-      t_floor: float usado
-      ref_point: list[float] usado no NEHVI
-    """
-    print(f"[debug] Proposing candidate with dataset size {X.shape[0]}")
-    X_opt = theta_to_opt(X)
-    model_obj, model_time_log = build_models(X_opt, Y_obj, Y_time)
+    torch.manual_seed(seed)
 
-    # ref_point para maximização: deve ser "pior" que os pontos observados (mais baixo)
+    X_opt = space.to_opt(X)
+    model_obj, model_time = build_models(space, X_opt, Y_obj, Y_time, cfg.eps)
+
     y_min = Y_obj.min(dim=0).values
     y_range = (Y_obj.max(dim=0).values - y_min).clamp_min(1e-6)
-    ref_point = (y_min - 0.2 * y_range).tolist()
+    ref_point = (y_min - cfg.ref_point_backoff * y_range).tolist()
 
-    _ = FastNondominatedPartitioning(
-        ref_point=torch.tensor(ref_point, dtype=DTYPE, device=DEVICE),
-        Y=Y_obj,
-    )
-
-    sampler = SobolQMCNormalSampler(sample_shape=torch.Size([128]))
-
-    qlognehvi = qLogNoisyExpectedHypervolumeImprovement(
+    acq_inner = qLogNoisyExpectedHypervolumeImprovement(
         model=model_obj,
         ref_point=ref_point,
         X_baseline=X_opt,
-        sampler=sampler,
-        prune_baseline=True,
+        sampler=SobolQMCNormalSampler(sample_shape=torch.Size([cfg.mc_samples])),
+        prune_baseline=cfg.prune_baseline,
         cache_pending=True,
-        max_iep=256,
+        max_iep=cfg.max_iep,
     )
 
-    # piso = melhor tempo observado até agora
-    t_floor = float(Y_time.min().clamp_min(EPS).item())
-
-    acq = MFMOLogAcq(
-        qlognehvi=qlognehvi,
-        model_time_log=model_time_log,
-        ell_z=ELL_Z,
-        gamma=GAMMA_TIME,
-        eps=EPS,
-        wz=WZ,
-        wt=WT,
-        t_floor=t_floor,
+    t_floor = float(Y_time.min().clamp_min(cfg.eps).item())
+    acq = RuntimeAwareLogAcq(
+        acq_inner, model_time,
+        ell_z=cfg.ell_z, gamma=cfg.gamma_time, eps=cfg.eps,
+        w_z=cfg.w_z, w_t=cfg.w_t, t_floor=t_floor,
     )
 
-    bounds = torch.stack([LB_OPT, UB_OPT]).to(device=DEVICE, dtype=DTYPE)
-    cand_opt, _ = optimize_acqf(
+    t0 = time.time()
+    cand_opt, acq_at_optimum = optimize_acqf(
         acq_function=acq,
-        bounds=bounds,
-        q=q,
-        num_restarts=20,
-        raw_samples=1024,
-        options={"batch_limit": 5, "maxiter": 250},
+        bounds=space.acq_bounds(),
+        q=cfg.q_batch,
+        num_restarts=cfg.num_restarts,
+        raw_samples=cfg.raw_samples,
+        options={"batch_limit": cfg.acq_batch_limit, "maxiter": cfg.acq_maxiter},
     )
+    elapsed = time.time() - t0
 
-    cand_opt = theta_to_opt(opt_to_theta(cand_opt))
-
-    # avalia acq no snapped (pra log)
+    cand_full = space.to_full(cand_opt)
     with torch.no_grad():
-        av = acq(cand_opt).detach().cpu().view(-1)[0].item()
+        acq_at_snapped = float(acq(space.to_opt(cand_full)).detach().cpu().view(-1)[0])
 
-    return cand_opt, float(av), t_floor, ref_point
+    diagnostics = {
+        "acq_value_at_optimum": float(acq_at_optimum.detach().cpu().view(-1)[0]),
+        "acq_value_at_snapped": acq_at_snapped,
+        "acq_seed": int(seed),
+        "acq_wall_s": elapsed,
+        "ref_point": [float(v) for v in ref_point],
+        "t_floor": t_floor,
+        "n_train": int(X.shape[0]),
+        "gp_objective": summarise_gp(model_obj, "objective"),
+        "gp_log_runtime": summarise_gp(model_time, "log_runtime"),
+    }
+    return cand_full.view(-1), diagnostics
 
 
-def sobol_unique_points(n_new: int, existing_X: torch.Tensor, seed: int = 1234) -> torch.Tensor:
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+
+def load_history(paths: List[Path]) -> List[Dict]:
+    """Read every results row of the given files, in file order then eval_id."""
+    rows: List[Dict] = []
+    for path in paths:
+        rows.extend(read_results(path))
+    rows.sort(key=lambda r: r["eval_id"])
+    return rows
+
+
+def history_tensors(rows: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Assemble the optimiser's view of the history.
+
+    Y_obj is the negated objective vector as it was recorded. The values scaled
+    by an earlier surrogate vintage are used unchanged: a refit does not revise
+    them. The measured costs and the divisors are in the CSV, so the whole
+    history can be recomputed under one vintage afterwards.
     """
-    Gera pontos Sobol e evita duplicar os já existentes.
+    if not rows:
+        return (torch.empty((0, THETA_D), dtype=DTYPE, device=DEVICE),
+                torch.empty((0, 2), dtype=DTYPE, device=DEVICE),
+                torch.empty((0, 1), dtype=DTYPE, device=DEVICE))
+
+    X = torch.tensor([r["theta"] for r in rows], dtype=DTYPE, device=DEVICE)
+    Y_obj = torch.tensor([[-r["SSE"], -r["SSdU"]] for r in rows],
+                         dtype=DTYPE, device=DEVICE)
+    Y_time = torch.tensor([[r["runtime_s"]] for r in rows],
+                          dtype=DTYPE, device=DEVICE).clamp_min(1e-9)
+    return X, Y_obj, Y_time
+
+
+# ---------------------------------------------------------------------------
+# Surrogate refit
+# ---------------------------------------------------------------------------
+
+def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
+                init_rows: List[Dict], bo_rows: List[Dict]) -> Dict:
+    """Fit, publish and record one surrogate vintage.
+
+    Vintage 0 is fitted on the initialisation runs alone. Vintage v is fitted on
+    those plus the first v * refit_every optimisation runs. The file list is
+    resolved from the ledger, so the record names exactly which evaluations
+    informed the fit.
     """
-    d = len(OPT_IDXS)
-    sobol = torch.quasirandom.SobolEngine(dimension=d, scramble=True, seed=seed)
+    n_bo = vintage * cfg.refit_every
+    used_rows = list(init_rows) + list(bo_rows[:n_bo])
 
-    pts = []
-    tries = 0
-    max_tries = 20000
-    while len(pts) < n_new and tries < max_tries:
-        tries += 1
-        x_opt = LB_OPT + (UB_OPT - LB_OPT) * sobol.draw(1).to(device=DEVICE, dtype=DTYPE)
-        x = theta_to_opt(opt_to_theta(x_opt)).view(1, -1)
+    paths: List[Path] = []
+    for row in used_rows:
+        phase_dir = out_dir("init") if row["phase"] == "DOE" else out_dir("bo")
+        candidate = phase_dir / f"out_{row['timestamp']}.mat"
+        if candidate.exists():
+            paths.append(candidate)
+        else:
+            print(f"[fit] missing trends file for eval {row['eval_id']}: {candidate.name}")
 
-        duplicate = False
-        if existing_X.numel() > 0:
-            # checa contra existing e contra os já selecionados
-            for j in range(existing_X.shape[0]):
-                if _theta_close(existing_X[j], x[0], atol=1e-9):
-                    duplicate = True
-                    break
-        if not duplicate:
-            for y in pts:
-                if _theta_close(y[0], x[0], atol=1e-9):
-                    duplicate = True
-                    break
+    if not paths:
+        raise RuntimeError(f"vintage {vintage}: no out_*.mat file available to fit on")
 
-        if not duplicate:
-            pts.append(x)
+    print(f"[fit] vintage {vintage}: fitting on {len(paths)} runs "
+          f"({len(init_rows)} DOE + {n_bo} OPT requested)")
+    t0 = time.time()
+    results = fit_all_targets(
+        paths,
+        z_min=cfg.fit_z_min,
+        lambda_grid=cfg.fit_lambda_grid,
+        k_fold=cfg.fit_k_fold,
+        n_repeats=cfg.fit_cv_repeats,
+        seed=cfg.cv_seed,
+        horizon_hours=cfg.horizon_hours,
+    )
+    elapsed = time.time() - t0
 
-    if len(pts) < n_new:
-        raise RuntimeError(f"Não consegui gerar {n_new} pontos Sobol únicos (gerou {len(pts)}).")
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    context = {
+        "case": cfg.case,
+        "n_doe_rows": len(init_rows),
+        "n_opt_rows_used": n_bo,
+        "eval_ids_used": [r["eval_id"] for r in used_rows],
+        "files_used": [p.name for p in paths],
+        "files_missing": len(used_rows) - len(paths),
+        "fit_wall_s": elapsed,
+        "governs_iterations": [vintage * cfg.refit_every + 1,
+                               (vintage + 1) * cfg.refit_every],
+        "rescales_past_rows": False,
+    }
 
-    return torch.cat(pts, dim=0)
+    write_vintage_record(results, registry.vintage_path(vintage), vintage,
+                         created_at, extra=context)
+    write_coefficients(results, BETA_COEFFS_FILE, vintage, created_at)
+
+    for name, r in results.items():
+        print(f"[fit]   {name}: a = {r.a:.6f}, b = {r.b:.6f}, lambda = {r.lam:g}, "
+              f"loss = {r.loss:.4e} (runs {r.n_runs_used}/{r.n_runs_total})")
+    print(f"[fit] vintage {vintage} published to {BETA_COEFFS_FILE.name} in {elapsed:.1f} s")
+
+    return {"vintage": vintage, "created_at": created_at, "context": context,
+            "targets": {n: r.to_dict() for n, r in results.items()}}
 
 
-def maybe_start_matlab(phase: str):
-    if not START_MATLAB:
+def ensure_vintage(cfg: RunConfig, registry: Registry, vintage: int,
+                   init_rows: List[Dict], bo_rows: List[Dict]) -> None:
+    """Publish the vintage that should govern the next iteration.
+
+    Called before every proposal rather than only on refit iterations, so an
+    interrupted run republishes the correct coefficients on restart instead of
+    continuing against whatever file happened to survive.
+    """
+    record = registry.load_vintage(vintage)
+    if record is not None and BETA_COEFFS_FILE.exists():
+        import scipy.io
+        published = float(scipy.io.loadmat(str(BETA_COEFFS_FILE))["vintage"].ravel()[0])
+        if int(published) == vintage:
+            return
+        print(f"[fit] published coefficients are vintage {int(published)}, "
+              f"iteration needs {vintage}; republishing from the record")
+        write_coefficients(
+            _results_from_record(record), BETA_COEFFS_FILE, vintage,
+            record.get("created_at", ""))
         return
-    script = "main_initialization" if phase == "init" else "main_BO"
-    print(f"[info] tentando iniciar MATLAB automaticamente ({script})...")
-    try:
-        subprocess.Popen(
-            [MATLAB_CMD, "-batch", f"try, {script}; catch ME, disp(getReport(ME)); end;"],
-            cwd=str(BASE_DIR),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            shell=False,
+
+    fit_vintage(cfg, registry, vintage, init_rows, bo_rows)
+
+
+def _results_from_record(record: Dict):
+    """Rebuild the coefficient payload from a stored vintage record."""
+    from fit_beta_surrogate import FitResult
+
+    out = {}
+    for name, t in record["targets"].items():
+        out[name] = FitResult(
+            target=name, a=t["a"], b=t["b"], lam=t["lam"], loss=t["loss"],
+            lambda_grid=t["lambda_grid"], cv_loss=t["cv_loss"],
+            cv_folds_scored=t["cv_folds_scored"], n_runs_total=t["n_runs_total"],
+            n_runs_used=t["n_runs_used"], n_samples=t["n_samples"],
         )
-        print("[info] MATLAB iniciado (modo batch).")
-    except Exception as e:
-        print(f"[warn] falhou iniciar MATLAB automaticamente: {e}")
-        print(f"[warn] inicie o MATLAB manualmente e rode {script}.")
+    return out
 
 
-# ============================================================
-# Main
-# ============================================================
-def run_initialization():
-    """Phase 1: evaluate the Sobol design, then stop for the surrogate fit."""
-    global ACTIVE_RESULTS_FILE
-    ACTIVE_RESULTS_FILE = INIT_RESULTS_FILE
+# ---------------------------------------------------------------------------
+# Phases
+# ---------------------------------------------------------------------------
 
-    X, Y_obj, Y_time, n_rows = load_history_from_results([INIT_RESULTS_FILE])
-    if n_rows > 0:
-        sync_trace_with_existing_results(X, Y_obj, Y_time, [INIT_RESULTS_FILE])
+def run_initialization(cfg: RunConfig) -> None:
+    space = Space(cfg)
+    registry = Registry(BASE_DIR / "results", "init")
+    registry.write_manifest(cfg.to_dict(), BASE_DIR)
 
-    print(f"[resume] {n_rows} linhas em {INIT_RESULTS_FILE} -> DOE: {n_rows}/{N_INIT}")
+    path_results = results_file("init")
+    path_failures = failures_file("init")
+    wait_for_matlab_ready(path_results, cfg.max_wait_matlab_s, cfg.matlab_wait_s)
 
-    if n_rows >= N_INIT:
-        print("[init] design já completo.")
-    else:
-        n_missing = N_INIT - n_rows
-        print(f"[init] faltam {n_missing} pontos (N_INIT={N_INIT}) ...")
+    rows = load_history([path_results])
+    registry.reconcile(rows)
+    done = {r["eval_id"] for r in rows}
 
-        X_new_opt = sobol_unique_points(n_missing, existing_X=theta_to_opt(X), seed=1234)
-        for i in range(n_missing):
-            theta = opt_to_theta(X_new_opt[i])
-            sse, ssd, jval, rt = evaluate_theta(theta)
-            X = torch.cat([X, theta.view(1, -1)], dim=0)
-            Y_obj = torch.cat([Y_obj, torch.tensor([[-sse, -ssd]], dtype=DTYPE, device=DEVICE)], dim=0)
-            Y_time = torch.cat([Y_time, torch.tensor([[rt]], dtype=DTYPE, device=DEVICE)], dim=0)
+    design = sobol_design(space, cfg.n_init, cfg.sobol_seed)
+    print(f"[init] {len(done)} of {cfg.n_init} design points already evaluated")
 
-            global_row = X.shape[0]
-            append_trace_row({
-                "row_idx": global_row,
-                "phase": "DOE",
-                "doe_idx": global_row,
-                "bo_idx": "",
-                "timestamp_py": int(time.time()),
-                "acq_value": "",
-                "ELL_Z": ELL_Z,
-                "GAMMA_TIME": GAMMA_TIME,
-                "WZ": WZ,
-                "WT": WT,
-                "t_floor": float(Y_time.min().clamp_min(EPS).item()),
-                "SSE": float(sse),
-                "SSdU": float(ssd),
-                "J": float(jval),
-                "runtime_s": float(rt),
-                "theta_list": [float(v) for v in theta.view(-1).detach().cpu().tolist()],
+    for i in range(cfg.n_init):
+        eval_id = i + 1
+        if eval_id in done:
+            continue
+
+        theta = space.to_full(design[i]).view(-1)
+        theta_list = [float(v) for v in theta.tolist()]
+        sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
+        try:
+            row = wait_for_result(eval_id, path_results, path_failures,
+                                  poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)
+        except EvaluationFailed as exc:
+            registry.append_evaluation({
+                "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
+                "theta": theta_list, "sent_at": sent_at,
+                "failed": True, "failure": exc.failure,
             })
+            print(f"[init] design point {eval_id} failed; it is recorded and skipped")
+            continue
 
-            print(f"  DOE {global_row:02d}/{N_INIT}: SSE={sse:.4g}, SSdU={ssd:.4g}, rt={rt:.2f}s, f={theta[0].item():.3f}")
+        registry.append_evaluation({
+            "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
+            "doe_index": eval_id, "theta": theta_list,
+            "sobol_seed": cfg.sobol_seed, "sent_at": sent_at,
+            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "beta_vintage_applied": None,
+            "result": row,
+        })
+        print(f"[init] {eval_id:3d}/{cfg.n_init}  z={row['z']:.4f}  "
+              f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
+              f"runtime={row['runtime_s']:.1f}s")
 
-    print("\n[init] fase de inicialização concluída.")
-    print("Próximos passos:")
-    print(f'  1) python "{FIT_SCRIPT}" "{INIT_RESULTS_FILE.parent}"')
-    print(f"  2) grave os coeficientes em {CHEB_COEFFS_FILE}")
-    print("  3) rode main_BO.m no MATLAB e 'python main.py bo' aqui")
-    return X, Y_obj, Y_time
+    rows = load_history([path_results])
+    print(f"\n[init] initialisation complete: {len(rows)} evaluations")
+
+    if not registry.vintage_exists(0):
+        bo_registry = Registry(BASE_DIR / "results", "bo")
+        fit_vintage(cfg, bo_registry, 0, rows, [])
+        print("[init] vintage 0 fitted and published")
+    print("Start MATLAB on main_BO.m, then run:  python main.py bo "
+          f"--case {cfg.case}")
 
 
-def run_bo():
-    """Phase 2: the acquisition loop, on top of the initialization history."""
-    global ACTIVE_RESULTS_FILE
-    ACTIVE_RESULTS_FILE = BO_RESULTS_FILE
+def run_bo(cfg: RunConfig) -> None:
+    space = Space(cfg)
+    registry = Registry(BASE_DIR / "results", "bo")
+    registry.write_manifest(cfg.to_dict(), BASE_DIR)
 
-    if not CHEB_COEFFS_FILE.exists():
-        raise FileNotFoundError(
-            f"Fidelity surrogate coefficients not found: {CHEB_COEFFS_FILE}\n"
-            f'Run "python main.py init" with main_initialization.m, then fit with\n'
-            f'  python "{FIT_SCRIPT}" "{INIT_RESULTS_FILE.parent}"'
-        )
+    path_init = results_file("init")
+    path_results = results_file("bo")
+    path_failures = failures_file("bo")
+    wait_for_matlab_ready(path_results, cfg.max_wait_matlab_s, cfg.matlab_wait_s)
 
-    # The GP trains on the initialization rows and the BO rows together, in that
-    # order, so row index < N_INIT still identifies a DOE point.
-    history_paths = [INIT_RESULTS_FILE, BO_RESULTS_FILE]
-    X, Y_obj, Y_time, n_rows = load_history_from_results(history_paths)
-    if n_rows > 0:
-        sync_trace_with_existing_results(X, Y_obj, Y_time, history_paths)
-
-    n_init_done = min(n_rows, N_INIT)
-    if n_init_done < N_INIT:
+    init_rows = load_history([path_init])
+    if len(init_rows) < cfg.n_init:
         raise RuntimeError(
-            f"only {n_init_done} of {N_INIT} initialization points found in {INIT_RESULTS_FILE}. "
-            'Finish phase "init" first.'
-        )
+            f"only {len(init_rows)} of {cfg.n_init} initialisation evaluations found "
+            f"in {path_init}. Finish phase 'init' first.")
 
-    n_opt_done = max(0, n_rows - N_INIT)
-    print(f"[resume] {n_rows} linhas -> DOE: {n_init_done}/{N_INIT}, OPT: {n_opt_done}/{N_ITER}")
+    bo_rows = load_history([path_results])
+    registry.reconcile(bo_rows)
+    print(f"[bo] resuming with {len(init_rows)} DOE and {len(bo_rows)} OPT evaluations")
 
-    remaining = max(0, N_ITER - n_opt_done)
-    if remaining == 0:
-        print("[bo] nada a fazer: já completou todas as iterações.")
-    else:
-        print(f"[bo] continuando: faltam {remaining} iterações (de {N_ITER}) ...")
+    done = {r["eval_id"] for r in bo_rows}
 
-    for k in range(remaining):
-        bo_idx = n_opt_done + k + 1  # 1-based dentro do BO
-        cand_opt, acq_val, t_floor, ref_point = propose_candidate(X, Y_obj, Y_time, q=Q_BATCH)
-        cand_opt = cand_opt.squeeze(0)  # (d_opt,)
-        cand = opt_to_theta(cand_opt.view(1, -1)).squeeze(0)  # (d_full,)
+    for k in range(len(bo_rows), cfg.n_iter):
+        bo_idx = k + 1
+        eval_id = cfg.n_init + bo_idx
+        if eval_id in done:
+            continue
 
-        sse, ssd, jval, rt = evaluate_theta(cand)
+        vintage = (bo_idx - 1) // cfg.refit_every
+        ensure_vintage(cfg, registry, vintage, init_rows, bo_rows)
 
-        X = torch.cat([X, cand.view(1, -1)], dim=0)
-        Y_obj = torch.cat([Y_obj, torch.tensor([[-sse, -ssd]], dtype=DTYPE, device=DEVICE)], dim=0)
-        Y_time = torch.cat([Y_time, torch.tensor([[rt]], dtype=DTYPE, device=DEVICE)], dim=0)
+        X, Y_obj, Y_time = history_tensors(init_rows + bo_rows)
+        theta, diagnostics = propose(space, cfg, X, Y_obj, Y_time,
+                                     seed=cfg.torch_seed + eval_id)
+        theta_list = [float(v) for v in theta.tolist()]
+        sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-        global_row = X.shape[0]
-        row = {
-            "row_idx": global_row,
-            "phase": "OPT",
-            "doe_idx": "",
-            "bo_idx": bo_idx,
-            "timestamp_py": int(time.time()),
-            "acq_value": float(acq_val),
-            "ELL_Z": ELL_Z,
-            "GAMMA_TIME": GAMMA_TIME,
-            "WZ": WZ,
-            "WT": WT,
-            "t_floor": float(t_floor),
-            "SSE": float(sse),
-            "SSdU": float(ssd),
-            "J": float(jval),
-            "runtime_s": float(rt),
-            "theta_list": [float(v) for v in cand.view(-1).detach().cpu().tolist()],
-        }
-        append_trace_row(row)
+        send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
+        try:
+            row = wait_for_result(eval_id, path_results, path_failures,
+                                  poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)
+        except EvaluationFailed as exc:
+            registry.append_evaluation({
+                "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
+                "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
+                "beta_vintage_expected": vintage, "proposal": diagnostics,
+                "acquisition_settings": _acq_settings(cfg),
+                "failed": True, "failure": exc.failure,
+            })
+            print(f"[bo] iteration {bo_idx} failed in MATLAB; recorded and skipped")
+            continue
 
-        print(f"  OPT {bo_idx:03d}/{N_ITER}: SSE={sse:.4g}, SSdU={ssd:.4g}, rt={rt:.2f}s, f={cand[0].item():.3f}, acq={acq_val:.3g}")
+        applied = int(row["beta_vintage"]) if row["beta_vintage"] == row["beta_vintage"] else None
+        if applied != vintage:
+            raise RuntimeError(
+                f"evaluation {eval_id} was scaled by surrogate vintage {applied} but "
+                f"iteration {bo_idx} required vintage {vintage}. MATLAB read a stale "
+                f"coefficient file; the row is on disk but the run is stopped rather "
+                f"than continuing with mixed vintages."
+            )
 
-    return X, Y_obj, Y_time
+        registry.append_evaluation({
+            "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
+            "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
+            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "beta_vintage_expected": vintage,
+            "beta_vintage_applied": applied,
+            "proposal": diagnostics,
+            "acquisition_settings": _acq_settings(cfg),
+            "result": row,
+        })
+        bo_rows.append(row)
+
+        print(f"[bo] {bo_idx:3d}/{cfg.n_iter} [v{vintage}]  z={row['z']:.4f}  "
+              f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
+              f"runtime={row['runtime_s']:.1f}s  "
+              f"acq={diagnostics['acq_value_at_snapped']:.4g}")
+
+        if bo_idx % cfg.refit_every == 0:
+            next_vintage = bo_idx // cfg.refit_every
+            is_terminal = bo_idx >= cfg.n_iter
+            if not is_terminal or cfg.refit_after_last:
+                if not registry.vintage_exists(next_vintage):
+                    fit_vintage(cfg, registry, next_vintage, init_rows, bo_rows)
+                    if is_terminal:
+                        print(f"[fit] vintage {next_vintage} is terminal: it is "
+                              f"recorded for post-hoc use and governs no evaluation")
+
+    print(f"\n[bo] budget complete: {len(bo_rows)} optimisation evaluations")
+    _print_summary(init_rows + bo_rows)
 
 
-def print_summary(X: torch.Tensor, Y_obj: torch.Tensor):
-    if X.shape[0] == 0:
-        print("[done] nenhum dado nos CSVs.")
+def _acq_settings(cfg: RunConfig) -> Dict:
+    return {
+        "ell_z": cfg.ell_z, "gamma_time": cfg.gamma_time,
+        "w_z": cfg.w_z, "w_t": cfg.w_t, "eps": cfg.eps,
+        "ref_point_backoff": cfg.ref_point_backoff,
+        "num_restarts": cfg.num_restarts, "raw_samples": cfg.raw_samples,
+        "acq_batch_limit": cfg.acq_batch_limit, "acq_maxiter": cfg.acq_maxiter,
+        "mc_samples": cfg.mc_samples, "prune_baseline": cfg.prune_baseline,
+        "max_iep": cfg.max_iep, "q_batch": cfg.q_batch,
+    }
+
+
+def _print_summary(rows: List[Dict]) -> None:
+    if not rows:
+        print("[done] no evaluations recorded")
         return
-
-    SSE_all = (-Y_obj[:, 0]).detach().cpu()
-    SSdU_all = (-Y_obj[:, 1]).detach().cpu()
-
-    best_sse_idx = torch.argmin(SSE_all)
-    best_ssdu_idx = torch.argmin(SSdU_all)
-
-    print("\n[done] resumo:")
-    print(f"  Melhor SSE:  {SSE_all[best_sse_idx].item():.6g}  (linha {best_sse_idx.item()+1})")
-    print(f"  Melhor SSdU: {SSdU_all[best_ssdu_idx].item():.6g}  (linha {best_ssdu_idx.item()+1})")
-    print(f"  results.csv : {ACTIVE_RESULTS_FILE}")
-    print(f"  trace.csv   : {TRACE_FILE}")
+    best_sse = min(rows, key=lambda r: r["SSE"])
+    best_ssdu = min(rows, key=lambda r: r["SSdU"])
+    total_runtime = sum(r["runtime_s"] for r in rows)
+    print("\n[done] summary")
+    print(f"  evaluations       {len(rows)}")
+    print(f"  simulation time   {total_runtime / 3600:.2f} h")
+    print(f"  lowest SSE        {best_sse['SSE']:.6g}  (eval {best_sse['eval_id']})")
+    print(f"  lowest SSdU       {best_ssdu['SSdU']:.6g}  (eval {best_ssdu['eval_id']})")
 
 
-def main(phase: str = "bo"):
-    print(f"[debug] Entered main(phase={phase!r})", flush=True)
+def main(argv: List[str]) -> int:
+    phase, cfg = parse_args(argv)
     torch.set_default_dtype(DTYPE)
+    torch.manual_seed(cfg.torch_seed)
 
-    if phase == "init":
-        X, Y_obj, _ = run_initialization()
-    elif phase == "bo":
-        X, Y_obj, _ = run_bo()
-    else:
-        raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
+    print(f"[run] phase={phase} case={cfg.case} "
+          f"({cfg.spec().dimension} free dimensions) "
+          f"budget={cfg.n_init}+{cfg.n_iter}")
 
-    print_summary(X, Y_obj)
+    try:
+        if phase == "init":
+            run_initialization(cfg)
+        else:
+            run_bo(cfg)
+    except KeyboardInterrupt:
+        print("\n[run] interrupted. Every completed evaluation is on disk; "
+              "restart the same command to resume.")
+        return 130
+    except Exception:
+        traceback.print_exc()
+        print("\n[run] stopped on an error. Every completed evaluation is on disk; "
+              "fix the cause and restart the same command to resume.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "bo")
-
-
-
-
-
-
+    raise SystemExit(main(sys.argv[1:]))

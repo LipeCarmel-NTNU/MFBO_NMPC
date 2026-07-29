@@ -35,6 +35,7 @@ function rerun_stored_controllers(cfg_run, base, run_label, timestamps, opts)
 
     results_csv = fullfile(out_dir, "results_full.csv");
     theta_len = 1 + 2 + base.nx + 2*base.nu;
+    check_results_header(results_csv, theta_len);
     init_results_csv(results_csv, theta_len);
     existing_ts = load_results_csv_timestamps(results_csv);
 
@@ -49,7 +50,7 @@ function rerun_stored_controllers(cfg_run, base, run_label, timestamps, opts)
         full_result_path = fullfile(out_dir, "out_full_" + ts + ".mat");
         if isfile(full_result_path)
             if opts.recover_csv_rows && ~ismember(ts, existing_ts)
-                if recover_csv_row(results_csv, full_result_path, ts)
+                if recover_csv_row(results_csv, full_result_path, ts, i)
                     existing_ts(end+1,1) = ts; %#ok<AGROW>
                 end
             else
@@ -74,14 +75,16 @@ function rerun_stored_controllers(cfg_run, base, run_label, timestamps, opts)
             run_id = ts, ...
             log_path = string(cfg_run.log_path));
 
-        J = out.SSE + 1e4 * out.SSdU;
-        append_results_row(results_csv, char(ts), out.SSE, out.SSdU, J, out.runtime_s, theta);
+        % eval_id is the position in the timestamp list. These reruns are not
+        % served through the inbox, so no driver index exists; the position is
+        % stable for a given list and keeps the schema uniform.
+        append_results_row(results_csv, i, char(ts), "FULL", out, theta);
         existing_ts(end+1,1) = ts; %#ok<AGROW>
         save(full_result_path, "ts", "out", "theta", "cfg_run", "base");
     end
 end
 
-function ok = recover_csv_row(results_csv, full_result_path, ts)
+function ok = recover_csv_row(results_csv, full_result_path, ts, eval_id)
 %RECOVER_CSV_ROW Rebuild a missing summary row from a stored result.
     ok = false;
     R = load(full_result_path, "out", "theta");
@@ -90,8 +93,7 @@ function ok = recover_csv_row(results_csv, full_result_path, ts)
         warning("Existing result is missing required fields; cannot recover CSV row: %s", full_result_path);
         return
     end
-    J = R.out.SSE + 1e4 * R.out.SSdU;
-    append_results_row(results_csv, char(ts), R.out.SSE, R.out.SSdU, J, R.out.runtime_s, R.theta);
+    append_results_row(results_csv, eval_id, char(ts), "FULL", R.out, R.theta);
     fprintf("Recovered missing CSV row for %s from existing %s\n", ts, full_result_path);
     ok = true;
 end

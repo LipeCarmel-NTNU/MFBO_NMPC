@@ -13,14 +13,19 @@ function out = simulate_nmpc(base, theta, opts)
 %
 %   Extrapolation
 %     opts.extrapolate divides the measured partial costs by the fitted cost
-%     fraction frac(f) to estimate full-horizon totals, and requires
-%     base.cheb. It is off during initialisation, where out.SSE and out.SSdU
-%     are the costs actually measured at the simulated fidelity, which is what
-%     the surrogate is later fitted to.
+%     fraction frac(f) = I_f(a, b) to estimate full-horizon totals, and
+%     requires base.beta. It is off during initialisation, where out.SSE and
+%     out.SSdU are the costs actually measured at the simulated fidelity, which
+%     is what the surrogate is later fitted to.
+%
+%     The measured costs survive the scaling as out.SSE_measured and
+%     out.SSdU_measured, and the divisors and the surrogate vintage are stored
+%     alongside them, so the full-horizon estimate can be recomputed under any
+%     later fit without rerunning the simulation.
 %
 %   Name-value options:
 %     horizon        "fidelity" (default) or "full"
-%     extrapolate    estimate full-horizon costs from base.cheb (default false)
+%     extrapolate    estimate full-horizon costs from base.beta (default false)
 %     terminal_cost  "lqr" (default), "zero" or "none"; see build_nmpc
 %     set_setpoint   copy base.xsp/base.usp into the controller (default true)
 %     x0             one row per case (default [1.0 10 0; 1.1 25 5])
@@ -64,15 +69,24 @@ function out = simulate_nmpc(base, theta, opts)
 
     %% Fidelity surrogate fractions
     % frac is the share of the full-horizon cost accumulated by fidelity f.
-    % The floor of 0.01 caps the scaling at 100x so that a tiny fraction
-    % cannot turn a small partial cost into an enormous estimate.
+    % I_f(a, b) is already confined to [0, 1] and equals 1 at f = 1, so the
+    % floor of 0.01 is the only guard needed. It caps the scaling at 100x so
+    % that a tiny fraction cannot turn a small partial cost into an enormous
+    % estimate; whether it was active is recorded per evaluation.
+    frac_floor = 0.01;
+    beta_vintage = NaN;
+    frac_floored = false;
+
     if opts.extrapolate
-        if isempty(base.cheb)
-            error("opts.extrapolate is true but base.cheb is empty. Build nmpc_base with cheb_coeffs_path set.");
+        if isempty(base.beta)
+            error("opts.extrapolate is true but base.beta is empty. Build nmpc_base with beta_coeffs_path set, or reload it with load_beta_coeffs.");
         end
-        x_f = 2 * cfg.f - 1;
-        frac_SSE = max(min(cheb_eval(x_f, base.cheb.SSE), 1), 0.01);
-        frac_SSdU = max(min(cheb_eval(x_f, base.cheb.SSdU), 1), 0.01);
+        raw_SSE = beta_eval(cfg.f, base.beta.SSE.a, base.beta.SSE.b);
+        raw_SSdU = beta_eval(cfg.f, base.beta.SSdU.a, base.beta.SSdU.b);
+        frac_SSE = max(raw_SSE, frac_floor);
+        frac_SSdU = max(raw_SSdU, frac_floor);
+        frac_floored = (raw_SSE < frac_floor) || (raw_SSdU < frac_floor);
+        beta_vintage = base.beta.vintage;
     else
         frac_SSE = 1;
         frac_SSdU = 1;
@@ -94,6 +108,16 @@ function out = simulate_nmpc(base, theta, opts)
     out.extrapolated = opts.extrapolate;
     out.frac_SSE = frac_SSE;
     out.frac_SSdU = frac_SSdU;
+    out.frac_floor = frac_floor;
+    out.frac_floored = frac_floored;
+    out.beta_vintage = beta_vintage;
+    if opts.extrapolate
+        out.beta_SSE = base.beta.SSE;
+        out.beta_SSdU = base.beta.SSdU;
+    else
+        out.beta_SSE = [];
+        out.beta_SSdU = [];
+    end
     out.SSE = 0;
     out.SSdU = 0;
     out.runtime_s = 0;
@@ -173,8 +197,13 @@ end
 
 function out = aggregate_cases(out)
 %AGGREGATE_CASES Sum the per-case costs and runtimes into the run totals.
+% Both the scaled and the measured costs are summed. A case summarised at a
+% mid-run checkpoint carries only the measured value, because finalize_case
+% runs before the scaling, so the measured total falls back to that field.
     out.SSE = 0;
     out.SSdU = 0;
+    out.SSE_measured = 0;
+    out.SSdU_measured = 0;
     out.runtime_s = 0;
     out.n_flag_not_one = 0;
     if ~isfield(out, "case") || isempty(out.case) || isempty(fieldnames(out.case))
@@ -186,6 +215,23 @@ function out = aggregate_cases(out)
         if isfield(c, "SSdU") && isfinite(c.SSdU), out.SSdU = out.SSdU + c.SSdU; end
         if isfield(c, "runtime_s") && isfinite(c.runtime_s), out.runtime_s = out.runtime_s + c.runtime_s; end
         if isfield(c, "n_flag_not_one"), out.n_flag_not_one = out.n_flag_not_one + c.n_flag_not_one; end
+
+        if isfield(c, "SSE_measured")
+            m_SSE = c.SSE_measured;
+        elseif isfield(c, "SSE")
+            m_SSE = c.SSE;
+        else
+            m_SSE = NaN;
+        end
+        if isfield(c, "SSdU_measured")
+            m_SSdU = c.SSdU_measured;
+        elseif isfield(c, "SSdU")
+            m_SSdU = c.SSdU;
+        else
+            m_SSdU = NaN;
+        end
+        if isfinite(m_SSE), out.SSE_measured = out.SSE_measured + m_SSE; end
+        if isfinite(m_SSdU), out.SSdU_measured = out.SSdU_measured + m_SSdU; end
     end
     out.J = out.SSE + 1e4 * out.SSdU;
 end

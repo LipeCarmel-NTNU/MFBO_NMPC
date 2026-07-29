@@ -21,14 +21,6 @@
 %   is the whole fit. It uses every stored sample of every DOE run above zMin,
 %   and forms no ratios, no pairs, no bins and no interpolation.
 %
-% Reported spread
-%   sigma = sqrt( cost / (nObs - nRuns) ) is the residual standard deviation of
-%   log J, so sigma also reads as the fractional error of a predicted ratio.
-%   R2_lin = 1 - cost(a, b) / cost(1, 1) compares the fit against f(z) = z. It
-%   states how much of the discrepancy left by a constant cost rate the two
-%   shape parameters remove, and it is bounded above by 1 because a = b = 1 lies
-%   inside the feasible set.
-%
 % Test
 %   The files in results/final_fidelity_same_noise are the frontier controllers
 %   rerun with theta(1) = 1. Those runs cover the whole horizon, so J(end) is the
@@ -87,11 +79,8 @@ for r = 1:nRuns
                 numel(samples), runNames(r), zMin);
         end
 
-        ab           = fit_beta(samples, ab0, abLb, abUb);
-        [cost, nObs] = beta_cost(ab, samples);
-        costLin      = beta_cost([1; 1], samples);
-        sigma        = sqrt(cost / max(nObs - numel(samples), 1));
-        r2Lin        = 1 - cost / costLin;
+        ab        = fit_beta(samples, ab0, abLb, abUb);
+        [~, nObs] = beta_cost(ab, samples);
 
         S(r, t).ab        = ab;
         S(r, t).testPairs = testPairs;
@@ -100,8 +89,6 @@ for r = 1:nRuns
         fprintf("  fit on %d of %d DOE runs, %d samples above z = %.2f\n", ...
             numel(samples), numel(doePairs), nObs, zMin);
         fprintf("  a = %.4f, b = %.4f\n", ab(1), ab(2));
-        fprintf("  sigma = %.4f (fractional error of a predicted ratio)\n", sigma);
-        fprintf("  R2_lin = %.4f against f(z) = z\n", r2Lin);
         warn_if_truncated(testPairs);
         print_test_table(testPairs, ab, zReport);
     end
