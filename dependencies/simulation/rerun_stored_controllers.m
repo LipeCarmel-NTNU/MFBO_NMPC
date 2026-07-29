@@ -75,12 +75,19 @@ function rerun_stored_controllers(cfg_run, base, run_label, timestamps, opts)
             run_id = ts, ...
             log_path = string(cfg_run.log_path));
 
-        % eval_id is the position in the timestamp list. These reruns are not
-        % served through the inbox, so no driver index exists; the position is
-        % stable for a given list and keeps the schema uniform.
-        append_results_row(results_csv, i, char(ts), "FULL", out, theta);
-        existing_ts(end+1,1) = ts; %#ok<AGROW>
+        % The .mat write comes before the CSV row, and the same order applies in
+        % the two serving drivers. The CSV row is the record that a rerun
+        % finished, so a crash between the two writes leaves an unused .mat file
+        % and not a row whose trends are missing.
+        t_save = tic;
         save(full_result_path, "ts", "out", "theta", "cfg_run", "base");
+        wall_save_s = toc(t_save);
+
+        % eval_id is the position in the timestamp list. The inbox does not
+        % serve these reruns, so no driver index exists. The position is stable
+        % for a given list and keeps one schema across all results files.
+        append_results_row(results_csv, i, char(ts), "FULL", out, theta, wall_save_s);
+        existing_ts(end+1,1) = ts; %#ok<AGROW>
     end
 end
 

@@ -11,21 +11,24 @@ function out = simulate_nmpc(base, theta, opts)
 %     opts.horizon = "full" ignores f and runs the whole base.tf, which is
 %       what the benchmark and the setpoint-schedule comparison need.
 %
-%   Extrapolation
+%   Scaling by phi
 %     opts.extrapolate divides the measured partial costs by the fitted cost
-%     fraction frac(f) = I_f(a, b) to estimate full-horizon totals, and
-%     requires base.beta. It is off during initialisation, where out.SSE and
-%     out.SSdU are the costs actually measured at the simulated fidelity, which
-%     is what the surrogate is later fitted to.
+%     fraction phi(z) = I_z(a, b). This estimates the full-horizon totals. It
+%     needs base.phi. It stays off during initialization, where out.SSE and
+%     out.SSdU are the costs measured at the simulated fidelity. The fit of phi
+%     uses those measured costs.
 %
 %     The measured costs survive the scaling as out.SSE_measured and
-%     out.SSdU_measured, and the divisors and the surrogate vintage are stored
-%     alongside them, so the full-horizon estimate can be recomputed under any
-%     later fit without rerunning the simulation.
+%     out.SSdU_measured. The function also stores the two divisors and the
+%     surrogate vintage. You can therefore recompute the full-horizon estimate
+%     under a later fit without a new simulation.
+%
+%   Timing
+%     out.wall_s holds the wall time of each stage of this function.
 %
 %   Name-value options:
 %     horizon        "fidelity" (default) or "full"
-%     extrapolate    estimate full-horizon costs from base.beta (default false)
+%     extrapolate    estimate full-horizon costs from base.phi (default false)
 %     terminal_cost  "lqr" (default), "zero" or "none"; see build_nmpc
 %     set_setpoint   copy base.xsp/base.usp into the controller (default true)
 %     x0             one row per case (default [1.0 10 0; 1.1 25 5])
@@ -52,6 +55,7 @@ function out = simulate_nmpc(base, theta, opts)
         opts.max_iter double = []
     end
 
+    t_call = tic;
     cfg = decode_theta(theta, base.nx, base.nu);
     if opts.verbosity ~= "quiet"
         disp('Run cfg:')
@@ -67,36 +71,42 @@ function out = simulate_nmpc(base, theta, opts)
     N = ceil(tf / base.dt) + 1;
     N = min(N, base.N);
 
-    %% Fidelity surrogate fractions
-    % frac is the share of the full-horizon cost accumulated by fidelity f.
-    % I_f(a, b) is already confined to [0, 1] and equals 1 at f = 1, so the
-    % floor of 0.01 is the only guard needed. It caps the scaling at 100x so
-    % that a tiny fraction cannot turn a small partial cost into an enormous
-    % estimate; whether it was active is recorded per evaluation.
-    frac_floor = 0.01;
-    beta_vintage = NaN;
-    frac_floored = false;
+    %% Fidelity surrogate
+    % phi(z) is the share of the full-horizon cost that the run accumulates by
+    % fidelity z. I_z(a, b) already lies in [0, 1] and equals 1 at z = 1, so the
+    % floor is the only guard that the caller needs. The floor caps the scaling
+    % at 100x, so a very small phi cannot turn a small partial cost into a huge
+    % estimate. Every evaluation records whether the floor acted.
+    t_phi = tic;
+    phi_floor = 0.01;
+    phi_vintage = NaN;
+    phi_floored = false;
 
     if opts.extrapolate
-        if isempty(base.beta)
-            error("opts.extrapolate is true but base.beta is empty. Build nmpc_base with beta_coeffs_path set, or reload it with load_beta_coeffs.");
+        if isempty(base.phi)
+            error(['opts.extrapolate is true but base.phi is empty. Build ' ...
+                   'nmpc_base with phi_coeffs_path set, or reload the field ' ...
+                   'with load_phi_coeffs.']);
         end
-        raw_SSE = beta_eval(cfg.f, base.beta.SSE.a, base.beta.SSE.b);
-        raw_SSdU = beta_eval(cfg.f, base.beta.SSdU.a, base.beta.SSdU.b);
-        frac_SSE = max(raw_SSE, frac_floor);
-        frac_SSdU = max(raw_SSdU, frac_floor);
-        frac_floored = (raw_SSE < frac_floor) || (raw_SSdU < frac_floor);
-        beta_vintage = base.beta.vintage;
+        raw_SSE = phi_eval(cfg.f, base.phi.SSE.a, base.phi.SSE.b);
+        raw_SSdU = phi_eval(cfg.f, base.phi.SSdU.a, base.phi.SSdU.b);
+        phi_SSE = max(raw_SSE, phi_floor);
+        phi_SSdU = max(raw_SSdU, phi_floor);
+        phi_floored = (raw_SSE < phi_floor) || (raw_SSdU < phi_floor);
+        phi_vintage = base.phi.vintage;
     else
-        frac_SSE = 1;
-        frac_SSdU = 1;
+        phi_SSE = 1;
+        phi_SSdU = 1;
     end
+    wall_phi_s = toc(t_phi);
 
     %% Controller
+    t_build = tic;
     NMPC = build_nmpc(base, cfg, ...
         terminal_cost = opts.terminal_cost, ...
         set_setpoint = opts.set_setpoint, ...
         max_iter = opts.max_iter);
+    wall_build_s = toc(t_build);
 
     %% Output skeleton
     out = struct();
@@ -106,18 +116,24 @@ function out = simulate_nmpc(base, theta, opts)
     out.N = N;
     out.T = base.T(1:N);
     out.extrapolated = opts.extrapolate;
-    out.frac_SSE = frac_SSE;
-    out.frac_SSdU = frac_SSdU;
-    out.frac_floor = frac_floor;
-    out.frac_floored = frac_floored;
-    out.beta_vintage = beta_vintage;
+    out.phi_SSE = phi_SSE;
+    out.phi_SSdU = phi_SSdU;
+    out.phi_floor = phi_floor;
+    out.phi_floored = phi_floored;
+    out.phi_vintage = phi_vintage;
     if opts.extrapolate
-        out.beta_SSE = base.beta.SSE;
-        out.beta_SSdU = base.beta.SSdU;
+        out.phi_params_SSE = base.phi.SSE;
+        out.phi_params_SSdU = base.phi.SSdU;
     else
-        out.beta_SSE = [];
-        out.beta_SSdU = [];
+        out.phi_params_SSE = [];
+        out.phi_params_SSdU = [];
     end
+
+    % Wall time of each stage. runtime_s below sums the solver time of the
+    % control steps. These fields cover the rest of the call.
+    out.wall_s = struct("phi", wall_phi_s, "build_nmpc", wall_build_s, ...
+        "cases", 0, "total", 0);
+
     out.SSE = 0;
     out.SSdU = 0;
     out.runtime_s = 0;
@@ -144,6 +160,7 @@ function out = simulate_nmpc(base, theta, opts)
     end
 
     %% Cases
+    t_cases = tic;
     for case_id = start_case:n_cases
         if case_id == start_case && ~isempty(fieldnames(resume_state))
             case_resume = resume_state;
@@ -167,11 +184,11 @@ function out = simulate_nmpc(base, theta, opts)
             run_id = opts.run_id, ...
             log_path = opts.log_path);
 
-        % Costs measured at the simulated fidelity, kept regardless of scaling.
+        % The costs measured at the simulated fidelity survive the scaling.
         case_out.SSE_measured = case_out.SSE;
         case_out.SSdU_measured = case_out.SSdU;
-        case_out.SSE = case_out.SSE_measured / frac_SSE;
-        case_out.SSdU = case_out.SSdU_measured / frac_SSdU;
+        case_out.SSE = case_out.SSE_measured / phi_SSE;
+        case_out.SSdU = case_out.SSdU_measured / phi_SSdU;
         case_out.cost_total = case_out.SSE + 1e4 * case_out.SSdU;
 
         if isempty(out.case)
@@ -188,11 +205,14 @@ function out = simulate_nmpc(base, theta, opts)
     end
 
     out = aggregate_cases(out);
+    out.wall_s.cases = toc(t_cases);
 
-    % Flush anything the logger had to buffer because the file was busy.
+    % Flush any line that the logger had to buffer because the file was busy.
     if strlength(opts.log_path) > 0
         log_simulation_event(opts.log_path);
     end
+
+    out.wall_s.total = toc(t_call);
 end
 
 function out = aggregate_cases(out)

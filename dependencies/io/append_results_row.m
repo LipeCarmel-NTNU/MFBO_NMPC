@@ -1,30 +1,42 @@
-function append_results_row(results_csv, eval_id, ts, phase, out, theta)
+function append_results_row(results_csv, eval_id, ts, phase, out, theta, wall_save_s)
 %APPEND_RESULTS_ROW Append one evaluation to the results CSV.
 %
-%   The row is assembled from the out struct returned by simulate_nmpc, so the
-%   measured costs, the divisors and the surrogate vintage travel together and
-%   cannot fall out of step with one another.
+%   The function builds the row from the out struct that simulate_nmpc returns.
+%   The measured costs, the divisors and the surrogate vintage therefore travel
+%   together and cannot fall out of step.
 %
-%   Values are written with %.17g so that a double survives the round trip
-%   through text. The line is built in memory and written by a single fprintf,
-%   because the driver polls this file from another process: a short buffered
-%   append lands whole, whereas a sequence of small writes can expose a partial
+%   wall_save_s is the wall time of the .mat write. Pass it when the caller
+%   measured it. The function writes NaN when the caller omits it.
+%
+%   The function writes each value with %.17g, so a double survives the round
+%   trip through text. It builds the line in memory and writes it with one
+%   fprintf. The driver polls this file from another process. One short
+%   buffered append lands whole. A sequence of small writes can show a partial
 %   row to a reader that opens the file between them.
+
+    if nargin < 7
+        wall_save_s = NaN;
+    end
 
     line = sprintf("%d,%s,%s,%.17g,%.17g", ...
         eval_id, ts, phase, ...
-        field_or_nan(out, "beta_vintage"), ...
+        field_or_nan(out, "phi_vintage"), ...
         cfg_fidelity(out));
 
     line = line + sprintf(",%.17g,%.17g,%.17g,%.17g", ...
         field_or_nan(out, "SSE_measured"), field_or_nan(out, "SSdU_measured"), ...
-        field_or_nan(out, "frac_SSE"),     field_or_nan(out, "frac_SSdU"));
+        field_or_nan(out, "phi_SSE"),      field_or_nan(out, "phi_SSdU"));
 
     line = line + sprintf(",%.17g,%.17g,%.17g,%.17g,%.17g,%d", ...
         field_or_nan(out, "SSE"),  field_or_nan(out, "SSdU"), ...
         field_or_nan(out, "J"),    field_or_nan(out, "runtime_s"), ...
         field_or_nan(out, "n_flag_not_one"), ...
-        logical_or_zero(out, "frac_floored"));
+        logical_or_zero(out, "phi_floored"));
+
+    line = line + sprintf(",%.17g,%.17g,%.17g,%.17g,%.17g", ...
+        wall_or_nan(out, "total"), wall_or_nan(out, "cases"), ...
+        wall_or_nan(out, "phi"),   wall_or_nan(out, "build_nmpc"), ...
+        wall_save_s);
 
     theta = theta(:).';
     for k = 1:numel(theta)
@@ -41,9 +53,9 @@ end
 
 
 function v = field_or_nan(s, name)
-%FIELD_OR_NAN Read a scalar field, returning NaN when it is absent or empty.
-% An absent field is written as NaN rather than skipped, so every row carries
-% the same number of columns whatever the phase produced it.
+%FIELD_OR_NAN Read a scalar field. Return NaN when it is absent or empty.
+% The function writes NaN and does not skip the column. Every row therefore
+% holds the same number of columns, whatever phase produced it.
     if isfield(s, name) && ~isempty(s.(name))
         v = double(s.(name));
     else
@@ -52,8 +64,18 @@ function v = field_or_nan(s, name)
 end
 
 
+function v = wall_or_nan(s, name)
+%WALL_OR_NAN Read one stage time from out.wall_s. Return NaN when it is absent.
+    if isfield(s, "wall_s") && isstruct(s.wall_s) && isfield(s.wall_s, name)
+        v = double(s.wall_s.(name));
+    else
+        v = NaN;
+    end
+end
+
+
 function v = logical_or_zero(s, name)
-%LOGICAL_OR_ZERO Read a flag field as 0 or 1, defaulting to 0.
+%LOGICAL_OR_ZERO Read a flag field as 0 or 1. Default to 0.
     if isfield(s, name) && ~isempty(s.(name)) && s.(name)
         v = 1;
     else
@@ -63,9 +85,10 @@ end
 
 
 function z = cfg_fidelity(out)
-%CFG_FIDELITY The simulated fidelity, read back from the decoded configuration.
-% Taking it from out.cfg rather than from theta(1) records the value the
-% simulation actually ran at, after decode_theta clamped it into [0, 1].
+%CFG_FIDELITY The simulated fidelity, read from the decoded configuration.
+% The function takes the value from out.cfg and not from theta(1). It therefore
+% records the fidelity that the simulation ran at, after decode_theta clamped it
+% into [0, 1].
     if isfield(out, "cfg") && isfield(out.cfg, "f")
         z = double(out.cfg.f);
     else

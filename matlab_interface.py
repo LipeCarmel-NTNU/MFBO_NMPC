@@ -34,7 +34,7 @@ BO_FAILURES_FILE = BASE_DIR / "results" / "failures.csv"
 INIT_OUT_DIR = BASE_DIR / "results" / "init"
 BO_OUT_DIR = BASE_DIR / "results"
 
-BETA_COEFFS_FILE = BASE_DIR / "results" / "surrogate" / "beta_coeffs.mat"
+PHI_COEFFS_FILE = BASE_DIR / "results" / "surrogate" / "phi_coeffs.mat"
 
 THETA_LEN = 12
 
@@ -42,14 +42,16 @@ THETA_LEN = 12
 # them, so a schema change on either side is caught at the first read instead of
 # silently shifting the meaning of a column.
 RESULTS_COLUMNS = [
-    "eval_id", "timestamp", "phase", "beta_vintage", "z",
-    "SSE_measured", "SSdU_measured", "frac_SSE", "frac_SSdU",
-    "SSE", "SSdU", "J", "runtime_s", "n_flag_not_one", "frac_floored",
+    "eval_id", "timestamp", "phase", "phi_vintage", "z",
+    "SSE_measured", "SSdU_measured", "phi_SSE", "phi_SSdU",
+    "SSE", "SSdU", "J", "runtime_s", "n_flag_not_one", "phi_floored",
+    "wall_total_s", "wall_cases_s", "wall_phi_s", "wall_build_s", "wall_save_s",
 ] + [f"theta_{i}" for i in range(1, THETA_LEN + 1)]
 
 _FLOAT_COLUMNS = {
-    "beta_vintage", "z", "SSE_measured", "SSdU_measured", "frac_SSE", "frac_SSdU",
-    "SSE", "SSdU", "J", "runtime_s", "n_flag_not_one", "frac_floored",
+    "phi_vintage", "z", "SSE_measured", "SSdU_measured", "phi_SSE", "phi_SSdU",
+    "SSE", "SSdU", "J", "runtime_s", "n_flag_not_one", "phi_floored",
+    "wall_total_s", "wall_cases_s", "wall_phi_s", "wall_build_s", "wall_save_s",
 }
 
 

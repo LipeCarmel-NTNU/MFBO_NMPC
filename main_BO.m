@@ -1,30 +1,32 @@
-%% Phase 2: Bayesian optimisation runs
+%% Phase 2: Bayesian optimization runs
 %
-% Serves evaluation requests written to inbox/theta.txt by main.py and logs one
-% row per evaluation. A run of length tf = 10*z accumulates only part of the
-% full-horizon cost, and the fitted fraction f(z) = I_z(a, b) scales the
-% measured partial costs up to full-horizon estimates.
+% This script serves the evaluation requests that main.py writes to
+% inbox/theta.txt. It logs one row for each evaluation.
 %
-% The surrogate is refitted by main.py during the run, every 10 optimisation
-% iterations, and published by renaming a new coefficient file over
-% results/surrogate/beta_coeffs.mat. This script reloads that file before every
-% evaluation and stores the vintage it used in the results row, so an objective
-% value can always be traced to the fit that produced it. Vintage 0 is the fit
-% on the initialisation runs alone.
+% A run of length tf = 10*z accumulates only part of the full-horizon cost. The
+% fitted fraction phi(z) = I_z(a, b) scales the measured partial costs up to
+% full-horizon estimates.
 %
-% Missing coefficients are an error rather than a fallback: a BO row scaled by
-% no surrogate, or by one from an earlier run, is not comparable with the rest.
+% main.py refits phi during the run, every 10 optimization iterations. It
+% publishes each fit by renaming a new coefficient file over
+% results/surrogate/phi_coeffs.mat. This script reloads that file before every
+% evaluation. It stores the vintage that it used in the results row. You can
+% therefore trace an objective value to the fit that produced it. Vintage 0 is
+% the fit on the initialization runs alone.
+%
+% A missing coefficient file raises an error. The script applies no fallback. A
+% row that no surrogate scaled, or that a surrogate from an earlier run scaled,
+% does not compare with the rest.
 %
 % Outputs:
-%   results/results.csv           one summary row per evaluation
-%   results/failures.csv          evaluations that raised, if any
-%   results/out_<timestamp>.mat   full per-step trends
+%   results/results.csv           one summary row for each evaluation
+%   results/failures.csv          the evaluations that raised, if any
+%   results/out_<timestamp>.mat   the full per-step trends
 %   SIMULATIONS_LOG.txt           fmincon exit flags other than 1, and failures
 %
-% Reproducibility: rng(1) fixes the measurement-noise realisation, which is
-% drawn once in nmpc_base and reused by every evaluation, and matches the seed
-% used by main_initialization.m so that both phases see the same disturbance
-% sequence.
+% Reproducibility: rng(1) fixes the measurement-noise realization. nmpc_base
+% draws it once and every evaluation reuses it. main_initialization.m uses the
+% same seed, so both phases see the same disturbance sequence.
 
 clear all; close all; clc;
 
@@ -47,7 +49,7 @@ cfg_run.poll_s = 2.0;
 cfg_run.out_dir = fullfile("results");
 cfg_run.results_csv = fullfile("results", "results.csv");
 cfg_run.failures_csv = fullfile("results", "failures.csv");
-cfg_run.beta_coeffs = fullfile("results", "surrogate", "beta_coeffs.mat");
+cfg_run.phi_coeffs = fullfile("results", "surrogate", "phi_coeffs.mat");
 cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
 cfg_run.lock_path = "matlab.lock";
 cfg_run.lock_stale_s = 6 * 3600;
@@ -58,15 +60,15 @@ cfg_run.rng_seed = 1;
 
 base = nmpc_base( ...
     sigma_y = cfg_run.sigma_y, ...
-    beta_coeffs_path = cfg_run.beta_coeffs);
+    phi_coeffs_path = cfg_run.phi_coeffs);
 
 cfg_run.theta_len = 1 + 2 + base.nx + 2*base.nu;
 
-fprintf("Loaded surrogate vintage %d (%s)\n", base.beta.vintage, base.beta.created_at);
+fprintf("Loaded phi vintage %d (%s)\n", base.phi.vintage, base.phi.created_at);
 fprintf("  SSE : a = %.6f, b = %.6f, lambda = %g\n", ...
-    base.beta.SSE.a, base.beta.SSE.b, base.beta.SSE.lambda);
+    base.phi.SSE.a, base.phi.SSE.b, base.phi.SSE.lambda);
 fprintf("  SSdU: a = %.6f, b = %.6f, lambda = %g\n", ...
-    base.beta.SSdU.a, base.beta.SSdU.b, base.beta.SSdU.lambda);
+    base.phi.SSdU.a, base.phi.SSdU.b, base.phi.SSdU.lambda);
 
 ensure_dir(cfg_run.out_dir);
 check_results_header(cfg_run.results_csv, cfg_run.theta_len);
@@ -85,12 +87,14 @@ serve_requests(cfg_run, @(req) run_and_log(cfg_run, base, req));
 %% Local functions
 
 function run_and_log(cfg_run, base, req)
-%RUN_AND_LOG Evaluate one request against the current surrogate vintage.
-% The coefficients are reloaded here rather than once at startup, because
-% main.py refits during the run. Reloading before every evaluation, instead of
-% only when a refit is expected, keeps this script indifferent to the refit
-% cadence and to any interruption in either process.
-    base.beta = load_beta_coeffs(cfg_run.beta_coeffs);
+%RUN_AND_LOG Evaluate one request against the current vintage of phi.
+% This function reloads the coefficients on every call and not once at startup,
+% because main.py refits phi during the run. A reload before every evaluation
+% keeps this script independent of the refit cadence. It also survives an
+% interruption of either process.
+    t_load = tic;
+    base.phi = load_phi_coeffs(cfg_run.phi_coeffs);
+    wall_load_s = toc(t_load);
 
     ts = timestamp_compact();
 
@@ -101,14 +105,21 @@ function run_and_log(cfg_run, base, req)
         run_id = string(ts), ...
         log_path = cfg_run.log_path);
 
-    % Saved in the default v7 format. The surrogate refit reads these files with
-    % scipy.io.loadmat, which cannot open the HDF5-based v7.3 format, so the
-    % format is a compatibility requirement rather than a preference.
+    out.wall_s.phi_load = wall_load_s;
+
+    % The default v7 format. The refit of phi reads these files with
+    % scipy.io.loadmat, which cannot open the HDF5-based v7.3 format. The format
+    % is a compatibility requirement and not a preference.
+    t_save = tic;
     mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
     save(mat_path, "ts", "out", "cfg_run", "base");
+    wall_save_s = toc(t_save);
 
-    append_results_row(cfg_run.results_csv, req.eval_id, ts, "OPT", out, req.theta);
+    append_results_row(cfg_run.results_csv, req.eval_id, ts, "OPT", out, ...
+        req.theta, wall_save_s);
 
-    fprintf("  OPT eval %d [vintage %d]: SSE=%.6g, SSdU=%.6g, z=%.4f, runtime=%.1fs\n", ...
-        req.eval_id, out.beta_vintage, out.SSE, out.SSdU, out.cfg.f, out.runtime_s);
+    fprintf(['  OPT eval %d [phi v%d]: SSE=%.6g, SSdU=%.6g, z=%.4f, ' ...
+             'solver=%.1fs, wall=%.1fs (save %.2fs)\n'], ...
+        req.eval_id, out.phi_vintage, out.SSE, out.SSdU, out.cfg.f, ...
+        out.runtime_s, out.wall_s.total, wall_save_s);
 end

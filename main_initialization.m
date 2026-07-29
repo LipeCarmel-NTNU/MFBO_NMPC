@@ -1,26 +1,26 @@
-%% Phase 1: initialisation runs for the fidelity surrogate
+%% Phase 1: initialization runs for the fidelity surrogate
 %
-% Serves evaluation requests written to inbox/theta.txt by main.py and stops
-% once the initialisation budget is reached. The Sobol design lives in main.py
-% (N_INIT points, sobol_unique_points, seed 1234), so this script generates no
-% design of its own.
+% This script serves the evaluation requests that main.py writes to
+% inbox/theta.txt. It stops when the initialization budget is complete.
 %
-% Costs are reported at the fidelity that was actually simulated: the run
-% length is tf = 10*z and no surrogate scaling is applied. The purpose of this
-% phase is to produce the data the surrogate is fitted to, so scaling here
-% would make the fit depend on its own output.
+% The Sobol design lives in main.py. This script generates no design of its own.
+%
+% The script reports the cost at the fidelity that it simulated. The run length
+% is tf = 10*z and no surrogate scales the result. This phase produces the data
+% that the fit of phi uses. A correction here would make the fit depend on its
+% own output.
 %
 % Outputs:
-%   results/init/results.csv          one summary row per evaluation
-%   results/init/failures.csv         evaluations that raised, if any
-%   results/init/out_<timestamp>.mat  full per-step trends, including
+%   results/init/results.csv          one summary row for each evaluation
+%   results/init/failures.csv         the evaluations that raised, if any
+%   results/init/out_<timestamp>.mat  the full per-step trends, which include
 %                                     case(k).partial_SSE and partial_SSdU
 %
-% Next step, once this script stops: main.py fits the surrogate as vintage 0
-% and then runs the optimisation phase against main_BO.m.
+% Next step: main.py fits phi as vintage 0. It then runs the optimization phase
+% against main_BO.m.
 %
-% Reproducibility: rng(1) fixes the measurement-noise realisation, which is
-% drawn once in nmpc_base and reused by every evaluation of this run.
+% Reproducibility: rng(1) fixes the measurement-noise realization. nmpc_base
+% draws it once and every evaluation of this run reuses it.
 
 clear all; close all; clc;
 
@@ -77,11 +77,11 @@ fprintf("Run main_BO.m next.\n");
 %% Local functions
 
 function run_and_log(cfg_run, base, req)
-%RUN_AND_LOG Evaluate one request, append the CSV row and save the trends.
-% The .mat is written before the CSV row. The driver treats the CSV row as the
-% record that an evaluation completed, so ordering it last means a crash
-% between the two leaves an orphan .mat rather than a results row whose trends
-% are missing.
+%RUN_AND_LOG Evaluate one request, save the trends and append the CSV row.
+% This function writes the .mat before the CSV row. The driver treats the CSV
+% row as the record that an evaluation finished. The order therefore matters. A
+% crash between the two writes leaves an unused .mat file. The reverse order
+% would leave a results row whose trends file is missing.
     ts = timestamp_compact();
 
     out = simulate_nmpc(base, req.theta, ...
@@ -91,14 +91,19 @@ function run_and_log(cfg_run, base, req)
         run_id = string(ts), ...
         log_path = cfg_run.log_path);
 
-    % Saved in the default v7 format. The surrogate fit reads these files with
-    % scipy.io.loadmat, which cannot open the HDF5-based v7.3 format, so the
-    % format is a compatibility requirement rather than a preference.
+    % The default v7 format. The fit of phi reads these files with
+    % scipy.io.loadmat, which cannot open the HDF5-based v7.3 format. The format
+    % is a compatibility requirement and not a preference.
+    t_save = tic;
     mat_path = fullfile(cfg_run.out_dir, "out_" + ts + ".mat");
     save(mat_path, "ts", "out", "cfg_run", "base");
+    wall_save_s = toc(t_save);
 
-    append_results_row(cfg_run.results_csv, req.eval_id, ts, "DOE", out, req.theta);
+    append_results_row(cfg_run.results_csv, req.eval_id, ts, "DOE", out, ...
+        req.theta, wall_save_s);
 
-    fprintf("  DOE eval %d: SSE=%.6g, SSdU=%.6g, z=%.4f, runtime=%.1fs\n", ...
-        req.eval_id, out.SSE, out.SSdU, out.cfg.f, out.runtime_s);
+    fprintf(['  DOE eval %d: SSE=%.6g, SSdU=%.6g, z=%.4f, ' ...
+             'solver=%.1fs, wall=%.1fs (save %.2fs)\n'], ...
+        req.eval_id, out.SSE, out.SSdU, out.cfg.f, ...
+        out.runtime_s, out.wall_s.total, wall_save_s);
 end

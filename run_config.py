@@ -1,10 +1,10 @@
-"""Declared configuration of one optimisation run.
+"""Declared configuration of one optimization run.
 
-Every setting that changes what the run does is named here and copied verbatim
-into the manifest before the first evaluation. Nothing that affects a result is
-left to a hand edit of the driver: the case is selected by name, the budget is
-a number rather than a point at which somebody stopped the process, and the
-seeds are explicit.
+This file names every setting that changes what a run does. The driver copies
+it into the manifest before the first evaluation. No setting that affects a
+result needs a hand edit of the driver. You select the case by name. The budget
+is a number and not the point at which somebody stopped the process. The seeds
+are explicit.
 
 Select a case on the command line:
 
@@ -18,6 +18,38 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Tuple
 
 # ---------------------------------------------------------------------------
+# Fidelity limits
+# ---------------------------------------------------------------------------
+# Two different limits act on the fidelity z. They are not the same quantity and
+# they must keep separate names.
+#
+# Z_MIN_BO is the lower bound of the search space. The acquisition maximizer
+# cannot propose a fidelity below it. It is the limit that decides how short an
+# evaluation the optimizer can buy.
+#
+# The simulation grid uses Ts = 1 min over a 10 h horizon. A run of fidelity z
+# therefore covers 600 * z minutes and steps 600 * z times:
+#
+#     z = 0.01  ->  6.0 min  ->  6 steps, 7 grid points
+#     z = 0.10  ->   60 min  ->  60 steps, 61 grid points
+#     z = 1.00  ->  600 min  ->  600 steps, 601 grid points
+#
+# decode_theta.m clamps z into [0, 1]. That clamp guards against a malformed
+# value and is not a fidelity policy. A fidelity below Z_MIN_BO covers less than
+# one sampling interval, so the clamp never decides anything in practice and
+# Z_MIN_BO is the floor that MATLAB sees.
+Z_MIN_BO: float = 0.01
+
+# Z_MIN_PHI is the floor of the surrogate fit. A sample below it leaves the fit.
+# It is larger than Z_MIN_BO on purpose. Near z = 0 the cumulative cost of a run
+# starts close to zero, and the log of that ratio is then dominated by the first
+# few steps. A very short run therefore says little about the shape of phi.
+#
+# A run below Z_MIN_PHI still receives a phi correction. It contributes no
+# sample to the fit of phi.
+Z_MIN_PHI: float = 0.1
+
+# ---------------------------------------------------------------------------
 # Search space
 # ---------------------------------------------------------------------------
 # theta = [z, theta_p, theta_m, q1..q3, r_u1..r_u3, r_du1..r_du3]
@@ -29,7 +61,7 @@ THETA_NAMES: Tuple[str, ...] = (
 )
 THETA_D = len(THETA_NAMES)
 
-BASE_LB: Tuple[float, ...] = (0.01, 0.0, 0.0) + (-3.0,) * 9
+BASE_LB: Tuple[float, ...] = (Z_MIN_BO, 0.0, 0.0) + (-3.0,) * 9
 BASE_UB: Tuple[float, ...] = (1.00, 15.0, 7.0) + (3.0,) * 9
 
 INTEGER_IDXS: Tuple[int, ...] = (1, 2)   # theta_p, theta_m are rounded after proposal
@@ -87,20 +119,21 @@ class RunConfig:
 
     case: str = "case1"
 
-    # Budget. n_init evaluations of the Sobol design, then n_iter
-    # acquisition-driven evaluations, for n_init + n_iter in total. The loop
-    # ends when n_iter is reached; no other criterion stops it.
+    # Budget. The run makes n_init evaluations of the Sobol design, then n_iter
+    # acquisition-driven evaluations. The total is n_init + n_iter. The loop
+    # ends when it reaches n_iter. No other criterion stops it.
     n_init: int = 20
     n_iter: int = 100
     q_batch: int = 1
 
-    # Surrogate refit. Vintage 0 is fitted on the initialisation runs alone and
-    # governs optimisation iterations 1 to refit_every. Vintage v is fitted once
-    # iteration v * refit_every completes and governs the next refit_every
-    # iterations. Past evaluations are never rescaled: a row keeps the estimate
-    # produced by the vintage in force when it was measured.
+    # Surrogate refit. Vintage 0 uses the initialization runs alone. It governs
+    # optimization iterations 1 to refit_every. The driver fits vintage v after
+    # iteration v * refit_every completes. Vintage v then governs the next
+    # refit_every iterations. The driver never rescales an earlier row. A row
+    # keeps the estimate that the vintage in force produced when MATLAB measured
+    # it.
     refit_every: int = 10
-    refit_after_last: bool = True   # fit a terminal vintage for post-hoc analysis
+    refit_after_last: bool = True   # fit a last vintage for later analysis
 
     # Seeds.
     sobol_seed: int = 1234          # scrambled Sobol stream of the DOE
@@ -108,14 +141,12 @@ class RunConfig:
     cv_seed: int = 1                # fold partitions of the surrogate fit
 
     # Surrogate fit. lambda is the plain argmin of the mean held-out loss over
-    # the grid; no one-standard-error rule is applied. The full loss grid is
-    # kept in each vintage record, so another rule can be applied afterwards
-    # without refitting.
+    # the grid. The fit applies no one-standard-error rule. Each vintage record
+    # keeps the full loss grid, so you can apply another rule later without a
+    # refit. The fit uses one fold partition, which cv_seed fixes.
     horizon_hours: float = 10.0
-    fit_z_min: float = 0.1          # samples below this fidelity leave the fit
     fit_lambda_grid: Tuple[float, ...] = (0.0, 1e-2, 1e0, 1e2)
     fit_k_fold: int = 5             # folds, split over runs and never over samples
-    fit_cv_repeats: int = 5         # fold partitions redrawn per fit
 
     # Acquisition, matching the log-domain form in the paper:
     #   log alpha = log qLogNEHVI + w_z log(a_z(z) + eps) - w_t gamma log(E[t] + eps)
@@ -167,6 +198,12 @@ class RunConfig:
         d = asdict(self)
         lb, ub = self.bounds()
         d.update({
+            "z_min_bo": Z_MIN_BO,
+            "z_min_phi": Z_MIN_PHI,
+            "z_min_note": (
+                "z_min_bo bounds the search space below. z_min_phi is the floor of "
+                "the surrogate fit. They are separate limits on separate steps."
+            ),
             "case_description": spec.description,
             "fixed_components": {THETA_NAMES[i]: v for i, v in sorted(spec.fixed.items())},
             "optimised_components": [THETA_NAMES[i] for i in spec.opt_idxs],

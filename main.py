@@ -1,23 +1,28 @@
-"""Two-phase runtime-aware multi-fidelity Bayesian optimisation driver.
+"""Runtime-aware multi-fidelity Bayesian optimization driver, in two phases.
 
-Phase "init" evaluates the Sobol design and stops. Those evaluations carry no
-surrogate: MATLAB reports the cost measured at the simulated fidelity and stores
-the per-step cost trends. The fidelity surrogate f(z) = I_z(a, b) is then fitted
-from them as vintage 0.
+Phase "init" evaluates the Sobol design and stops. These evaluations use no
+surrogate. MATLAB reports the cost that it measured at the simulated fidelity
+and stores the per-step cost trends. The driver then fits the fidelity surrogate
+phi(z) = I_z(a, b) from those runs and calls it vintage 0.
 
-Phase "bo" runs the acquisition loop against that surrogate, refitting every
-refit_every iterations. A refit does not rescale earlier rows: an objective
-value keeps the estimate produced by the vintage in force when it was measured,
-and every row records which vintage that was, so the whole history can be
-recomputed under any single fit afterwards.
+Phase "bo" runs the acquisition loop against phi. It refits phi every
+refit_every iterations.
+
+A refit does not rescale an earlier row. An objective value keeps the estimate
+that the vintage in force produced when MATLAB measured it. Every row records
+that vintage. You can therefore recompute the whole history under one fit later.
 
     python main.py init --case case1     # with main_initialization.m in MATLAB
     python main.py bo   --case case1     # with main_BO.m in MATLAB
 
-Both phases resume. State is rebuilt from the results CSV, which MATLAB writes,
-reconciled against the driver's own ledger, and the run continues from the first
-evaluation that neither records. Proposals are seeded per iteration, so a
-resumed run proposes what an uninterrupted one would have.
+Both phases resume after an interruption. The driver rebuilds its state from the
+results CSV that MATLAB writes. It compares that state against its own ledger.
+It then continues from the first evaluation that neither file records.
+
+The driver seeds each proposal from the iteration index. A resumed run therefore
+proposes what an uninterrupted run would propose at the same index.
+
+The driver measures the wall time of each step and stores it in the ledger.
 """
 
 from __future__ import annotations
@@ -41,7 +46,7 @@ from botorch.sampling.normal import SobolQMCNormalSampler
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 from matlab_interface import (
-    BETA_COEFFS_FILE,
+    PHI_COEFFS_FILE,
     EvaluationFailed,
     failures_file,
     out_dir,
@@ -144,7 +149,10 @@ def sobol_design(space: Space, n: int, seed: int) -> torch.Tensor:
 
 def build_models(space: Space, X_opt: torch.Tensor, Y_obj: torch.Tensor,
                  Y_time: torch.Tensor, eps: float):
-    """Fit the objective GP and the log-runtime GP on the accumulated data."""
+    """Fit the objective GP and the log-runtime GP on the data collected so far.
+
+    The function returns the two models and the wall time of each fit.
+    """
     bounds = space.acq_bounds().to(device=DEVICE, dtype=DTYPE)
     Y_time_log = torch.log(Y_time.clamp_min(eps))
 
@@ -159,23 +167,29 @@ def build_models(space: Space, X_opt: torch.Tensor, Y_obj: torch.Tensor,
         outcome_transform=Standardize(m=1),
     )
 
+    t0 = time.perf_counter()
     fit_gpytorch_mll(ExactMarginalLogLikelihood(model_obj.likelihood, model_obj))
+    wall_obj = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
     fit_gpytorch_mll(ExactMarginalLogLikelihood(model_time.likelihood, model_time))
-    return model_obj, model_time
+    wall_time = time.perf_counter() - t0
+
+    return model_obj, model_time, {"gp_objective": wall_obj, "gp_log_runtime": wall_time}
 
 
 class RuntimeAwareLogAcq(AcquisitionFunction):
     """log alpha = log qLogNEHVI + w_z log(a_z + eps) - w_t gamma log(E[t] + eps).
 
-    The fidelity bias a_z is centred at z = 1 and rewards candidates closer to
-    full fidelity. The runtime term penalises candidates whose predicted
-    evaluation cost is large. The runtime GP is fitted on log t, so the
-    expectation is taken in lognormal form.
+    The fidelity bias a_z has its center at z = 1. It rewards a candidate that is
+    closer to full fidelity. The runtime term penalizes a candidate whose
+    predicted evaluation cost is large. The runtime GP uses log t, so the
+    function takes the expectation in lognormal form.
 
-    The two terms are not commensurable: qLogNEHVI carries the units of the
-    hypervolume in standardised objective space and drifts in magnitude as the
-    frontier fills in, so the effective weight of the runtime penalty is not
-    constant over a run.
+    The two terms do not share units. qLogNEHVI carries the units of the
+    hypervolume in standardized objective space. Its magnitude drifts as the
+    frontier fills in. The effective weight of the runtime penalty is therefore
+    not constant over a run.
     """
 
     def __init__(self, qlognehvi, model_time_log, *, ell_z: float, gamma: float,
@@ -218,10 +232,11 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
     a proposal depends on the data and the index alone. A resumed run therefore
     proposes what an uninterrupted one would have proposed at the same index.
     """
+    t_propose = time.perf_counter()
     torch.manual_seed(seed)
 
     X_opt = space.to_opt(X)
-    model_obj, model_time = build_models(space, X_opt, Y_obj, Y_time, cfg.eps)
+    model_obj, model_time, wall_fit = build_models(space, X_opt, Y_obj, Y_time, cfg.eps)
 
     y_min = Y_obj.min(dim=0).values
     y_range = (Y_obj.max(dim=0).values - y_min).clamp_min(1e-6)
@@ -244,7 +259,7 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
         w_z=cfg.w_z, w_t=cfg.w_t, t_floor=t_floor,
     )
 
-    t0 = time.time()
+    t0 = time.perf_counter()
     cand_opt, acq_at_optimum = optimize_acqf(
         acq_function=acq,
         bounds=space.acq_bounds(),
@@ -253,7 +268,7 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
         raw_samples=cfg.raw_samples,
         options={"batch_limit": cfg.acq_batch_limit, "maxiter": cfg.acq_maxiter},
     )
-    elapsed = time.time() - t0
+    wall_acq = time.perf_counter() - t0
 
     cand_full = space.to_full(cand_opt)
     with torch.no_grad():
@@ -263,12 +278,17 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
         "acq_value_at_optimum": float(acq_at_optimum.detach().cpu().view(-1)[0]),
         "acq_value_at_snapped": acq_at_snapped,
         "acq_seed": int(seed),
-        "acq_wall_s": elapsed,
         "ref_point": [float(v) for v in ref_point],
         "t_floor": t_floor,
         "n_train": int(X.shape[0]),
         "gp_objective": summarise_gp(model_obj, "objective"),
         "gp_log_runtime": summarise_gp(model_time, "log_runtime"),
+        "wall_s": {
+            "gp_objective_fit": wall_fit["gp_objective"],
+            "gp_log_runtime_fit": wall_fit["gp_log_runtime"],
+            "acquisition_maximisation": wall_acq,
+            "total": time.perf_counter() - t_propose,
+        },
     }
     return cand_full.view(-1), diagnostics
 
@@ -337,13 +357,12 @@ def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
 
     print(f"[fit] vintage {vintage}: fitting on {len(paths)} runs "
           f"({len(init_rows)} DOE + {n_bo} OPT requested)")
-    t0 = time.time()
+    t_fit = time.perf_counter()
+    t0 = time.perf_counter()
     results = fit_all_targets(
         paths,
-        z_min=cfg.fit_z_min,
         lambda_grid=cfg.fit_lambda_grid,
         k_fold=cfg.fit_k_fold,
-        n_repeats=cfg.fit_cv_repeats,
         seed=cfg.cv_seed,
         horizon_hours=cfg.horizon_hours,
     )
@@ -363,14 +382,23 @@ def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
         "rescales_past_rows": False,
     }
 
+    wall_record = write_vintage_record(results, registry.vintage_path(vintage),
+                                       vintage, created_at, extra=context)
+    wall_publish = write_coefficients(results, PHI_COEFFS_FILE, vintage, created_at)
+    context["wall_s"] = {
+        "fit_total": elapsed,
+        "per_target": {n: r.wall_s for n, r in results.items()},
+        "write_record": wall_record,
+        "publish_coefficients": wall_publish,
+        "total": time.perf_counter() - t_fit,
+    }
     write_vintage_record(results, registry.vintage_path(vintage), vintage,
                          created_at, extra=context)
-    write_coefficients(results, BETA_COEFFS_FILE, vintage, created_at)
 
     for name, r in results.items():
         print(f"[fit]   {name}: a = {r.a:.6f}, b = {r.b:.6f}, lambda = {r.lam:g}, "
               f"loss = {r.loss:.4e} (runs {r.n_runs_used}/{r.n_runs_total})")
-    print(f"[fit] vintage {vintage} published to {BETA_COEFFS_FILE.name} in {elapsed:.1f} s")
+    print(f"[fit] vintage {vintage} published to {PHI_COEFFS_FILE.name} in {elapsed:.1f} s")
 
     return {"vintage": vintage, "created_at": created_at, "context": context,
             "targets": {n: r.to_dict() for n, r in results.items()}}
@@ -385,15 +413,15 @@ def ensure_vintage(cfg: RunConfig, registry: Registry, vintage: int,
     continuing against whatever file happened to survive.
     """
     record = registry.load_vintage(vintage)
-    if record is not None and BETA_COEFFS_FILE.exists():
+    if record is not None and PHI_COEFFS_FILE.exists():
         import scipy.io
-        published = float(scipy.io.loadmat(str(BETA_COEFFS_FILE))["vintage"].ravel()[0])
+        published = float(scipy.io.loadmat(str(PHI_COEFFS_FILE))["vintage"].ravel()[0])
         if int(published) == vintage:
             return
         print(f"[fit] published coefficients are vintage {int(published)}, "
               f"iteration needs {vintage}; republishing from the record")
         write_coefficients(
-            _results_from_record(record), BETA_COEFFS_FILE, vintage,
+            _results_from_record(record), PHI_COEFFS_FILE, vintage,
             record.get("created_at", ""))
         return
 
@@ -444,6 +472,7 @@ def run_initialization(cfg: RunConfig) -> None:
         theta_list = [float(v) for v in theta.tolist()]
         sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
+        t_wait = time.perf_counter()
         send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
         try:
             row = wait_for_result(eval_id, path_results, path_failures,
@@ -457,17 +486,19 @@ def run_initialization(cfg: RunConfig) -> None:
             print(f"[init] design point {eval_id} failed; it is recorded and skipped")
             continue
 
+        wall_matlab = time.perf_counter() - t_wait
         registry.append_evaluation({
             "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
             "doe_index": eval_id, "theta": theta_list,
             "sobol_seed": cfg.sobol_seed, "sent_at": sent_at,
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "beta_vintage_applied": None,
+            "phi_vintage_applied": None,
             "result": row,
+            "wall_s": {"matlab_round_trip": wall_matlab},
         })
         print(f"[init] {eval_id:3d}/{cfg.n_init}  z={row['z']:.4f}  "
               f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
-              f"runtime={row['runtime_s']:.1f}s")
+              f"solver={row['runtime_s']:.1f}s  matlab={wall_matlab:.1f}s")
 
     rows = load_history([path_results])
     print(f"\n[init] initialisation complete: {len(rows)} evaluations")
@@ -508,8 +539,12 @@ def run_bo(cfg: RunConfig) -> None:
         if eval_id in done:
             continue
 
+        t_iter = time.perf_counter()
         vintage = (bo_idx - 1) // cfg.refit_every
+
+        t0 = time.perf_counter()
         ensure_vintage(cfg, registry, vintage, init_rows, bo_rows)
+        wall_vintage = time.perf_counter() - t0
 
         X, Y_obj, Y_time = history_tensors(init_rows + bo_rows)
         theta, diagnostics = propose(space, cfg, X, Y_obj, Y_time,
@@ -517,6 +552,7 @@ def run_bo(cfg: RunConfig) -> None:
         theta_list = [float(v) for v in theta.tolist()]
         sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
+        t_wait = time.perf_counter()
         send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
         try:
             row = wait_for_result(eval_id, path_results, path_failures,
@@ -525,14 +561,15 @@ def run_bo(cfg: RunConfig) -> None:
             registry.append_evaluation({
                 "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
                 "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
-                "beta_vintage_expected": vintage, "proposal": diagnostics,
+                "phi_vintage_expected": vintage, "proposal": diagnostics,
                 "acquisition_settings": _acq_settings(cfg),
                 "failed": True, "failure": exc.failure,
             })
             print(f"[bo] iteration {bo_idx} failed in MATLAB; recorded and skipped")
             continue
+        wall_matlab = time.perf_counter() - t_wait
 
-        applied = int(row["beta_vintage"]) if row["beta_vintage"] == row["beta_vintage"] else None
+        applied = int(row["phi_vintage"]) if row["phi_vintage"] == row["phi_vintage"] else None
         if applied != vintage:
             raise RuntimeError(
                 f"evaluation {eval_id} was scaled by surrogate vintage {applied} but "
@@ -541,22 +578,35 @@ def run_bo(cfg: RunConfig) -> None:
                 f"than continuing with mixed vintages."
             )
 
+        t0 = time.perf_counter()
         registry.append_evaluation({
             "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
             "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "beta_vintage_expected": vintage,
-            "beta_vintage_applied": applied,
+            "phi_vintage_expected": vintage,
+            "phi_vintage_applied": applied,
             "proposal": diagnostics,
             "acquisition_settings": _acq_settings(cfg),
             "result": row,
+            "wall_s": {
+                "ensure_vintage": wall_vintage,
+                "propose": diagnostics["wall_s"]["total"],
+                "matlab_round_trip": wall_matlab,
+                "iteration": time.perf_counter() - t_iter,
+            },
         })
+        wall_ledger = time.perf_counter() - t0
         bo_rows.append(row)
 
-        print(f"[bo] {bo_idx:3d}/{cfg.n_iter} [v{vintage}]  z={row['z']:.4f}  "
+        print(f"[bo] {bo_idx:3d}/{cfg.n_iter} [phi v{vintage}]  z={row['z']:.4f}  "
               f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
-              f"runtime={row['runtime_s']:.1f}s  "
               f"acq={diagnostics['acq_value_at_snapped']:.4g}")
+        print(f"       wall: propose {diagnostics['wall_s']['total']:.1f}s "
+              f"(gp {diagnostics['wall_s']['gp_objective_fit']:.1f}+"
+              f"{diagnostics['wall_s']['gp_log_runtime_fit']:.1f}s, "
+              f"acq {diagnostics['wall_s']['acquisition_maximisation']:.1f}s), "
+              f"matlab {wall_matlab:.1f}s, ledger {wall_ledger:.3f}s, "
+              f"iteration {time.perf_counter() - t_iter:.1f}s")
 
         if bo_idx % cfg.refit_every == 0:
             next_vintage = bo_idx // cfg.refit_every
@@ -569,7 +619,7 @@ def run_bo(cfg: RunConfig) -> None:
                               f"recorded for post-hoc use and governs no evaluation")
 
     print(f"\n[bo] budget complete: {len(bo_rows)} optimisation evaluations")
-    _print_summary(init_rows + bo_rows)
+    _print_summary(init_rows + bo_rows, registry)
 
 
 def _acq_settings(cfg: RunConfig) -> Dict:
@@ -584,18 +634,43 @@ def _acq_settings(cfg: RunConfig) -> Dict:
     }
 
 
-def _print_summary(rows: List[Dict]) -> None:
+def _print_summary(rows: List[Dict], registry: Registry | None = None) -> None:
+    """Print the totals of a finished run, including where the time went."""
     if not rows:
         print("[done] no evaluations recorded")
         return
+
     best_sse = min(rows, key=lambda r: r["SSE"])
     best_ssdu = min(rows, key=lambda r: r["SSdU"])
-    total_runtime = sum(r["runtime_s"] for r in rows)
+    solver_s = sum(r["runtime_s"] for r in rows)
+    sim_wall_s = sum(r.get("wall_total_s", 0.0) or 0.0 for r in rows)
+
     print("\n[done] summary")
-    print(f"  evaluations       {len(rows)}")
-    print(f"  simulation time   {total_runtime / 3600:.2f} h")
-    print(f"  lowest SSE        {best_sse['SSE']:.6g}  (eval {best_sse['eval_id']})")
-    print(f"  lowest SSdU       {best_ssdu['SSdU']:.6g}  (eval {best_ssdu['eval_id']})")
+    print(f"  evaluations         {len(rows)}")
+    print(f"  solver time         {solver_s / 3600:.2f} h")
+    print(f"  simulation wall     {sim_wall_s / 3600:.2f} h")
+    print(f"  lowest SSE          {best_sse['SSE']:.6g}  (eval {best_sse['eval_id']})")
+    print(f"  lowest SSdU         {best_ssdu['SSdU']:.6g}  (eval {best_ssdu['eval_id']})")
+
+    if registry is None:
+        return
+
+    gp_s = acq_s = fit_s = 0.0
+    for rec in registry.load_evaluations():
+        w = (rec.get("proposal") or {}).get("wall_s") or {}
+        gp_s += w.get("gp_objective_fit", 0.0) + w.get("gp_log_runtime_fit", 0.0)
+        acq_s += w.get("acquisition_maximisation", 0.0)
+    for v in registry.list_vintages():
+        rec = registry.load_vintage(v) or {}
+        fit_s += ((rec.get("context") or {}).get("wall_s") or {}).get("total", 0.0)
+
+    overhead = gp_s + acq_s + fit_s
+    print(f"  GP fits             {gp_s / 60:.1f} min")
+    print(f"  acquisition         {acq_s / 60:.1f} min")
+    print(f"  phi fits            {fit_s / 60:.1f} min")
+    if sim_wall_s > 0:
+        print(f"  driver overhead     {100 * overhead / (sim_wall_s + overhead):.1f}% "
+              f"of the total wall time")
 
 
 def main(argv: List[str]) -> int:

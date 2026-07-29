@@ -16,8 +16,8 @@ function base = nmpc_base(opts)
 %                       setpoint-schedule run sets this false because it
 %                       recomputes the setpoint for every segment.
 %     load_lqr          load LQR_data.mat for construct_P (default true)
-%     beta_coeffs_path  when non-empty, load the fitted fidelity surrogate
-%                       coefficients from this file into base.beta
+%     phi_coeffs_path   when non-empty, load the fitted fidelity surrogate
+%                       coefficients from this file into base.phi
 %     optimizer_max_iter  fmincon MaxIterations (default 100)
 %
 %   The noise realisation depends on the random state at call time, so seed
@@ -31,7 +31,7 @@ function base = nmpc_base(opts)
         opts.Xsp (1,1) double = 20
         opts.set_setpoint (1,1) logical = true
         opts.load_lqr (1,1) logical = true
-        opts.beta_coeffs_path string = ""
+        opts.phi_coeffs_path string = ""
         opts.optimizer_max_iter (1,1) double = 100
     end
 
@@ -97,15 +97,16 @@ function base = nmpc_base(opts)
     base.optimizer_max_iter = opts.optimizer_max_iter;
 
     %% Fidelity surrogate
-    % Shape parameters of the cost fraction curves frac_SSE(f) = I_f(a, b) and
-    % frac_SSdU(f), fitted on the runs collected so far. Left empty during
-    % initialisation, where costs are reported at the simulated fidelity
-    % without extrapolation. The BO loop refits periodically and reloads this
-    % field before each evaluation, so base.beta.vintage identifies the fit
-    % that scaled any given row.
-    if strlength(opts.beta_coeffs_path) > 0
-        base.beta = load_beta_coeffs(opts.beta_coeffs_path);
+    % Shape parameters of the cost fraction phi(z) = I_z(a, b), one pair for
+    % each objective. The fit uses the runs collected so far. This field stays
+    % empty during initialization, where the driver reports the cost measured at
+    % the simulated fidelity and applies no scaling.
+    %
+    % The BO loop refits phi during the run. main_BO.m reloads this field before
+    % every evaluation, so base.phi.vintage names the fit that scaled a row.
+    if strlength(opts.phi_coeffs_path) > 0
+        base.phi = load_phi_coeffs(opts.phi_coeffs_path);
     else
-        base.beta = [];
+        base.phi = [];
     end
 end

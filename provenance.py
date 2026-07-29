@@ -1,33 +1,33 @@
 """Durable record of everything a run did.
 
-Three artefacts, all under results/registry:
+The registry holds three kinds of file under results/registry.
 
-  manifest.json          written once, before the first evaluation. Holds the
-                         declared configuration, the environment, the git state
-                         and the seeds. On resume it is compared against the
-                         current configuration and any difference stops the run.
+manifest.json holds the declared configuration, the environment, the git state
+and the seeds. The driver writes it once, before the first evaluation. On resume
+the driver compares it against the current configuration. Any difference stops
+the run.
 
-  evaluations.jsonl      one line per evaluation, appended and flushed to disk
-                         before the next request is sent. Holds the proposal
-                         (acquisition value, reference point, fitted GP
-                         hyperparameters, surrogate vintage in force) and the
-                         result read back from MATLAB.
+evaluations.jsonl holds one line for each evaluation. The driver appends the
+line and flushes it to disk before it sends the next request. The line holds the
+proposal and the result that MATLAB returned. The proposal part holds the
+acquisition value, the reference point, the fitted GP hyperparameters, the phi
+vintage in force, and the wall time of each step.
 
-  vintages/vintage_NN.json   one file per surrogate fit: shape parameters,
-                         selected lambda, the whole cross-validation loss grid,
-                         the optimiser exit status, and the list of output files
-                         that informed the fit.
+vintages/vintage_NN.json holds one fit of phi. It holds the shape parameters,
+the selected lambda, the whole cross-validation loss grid, the optimizer exit
+status, the output files that informed the fit, and the wall time of each stage.
 
-Design rules, both consequences of expecting a crash at any point:
+Two rules follow from the assumption that a crash can happen at any point.
 
-  Append, never rewrite. A line already on disk is never revised, so a partial
-  write can only ever truncate the tail. The reader drops a trailing line that
-  does not parse and the run resumes from the last complete record.
+Append, and never rewrite. The driver never revises a line that is already on
+disk. A partial write can therefore only truncate the tail. The reader drops a
+last line that does not parse, and the run resumes from the last complete
+record.
 
-  Write the durable record after the fact it describes. The evaluation line is
-  appended once MATLAB has reported the result, so a line in the ledger implies
-  a completed evaluation. The reverse gap, a completed evaluation with no line,
-  is recoverable from the results CSV and is repaired on resume.
+Write the record after the event that it describes. The driver appends the
+evaluation line after MATLAB reports the result. A line in the ledger therefore
+means that the evaluation finished. The opposite gap is a finished evaluation
+with no line. The driver recovers that case from the results CSV on resume.
 """
 
 from __future__ import annotations
