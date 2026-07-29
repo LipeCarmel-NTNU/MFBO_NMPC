@@ -1,0 +1,30 @@
+# Conda environment for the MFBO-NMPC pipeline.
+#
+# Create it with:
+#     conda env create -f environment.yml
+#     conda activate mfbo-nmpc
+#
+# One channel keeps the solve simple. conda-forge carries pytorch, botorch and
+# gpytorch, so you do not need to mix in the pytorch channel.
+#
+# The driver sets the torch device to CPU, so this file asks for no CUDA build.
+#
+# The package is named "pytorch" here and "torch" on PyPI. That difference is
+# why requirements.txt does not work with `conda install --file`.
+
+name: mfbo-nmpc
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python>=3.10
+  - pytorch>=2.0
+  - botorch>=0.11
+  - gpytorch>=1.11
+  - numpy>=1.24
+  - scipy>=1.10
+
+  # Used only by the scripts under "Result analysis".
+  # - matplotlib>=3.7
+  # - pandas>=2.0
