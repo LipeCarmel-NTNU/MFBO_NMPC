@@ -72,6 +72,15 @@ function [t,y] = RKF45_book(system, tspan, x0, h)
         %e = max(norm(y_new - y_star, inf), - min([y_new(y_new<0); 0]));
         e = norm(y_new - y_star, inf);
 
+        % A NaN error estimate means the model returned NaN over this step, or
+        % Inf in both estimates. Shrinking h does not recover it, so the step
+        % floor would accept the NaN and carry it to tf. No reasonable operating
+        % condition reaches this point.
+        if not(isfinite(e))
+            error('RKF45_book:Step is not finite', ...
+                'RKF45_book failed: NaN in the integrated state at t = %g.', t);
+        end
+
         % Step size control
         h_new = h * safety * 0.84*(tol / e)^(1/4);
 
