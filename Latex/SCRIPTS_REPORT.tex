@@ -58,7 +58,7 @@ The plant is a three-state reduced bioprocess dilution model with states $x = [V
 \dot X &= \left(-\frac{F_{\mathrm{in},1}+F_{\mathrm{in},2}}{V} + \mu(S) - k_d\right) X, \\
 \dot S &= \frac{(S_{\mathrm{in}}-S)F_{\mathrm{in},1} - S F_{\mathrm{in},2}}{V} - \mu(S)\, X\, Y_{XS}^{-1},
 \end{align}
-with Monod kinetics $\mu(S) = \mu_{\max}\, S / (K_s + S)$ and parameters $S_{\mathrm{in}} = \SI{70}{g\per L}$, $\mu_{\max} = \SI{0.273}{h^{-1}}$, $K_s = \SI{0.007}{g\per L}$, $k_d = \SI{0.006}{h^{-1}}$, $Y_{XS} = 0.42042$. State and input bounds are $V \in [0.5, 2]$, $X \in [0, 50]$, $S \in [-0.1, 20]$, $u_i \in [0, 0.4]$, $i = 1,2,3$. Plant simulation uses \texttt{ode45} with non-negativity enforcement on $X$ and $S$.
+with Monod kinetics $\mu(S) = \mu_{\max}\, S / (K_s + S)$ and parameters $S_{\mathrm{in}} = \SI{70}{g\per L}$, $\mu_{\max} = \SI{0.273}{h^{-1}}$, $K_s = \SI{0.007}{g\per L}$, $k_d = \SI{0.006}{h^{-1}}$, $Y_{XS} = 0.42042$. State and input bounds are $V \in [0.5, 2]$, $X \in [0, 50]$, $S \in [0, 20]$, $u_i \in [0, 0.4]$, $i = 1,2,3$. Plant simulation uses \texttt{ode45} with non-negativity enforcement on $X$ and $S$.
 
 \subsection{NMPC formulation with LQR-derived terminal cost}
 

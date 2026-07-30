@@ -1,13 +1,9 @@
 clear all; close all; clc
 
-% Add folders and subfolders to path
-current_dir = fileparts(mfilename('fullpath'));
-addpath(genpath(current_dir))
-
 USE_PARALLEL = true;
 pool = gcp('nocreate');
 if USE_PARALLEL
-    NumWorkers = 8;
+    NumWorkers = 2;
     if isempty(pool) || pool.NumWorkers ~= NumWorkers
         if ~isempty(pool)
             delete(pool);
@@ -38,9 +34,9 @@ plant = model;
 xdot = @(x, u) reshape(model(x(:), u), 1, []);
 
 %% Initial conditions
-tf = 5/60;                % h
+tf = 50/60;                % h
 
-V_0   = 100;
+V_0   = 1;
 X_0   = 15;
 S_0   = 0;
 x0_plant = [V_0, X_0, S_0];
@@ -79,7 +75,7 @@ nmpc = NMPC( ...
     x_sp = xss, u_sp = uss, ...
     Q = Q, R_u = R_u, R_du = R_du, ...
     P = P, x_term = xss, u_term = uss, ...
-    Xmin = [0.5 0 -0.1], Xmax = [2 50 20], ...
+    Xmin = [0.5 0 0], Xmax = [2 50 20], ...
     umin = zeros(1, nu), umax = 0.4 * ones(1, nu), ...
     x_scale = [1 20 1], u_scale = 0.4 * ones(1, nu), ...
     soft_mask = [false true true], rho_L1 = 1e3);

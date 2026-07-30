@@ -12,7 +12,7 @@ function base = nmpc_base(opts)
 %     Ts                sampling time in hours (default 1/60)
 %     tf                horizon in hours (default 10)
 %     Vsp, Xsp          setpoints passed to find_ss (default 1 and 20)
-%     Xmin, Xmax        state bounds (default [0.5 0 -0.1] and [2 50 20])
+%     Xmin, Xmax        state bounds (default [0.5 0 0] and [2 50 20])
 %     umin, umax        input bounds (default zeros(1,3) and 0.4*ones(1,3))
 %     x_scale, u_scale  decision-variable scaling (default [1 20 1] and
 %                       0.4*ones(1,3))
@@ -37,7 +37,7 @@ function base = nmpc_base(opts)
         opts.tf (1,1) double {mustBePositive} = 10
         opts.Vsp (1,1) double = 1
         opts.Xsp (1,1) double = 20
-        opts.Xmin (1,:) double = [0.5 0 -0.1]
+        opts.Xmin (1,:) double = [0.5 0 0]
         opts.Xmax (1,:) double = [2 50 20]
         opts.umin (1,:) double = zeros(1, 3)
         opts.umax (1,:) double = 0.4 * ones(1, 3)
