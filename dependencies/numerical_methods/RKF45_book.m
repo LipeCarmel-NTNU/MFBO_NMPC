@@ -71,7 +71,10 @@ function [t,y] = RKF45_book(system, tspan, x0, h)
         % Error estimate (maximum absolute error)
         %e = max(norm(y_new - y_star, inf), - min([y_new(y_new<0); 0]));
         e = norm(y_new - y_star, inf);
-
+        if isnan(e)
+            error('RKF45_book:NaN', ...
+                'RKF45_book failed: NaN in the integrated state at t = %g.', t);
+        end
         % Step size control
         h_new = h * safety * 0.84*(tol / e)^(1/4);
 
