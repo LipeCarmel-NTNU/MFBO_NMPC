@@ -467,6 +467,11 @@ def run_initialization(cfg: RunConfig) -> None:
     design = sobol_design(space, cfg.n_init, cfg.sobol_seed)
     print(f"[init] {len(done)} of {cfg.n_init} design points already evaluated")
 
+    # Iteration wall times of this session, used for the estimate of time left.
+    # Rows from an earlier session are excluded: they may come from a different
+    # machine or a different fmincon budget.
+    iter_walls: List[float] = []
+
     for i in range(cfg.n_init):
         eval_id = i + 1
         if eval_id in done:
@@ -500,9 +505,12 @@ def run_initialization(cfg: RunConfig) -> None:
             "result": row,
             "wall_s": {"matlab_round_trip": wall_matlab},
         })
+        iter_walls.append(wall_matlab)
+        eta = _eta(iter_walls, cfg.n_init - eval_id)
         print(f"[init] {eval_id:3d}/{cfg.n_init}  z={row['z']:.4f}  "
               f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
-              f"solver={row['runtime_s']:.1f}s  matlab={wall_matlab:.1f}s")
+              f"solver={row['runtime_s']:.1f}s  matlab={wall_matlab:.1f}s"
+              + (f"\n       {eta}" if eta else ""))
 
     rows = load_history([path_results])
     print(f"\n[init] initialisation complete: {len(rows)} evaluations")
@@ -539,6 +547,10 @@ def run_bo(cfg: RunConfig) -> None:
     print(f"[bo] resuming with {len(init_rows)} DOE and {len(bo_rows)} OPT evaluations")
 
     done = {r["eval_id"] for r in bo_rows}
+
+    # See the note in run_initialization: only this session's timings feed the
+    # estimate of time left.
+    iter_walls: List[float] = []
 
     for k in range(len(bo_rows), cfg.n_iter):
         bo_idx = k + 1
@@ -608,12 +620,18 @@ def run_bo(cfg: RunConfig) -> None:
         print(f"[bo] {bo_idx:3d}/{cfg.n_iter} [phi v{vintage}]  z={row['z']:.4f}  "
               f"SSE={row['SSE']:.6g}  SSdU={row['SSdU']:.6g}  "
               f"acq={diagnostics['acq_value_at_snapped']:.4g}")
+        wall_iter = time.perf_counter() - t_iter
         print(f"       wall: propose {diagnostics['wall_s']['total']:.1f}s "
               f"(gp {diagnostics['wall_s']['gp_objective_fit']:.1f}+"
               f"{diagnostics['wall_s']['gp_log_runtime_fit']:.1f}s, "
               f"acq {diagnostics['wall_s']['acquisition_maximisation']:.1f}s), "
               f"matlab {wall_matlab:.1f}s, ledger {wall_ledger:.3f}s, "
-              f"iteration {time.perf_counter() - t_iter:.1f}s")
+              f"iteration {wall_iter:.1f}s")
+
+        iter_walls.append(wall_iter)
+        eta = _eta(iter_walls, cfg.n_iter - bo_idx)
+        if eta:
+            print(f"       {eta}")
 
         if bo_idx % cfg.refit_every == 0:
             next_vintage = bo_idx // cfg.refit_every
@@ -627,6 +645,50 @@ def run_bo(cfg: RunConfig) -> None:
 
     print(f"\n[bo] budget complete: {len(bo_rows)} optimisation evaluations")
     _print_summary(init_rows + bo_rows, registry)
+
+
+ETA_WINDOW = 5
+
+
+def _eta(iter_walls: List[float], n_remaining: int) -> str:
+    """Return an estimate of the time left, from the recent iteration times.
+
+    The estimate uses the median of the last ETA_WINDOW iterations and not the
+    mean over the whole run. Two reasons. The cost of one evaluation grows with
+    the fidelity z, and the fidelity bias in the acquisition pushes z toward 1
+    as the run proceeds, so early iterations are systematically cheaper than
+    late ones and a full-run mean is biased low. The median also absorbs a
+    single slow evaluation without dragging the estimate.
+
+    The range comes from the fastest and the slowest iteration in the same
+    window. It states how uncertain the estimate is instead of implying a
+    precision the data does not support.
+
+    An estimate needs at least two finished iterations. Before that the function
+    returns an empty string and the caller prints nothing.
+    """
+    if n_remaining <= 0 or len(iter_walls) < 2:
+        return ""
+
+    window = iter_walls[-ETA_WINDOW:]
+    ordered = sorted(window)
+    mid = len(ordered) // 2
+    typical = ordered[mid] if len(ordered) % 2 else 0.5 * (ordered[mid - 1] + ordered[mid])
+
+    remaining_s = typical * n_remaining
+    low_s = ordered[0] * n_remaining
+    high_s = ordered[-1] * n_remaining
+    finish = time.strftime("%a %H:%M", time.localtime(time.time() + remaining_s))
+
+    return (f"{n_remaining} left, eta {_hours(remaining_s)} "
+            f"[{_hours(low_s)}-{_hours(high_s)}], finish ~{finish}")
+
+
+def _hours(seconds: float) -> str:
+    """Format a duration as minutes below one hour, otherwise as hours."""
+    if seconds < 3600:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
 
 
 def _acq_settings(cfg: RunConfig) -> Dict:
