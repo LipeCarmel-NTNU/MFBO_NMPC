@@ -1,9 +1,14 @@
 %% Phase 1: initialization runs for the fidelity surrogate
 %
-% This script serves the evaluation requests that main.py writes to
-% inbox/theta.txt. It stops when the initialization budget is complete.
+% This script serves the evaluation requests that the driver writes to
+% inbox/theta.txt. It answers the requests that carry phase code 0.
 %
-% The Sobol design lives in main.py. This script generates no design of its own.
+% The script holds no budget and no design. run_pipeline.py owns both, and
+% run_config.py declares the number of design points in one place.
+%
+% When the driver sends its first request with phase code 1, this script leaves
+% its loop without serving that request and calls main_BO. You therefore start
+% MATLAB once for a whole run.
 %
 % The script reports the cost at the fidelity that it simulated. The run length
 % is tf = 10*z and no surrogate scales the result. This phase produces the data
@@ -16,8 +21,8 @@
 %   results/init/out_<timestamp>.mat  the full per-step trends, which include
 %                                     case(k).partial_SSE and partial_SSdU
 %
-% Next step: main.py fits phi as vintage 0. It then runs the optimization phase
-% against main_BO.m.
+% The driver fits phi as vintage 0 when the design is complete. This script
+% then hands over to main_BO without any action from you.
 %
 % Reproducibility: rng(1) fixes the measurement-noise realization. nmpc_base
 % draws it once and every evaluation of this run reuses it.
@@ -27,8 +32,11 @@ clear all; close all; clc;
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir))
 
+% Clear the exchange before serving. A request or a lock left by an earlier run
+% would otherwise be the first thing this server sees.
 delete_if_exists('.lock')
 delete_if_exists('matlab.lock')
+delete_if_exists(fullfile('inbox', 'theta.txt'))
 
 rng(1)
 
@@ -38,12 +46,11 @@ configure_pool(USE_PARALLEL, NumWorkers);
 
 %% Run configuration
 cfg_run = struct();
-cfg_run.n_init = 20;                                    % must match N_INIT in main.py
 cfg_run.theta_txt = fullfile("inbox", "theta.txt");
 cfg_run.poll_s = 2.0;
 cfg_run.out_dir = fullfile("results", "init");
 cfg_run.results_csv = fullfile("results", "init", "results.csv");
-cfg_run.failures_csv = fullfile("results", "init", "failures.csv");
+cfg_run.failures_csv = fullfile("results", "failures.csv");
 cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
 cfg_run.lock_path = "matlab.lock";
 cfg_run.lock_stale_s = 6 * 3600;
@@ -51,6 +58,7 @@ cfg_run.max_consecutive_failures = 5;
 cfg_run.sigma_y = [0.001 0.1 0.1];
 cfg_run.NumWorkers = NumWorkers;
 cfg_run.rng_seed = 1;
+cfg_run.serves_phase = 0;      % 0 = design of experiments
 
 base = nmpc_base(sigma_y = cfg_run.sigma_y);
 
@@ -60,18 +68,26 @@ ensure_dir(cfg_run.out_dir);
 check_results_header(cfg_run.results_csv, cfg_run.theta_len);
 init_results_csv(cfg_run.results_csv, cfg_run.theta_len);
 
-%% Initialisation loop
+%% Request loop
+% This script holds no budget. It serves requests until you stop it. The driver
+% decides how many evaluations the design needs, and run_config.py declares that
+% number in one place.
 n_done = count_results_rows(cfg_run.results_csv);
-fprintf("Initialisation: %d of %d points already complete.\n", n_done, cfg_run.n_init);
-
-cfg_run.stop_after = max(0, cfg_run.n_init - n_done);
+fprintf("Initialization: %d rows already in %s.\n", n_done, cfg_run.results_csv);
+fprintf("Serving until you press Ctrl-C. The driver stops when its design is complete.\n");
 
 serve_requests(cfg_run, @(req) run_and_log(cfg_run, base, req));
 
-fprintf("\nInitialisation complete: %d points in %s\n", ...
-    count_results_rows(cfg_run.results_csv), cfg_run.out_dir);
-fprintf("main.py fits vintage 0 from these runs and then starts the BO phase.\n");
-fprintf("Run main_BO.m next.\n");
+%% Hand over to the optimization phase
+% serve_requests returns when the driver sends a request that this server does
+% not answer. That request is still in the inbox, so main_BO reads it and serves
+% it.
+%
+% main_BO clears the workspace, which empties this one too. The handover
+% therefore leaves the same state as closing MATLAB here and starting main_BO
+% fresh. Nothing may follow this call.
+fprintf("\nDesign phase complete. Starting main_BO.\n\n");
+main_BO
 
 
 %% Local functions

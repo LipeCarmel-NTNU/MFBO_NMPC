@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 LOCK_FILE = BASE_DIR / "matlab.lock"
 THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 
@@ -29,14 +29,22 @@ THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 # the surrogate-scaled costs of the optimisation runs.
 INIT_RESULTS_FILE = BASE_DIR / "results" / "init" / "results.csv"
 BO_RESULTS_FILE = BASE_DIR / "results" / "results.csv"
-INIT_FAILURES_FILE = BASE_DIR / "results" / "init" / "failures.csv"
-BO_FAILURES_FILE = BASE_DIR / "results" / "failures.csv"
+# One failures file for both phases. The MATLAB serve loop writes it, and that
+# loop does not know which phase a request belongs to.
+FAILURES_FILE = BASE_DIR / "results" / "failures.csv"
 INIT_OUT_DIR = BASE_DIR / "results" / "init"
 BO_OUT_DIR = BASE_DIR / "results"
 
 PHI_COEFFS_FILE = BASE_DIR / "results" / "surrogate" / "phi_coeffs.mat"
 
 THETA_LEN = 12
+
+# Phase codes sent with every request. The MATLAB server reads the code and
+# routes the request. It therefore needs no state of its own to know which
+# phase a run is in.
+PHASE_DOE = 0    # report the cost measured at the simulated fidelity
+PHASE_OPT = 1    # scale the measured cost by phi(z)
+PHASE_CODES = {"init": PHASE_DOE, "bo": PHASE_OPT}
 
 # Columns written by dependencies/io/results_csv_header.m. The reader checks
 # them, so a schema change on either side is caught at the first read instead of
@@ -64,11 +72,10 @@ def results_file(phase: str) -> Path:
 
 
 def failures_file(phase: str) -> Path:
-    if phase == "init":
-        return INIT_FAILURES_FILE
-    if phase == "bo":
-        return BO_FAILURES_FILE
-    raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
+    """Both phases share one failures file. phase is accepted for symmetry."""
+    if phase not in ("init", "bo"):
+        raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
+    return FAILURES_FILE
 
 
 def out_dir(phase: str) -> Path:
@@ -123,20 +130,31 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> List[float]:
     return values
 
 
-def send_request(eval_id: int, theta: Sequence[float], *,
+def send_request(eval_id: int, phase: str, theta: Sequence[float], *,
                  lock_stale_s: float = 6 * 3600.0) -> None:
     """Publish one evaluation request.
 
-    Written by temporary name and renamed, so MATLAB polling the file sees
-    either the previous request or this one. A partially written line would
-    otherwise parse as a short theta; the reader also checks the value count,
-    which makes the guard redundant rather than load-bearing.
+    The line is
+
+        eval_id phase_code theta_1 ... theta_12
+
+    The phase code tells the MATLAB server whether to scale the measured cost
+    by phi. The first request carrying the optimization code is also what makes
+    main_initialization hand over to main_BO.
+
+    The function writes a temporary file and renames it. MATLAB polling the
+    file therefore sees the previous request or this one. The reader also
+    checks the value count, so a partial line is rejected rather than parsed as
+    a short theta.
     """
+    if phase not in PHASE_CODES:
+        raise ValueError(f"unknown phase {phase!r}, choose 'init' or 'bo'")
     values = _validate_theta(theta)
     wait_for_lock(lock_stale_s)
 
     THETA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    payload = " ".join([str(int(eval_id))] + [repr(v) for v in values]) + "\n"
+    payload = " ".join([str(int(eval_id)), str(PHASE_CODES[phase])]
+                       + [repr(v) for v in values]) + "\n"
 
     tmp = THETA_FILE.with_suffix(".tmp")
     with tmp.open("w", encoding="ascii") as fh:
@@ -257,7 +275,8 @@ def read_failures(path: Path | str) -> List[Dict]:
 
 
 def wait_for_result(eval_id: int, results_path: Path, failures_path: Path, *,
-                    poll_s: float = 1.0, timeout_s: float = 6 * 3600.0) -> Dict:
+                    poll_s: float = 1.0, timeout_s: float = 6 * 3600.0,
+                    heartbeat_s: float = 600.0, idle_warn_s: float = 120.0) -> Dict:
     """Block until the given evaluation reports success or failure.
 
     Returns the results row on success. Raises EvaluationFailed when MATLAB
@@ -265,6 +284,9 @@ def wait_for_result(eval_id: int, results_path: Path, failures_path: Path, *,
     which is the signature of a MATLAB process that died without writing.
     """
     t0 = time.time()
+    next_heartbeat = t0 + heartbeat_s
+    idle_since = None
+
     while True:
         for row in read_results(results_path):
             if row["eval_id"] == eval_id:
@@ -274,12 +296,39 @@ def wait_for_result(eval_id: int, results_path: Path, failures_path: Path, *,
             if failure["eval_id"] == eval_id:
                 raise EvaluationFailed(eval_id, failure)
 
-        if time.time() - t0 > timeout_s:
+        now = time.time()
+        if now - t0 > timeout_s:
             raise TimeoutError(
                 f"evaluation {eval_id} produced neither a results row nor a failure "
                 f"row within {timeout_s / 3600:.1f} h. Check that MATLAB is still "
-                f"running main_BO.m or main_initialization.m."
+                f"running main_initialization.m or main_BO.m."
             )
+
+        # MATLAB holds the lock for as long as it works on a request. A missing
+        # lock while this function waits therefore means that MATLAB is not
+        # working on the request. That is the signature of a MATLAB process that
+        # died without writing a failure row, which otherwise looks exactly like
+        # a slow evaluation and costs the whole timeout to discover.
+        busy = LOCK_FILE.exists()
+        if busy:
+            idle_since = None
+        elif idle_since is None:
+            idle_since = now
+
+        if now >= next_heartbeat:
+            mins = (now - t0) / 60.0
+            if idle_since is not None and now - idle_since > idle_warn_s:
+                print(f"[warn] evaluation {eval_id} has been pending {mins:.0f} min and "
+                      f"{LOCK_FILE.name} has been absent for "
+                      f"{(now - idle_since) / 60:.0f} min. MATLAB holds that lock while "
+                      f"it works, so it is probably no longer running. Check the MATLAB "
+                      f"console, then restart the server and this command to resume.",
+                      flush=True)
+            else:
+                print(f"[wait] evaluation {eval_id} running for {mins:.0f} min",
+                      flush=True)
+            next_heartbeat = now + heartbeat_s
+
         time.sleep(poll_s)
 
 

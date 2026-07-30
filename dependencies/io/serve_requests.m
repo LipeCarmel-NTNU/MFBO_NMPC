@@ -17,15 +17,23 @@ function n_served = serve_requests(cfg, evaluate_fn)
 %   fault is in the configuration rather than in one candidate and continuing
 %   would burn the budget on rows that never reach the optimiser.
 %
+%   This loop holds no budget. It serves until you stop it, or until it meets a
+%   request that belongs to another phase. run_config.py declares the number of
+%   evaluations in one place. A budget on this side as well would be a second
+%   copy that has to agree with the first, and a stale copy fails silently:
+%   MATLAB waits for a request that never arrives, or stops while the driver is
+%   still sending.
+%
+%   cfg.serves_phase is the phase code that this server answers. A request that
+%   carries a different code ends the loop, and the function returns without
+%   serving it. The request stays in the inbox for the next server to read. This
+%   is how main_initialization hands the run over to main_BO: the driver sends
+%   its first optimization request, the design server sees a code it does not
+%   answer, and it stops.
+%
 %   Required cfg fields:
 %     theta_txt, results_csv, failures_csv, log_path, theta_len, poll_s,
-%     lock_path, lock_stale_s, max_consecutive_failures
-%   Optional:
-%     stop_after   return once this many requests have been served
-
-    if ~isfield(cfg, "stop_after")
-        cfg.stop_after = Inf;
-    end
+%     lock_path, lock_stale_s, max_consecutive_failures, serves_phase
 
     n_served = 0;
     n_consecutive_failures = 0;
@@ -34,7 +42,7 @@ function n_served = serve_requests(cfg, evaluate_fn)
 
     fprintf("Serving requests from %s (Ctrl-C to stop).\n", cfg.theta_txt);
 
-    while n_served < cfg.stop_after
+    while true
         [req, ok] = read_theta_from_txt(cfg.theta_txt, cfg.theta_len);
 
         if ~ok
@@ -45,6 +53,16 @@ function n_served = serve_requests(cfg, evaluate_fn)
         if req.signature == last_signature
             pause(cfg.poll_s);
             continue
+        end
+
+        % A request for another phase ends this server. The request is left in
+        % the inbox, unserved and with its signature unrecorded, so the next
+        % server reads the same file and answers it.
+        if req.phase_code ~= cfg.serves_phase
+            fprintf("\nRequest %d carries phase code %d, and this server answers %d.\n", ...
+                req.eval_id, req.phase_code, cfg.serves_phase);
+            fprintf("Served %d request(s). Handing over.\n", n_served);
+            return
         end
 
         % A request whose index is not ahead of the last one served is a file

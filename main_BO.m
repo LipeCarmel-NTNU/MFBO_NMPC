@@ -1,13 +1,16 @@
 %% Phase 2: Bayesian optimization runs
 %
-% This script serves the evaluation requests that main.py writes to
-% inbox/theta.txt. It logs one row for each evaluation.
+% This script serves the evaluation requests that carry phase code 1. It logs
+% one row for each evaluation.
+%
+% main_initialization calls this script when the design phase ends. You can also
+% run it on its own to resume an interrupted optimization phase.
 %
 % A run of length tf = 10*z accumulates only part of the full-horizon cost. The
 % fitted fraction phi(z) = I_z(a, b) scales the measured partial costs up to
 % full-horizon estimates.
 %
-% main.py refits phi during the run, every 10 optimization iterations. It
+% The driver refits phi during the run, every refit_every iterations. It
 % publishes each fit by renaming a new coefficient file over
 % results/surrogate/phi_coeffs.mat. This script reloads that file before every
 % evaluation. It stores the vintage that it used in the results row. You can
@@ -28,11 +31,18 @@
 % draws it once and every evaluation reuses it. main_initialization.m uses the
 % same seed, so both phases see the same disturbance sequence.
 
-clear all; close all; clc;
+% The clear runs whether you start this script yourself or main_initialization
+% calls it. Both scripts share the base workspace, so the clear also empties the
+% caller. That is the intent: the handover then leaves the same state as closing
+% MATLAB after the design phase and starting this script fresh. Nothing follows
+% the call in main_initialization, so it needs none of its variables again.
+clear all; close all; clc; %#ok<CLALL>
 
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir))
 
+% The lock is cleared, but not inbox/theta.txt. main_initialization hands over
+% with an unserved request already in the inbox, and this server has to read it.
 delete_if_exists('.lock')
 delete_if_exists('matlab.lock')
 
@@ -57,6 +67,7 @@ cfg_run.max_consecutive_failures = 5;
 cfg_run.sigma_y = [0.001 0.1 0.1];
 cfg_run.NumWorkers = NumWorkers;
 cfg_run.rng_seed = 1;
+cfg_run.serves_phase = 1;      % 1 = optimization
 
 base = nmpc_base( ...
     sigma_y = cfg_run.sigma_y, ...
@@ -78,9 +89,9 @@ n_done = count_results_rows(cfg_run.results_csv);
 fprintf("Optimisation: %d rows already in %s.\n", n_done, cfg_run.results_csv);
 
 %% External request loop
-% main.py writes a request, waits for the matching eval_id to appear in the
-% CSV, then writes the next one. The budget lives in main.py, so this loop runs
-% until it is stopped.
+% The driver writes a request, waits for the matching eval_id to appear in the
+% CSV, then writes the next one. The budget lives in run_config.py, so this loop
+% runs until you stop it.
 serve_requests(cfg_run, @(req) run_and_log(cfg_run, base, req));
 
 
@@ -89,7 +100,7 @@ serve_requests(cfg_run, @(req) run_and_log(cfg_run, base, req));
 function run_and_log(cfg_run, base, req)
 %RUN_AND_LOG Evaluate one request against the current vintage of phi.
 % This function reloads the coefficients on every call and not once at startup,
-% because main.py refits phi during the run. A reload before every evaluation
+% because the driver refits phi during the run. A reload before every evaluation
 % keeps this script independent of the refit cadence. It also survives an
 % interruption of either process.
     t_load = tic;

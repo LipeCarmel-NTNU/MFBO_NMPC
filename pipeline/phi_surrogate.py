@@ -45,7 +45,7 @@ USE
 The optimization driver imports this module and refits during a run. You can
 also run it as a script to fit one directory of outputs:
 
-    python fit_beta_surrogate.py results/init
+    python -m pipeline.phi_surrogate results/init
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ from scipy.special import betainc
 # Z_MIN_PHI is the floor of this fit. Z_MIN_BO is the lower bound of the search
 # space and is a separate limit on a separate step. Import the value so that
 # this module and the run configuration cannot disagree.
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 from run_config import Z_MIN_PHI  # noqa: E402
@@ -554,7 +554,7 @@ def write_vintage_record(results: Dict[str, FitResult], json_path: Path, vintage
 def _main(argv: Sequence[str]) -> int:
     if len(argv) < 2:
         print(__doc__)
-        print("usage: fit_beta_surrogate.py <directory of out_*.mat> [more directories]")
+        print("usage: python -m pipeline.phi_surrogate <directory of out_*.mat> [more directories]")
         return 2
 
     paths: List[Path] = []

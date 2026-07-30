@@ -8,8 +8,7 @@ are explicit.
 
 Select a case on the command line:
 
-    python main.py init --case case2
-    python main.py bo   --case case2
+    python run_pipeline.py --case case2
 """
 
 from __future__ import annotations

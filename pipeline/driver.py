@@ -12,8 +12,10 @@ A refit does not rescale an earlier row. An objective value keeps the estimate
 that the vintage in force produced when MATLAB measured it. Every row records
 that vintage. You can therefore recompute the whole history under one fit later.
 
-    python main.py init --case case1     # with main_initialization.m in MATLAB
-    python main.py bo   --case case1     # with main_BO.m in MATLAB
+    python run_pipeline.py --case case1        # runs both phases
+    python run_pipeline.py --case case1 --phase init
+
+Start MATLAB on main_initialization first. It hands over to main_BO by itself.
 
 Both phases resume after an interruption. The driver rebuilds its state from the
 results CSV that MATLAB writes. It compares that state against its own ledger.
@@ -45,7 +47,7 @@ from botorch.optim import optimize_acqf
 from botorch.sampling.normal import SobolQMCNormalSampler
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
-from matlab_interface import (
+from pipeline.matlab_interface import (
     PHI_COEFFS_FILE,
     EvaluationFailed,
     failures_file,
@@ -56,17 +58,19 @@ from matlab_interface import (
     wait_for_matlab_ready,
     wait_for_result,
 )
-from provenance import Registry, summarise_gp
+from pipeline.provenance import Registry, summarise_gp
 from run_config import INTEGER_IDXS, THETA_D, RunConfig, parse_args
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "J surrogate" / "runtime_surrogate"))
-from fit_beta_surrogate import (  # noqa: E402
+from pipeline.phi_surrogate import (
     fit_all_targets,
     write_coefficients,
     write_vintage_record,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+# The project root is one level above this package. Every results path hangs
+# off it, so moving this file deeper would need this line changed and nothing
+# else.
+BASE_DIR = Path(__file__).resolve().parents[1]
 DEVICE = torch.device("cpu")
 DTYPE = torch.double
 
@@ -366,7 +370,7 @@ def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
         seed=cfg.cv_seed,
         horizon_hours=cfg.horizon_hours,
     )
-    elapsed = time.time() - t0
+    elapsed = time.perf_counter() - t0
 
     created_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     context = {
@@ -430,7 +434,7 @@ def ensure_vintage(cfg: RunConfig, registry: Registry, vintage: int,
 
 def _results_from_record(record: Dict):
     """Rebuild the coefficient payload from a stored vintage record."""
-    from fit_beta_surrogate import FitResult
+    from pipeline.phi_surrogate import FitResult
 
     out = {}
     for name, t in record["targets"].items():
@@ -473,7 +477,7 @@ def run_initialization(cfg: RunConfig) -> None:
         sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
         t_wait = time.perf_counter()
-        send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
+        send_request(eval_id, "init", theta_list, lock_stale_s=cfg.lock_stale_s)
         try:
             row = wait_for_result(eval_id, path_results, path_failures,
                                   poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)
@@ -507,8 +511,7 @@ def run_initialization(cfg: RunConfig) -> None:
         bo_registry = Registry(BASE_DIR / "results", "bo")
         fit_vintage(cfg, bo_registry, 0, rows, [])
         print("[init] vintage 0 fitted and published")
-    print("Start MATLAB on main_BO.m, then run:  python main.py bo "
-          f"--case {cfg.case}")
+    print("[init] MATLAB hands over to main_BO on the first optimization request.")
 
 
 def run_bo(cfg: RunConfig) -> None:
@@ -519,7 +522,11 @@ def run_bo(cfg: RunConfig) -> None:
     path_init = results_file("init")
     path_results = results_file("bo")
     path_failures = failures_file("bo")
-    wait_for_matlab_ready(path_results, cfg.max_wait_matlab_s, cfg.matlab_wait_s)
+
+    # No readiness wait here. main_BO creates results.csv only after
+    # main_initialization hands over, and the handover needs the first
+    # optimization request. Waiting for the file before sending that request
+    # would block for the whole timeout every time.
 
     init_rows = load_history([path_init])
     if len(init_rows) < cfg.n_init:
@@ -553,7 +560,7 @@ def run_bo(cfg: RunConfig) -> None:
         sent_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
         t_wait = time.perf_counter()
-        send_request(eval_id, theta_list, lock_stale_s=cfg.lock_stale_s)
+        send_request(eval_id, "bo", theta_list, lock_stale_s=cfg.lock_stale_s)
         try:
             row = wait_for_result(eval_id, path_results, path_failures,
                                   poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)

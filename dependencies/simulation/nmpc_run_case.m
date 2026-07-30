@@ -81,6 +81,11 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
     has_checkpoint_fn = ~isempty(opts.checkpoint_fn);
     do_log = strlength(opts.log_path) > 0;
 
+    % Cap on the flag lines that one case may write. See the logging block in
+    % the loop below.
+    max_flag_log = 20;
+    n_flagged = 0;
+
     %% Control loop
     for i = i_start:N
         t_now = T(i);
@@ -104,12 +109,22 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
         U(i, :) = uk;
 
         % NMPC.solve leaves the fmincon exit flag of this step in latest_flag.
+        %
+        % The log is capped per case. A flag other than 1 is meant to be the
+        % exception, but a tight iteration budget makes every step report flag 0,
+        % and one open-write-close for each control step then dominates the run
+        % time on a synced folder. The cap keeps the first max_flag_log events
+        % and writes one summary line at the end of the case. The full flag
+        % vector is stored in the .mat either way, so nothing is lost.
         EXITFLAG(i) = NMPC.latest_flag;
         if do_log && ~(EXITFLAG(i) == 1)
-            log_simulation_event(opts.log_path, sprintf( ...
-                "%s | id=%s | case=%d | step=%d/%d | t=%.4f h | flag=%g", ...
-                char(datetime("now", "Format", "yyyy-MM-dd HH:mm:ss")), ...
-                opts.run_id, case_id, i, N, t_now, EXITFLAG(i)));
+            n_flagged = n_flagged + 1;
+            if n_flagged <= max_flag_log
+                log_simulation_event(opts.log_path, sprintf( ...
+                    "%s | id=%s | case=%d | step=%d/%d | t=%.4f h | flag=%g", ...
+                    char(datetime("now", "Format", "yyyy-MM-dd HH:mm:ss")), ...
+                    opts.run_id, case_id, i, N, t_now, EXITFLAG(i)));
+            end
         end
 
         if opts.verbosity == "full"
@@ -151,6 +166,16 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
             case_state.sp_state = sp_state;
             opts.checkpoint_fn(case_state, i);
         end
+    end
+
+    % One summary line when the cap suppressed flag events, so the log states
+    % how many steps it did not list.
+    if do_log && n_flagged > max_flag_log
+        log_simulation_event(opts.log_path, sprintf( ...
+            "%s | id=%s | case=%d | %d of %d steps had a flag other than 1, " + ...
+            "%d line(s) suppressed by the cap of %d", ...
+            char(datetime("now", "Format", "yyyy-MM-dd HH:mm:ss")), ...
+            opts.run_id, case_id, n_flagged, N, n_flagged - max_flag_log, max_flag_log));
     end
 
     case_out = finalize_case(base, x0, case_id, T, noise, Y, Y_meas, Ysp, U, RUNTIME, EXITFLAG, N);

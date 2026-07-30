@@ -10,3 +10,4 @@
 
 /results/graphical_results/*
 /results/graphics
+*.pyc

@@ -1,27 +1,39 @@
 # Rerun procedure
 
 Two processes exchange files. MATLAB runs the simulations. Python proposes the
-candidates. Start MATLAB first in both phases. The driver waits for the results
-file that MATLAB creates.
+candidates.
+
+MATLAB is a server in both phases. It holds no budget and no design. It answers
+requests until you stop it with Ctrl-C. Python owns the budget, and
+`run_config.py` declares it in one place.
+
+Start MATLAB first. The driver waits for the results file that MATLAB creates.
 
 ## Sequence
 
-Phase 1 is the design of experiments. It evaluates 20 Sobol points. Each point
-runs at the fidelity that its own z asks for. No surrogate acts in this phase.
+Two commands per case.
 
 1. In MATLAB, run `main_initialization`.
-2. In a shell, run `python main.py init --case case1`.
+2. In a shell, run `python run_pipeline.py --case case1`.
 
-The driver fits phi and writes vintage 0 when the design finishes. It then
-stops.
+That is the whole run. The launcher runs the design phase, fits phi as vintage
+0, waits ten seconds, and then runs the optimization phase.
 
-Phase 2 is the optimization. It makes 100 acquisition-driven evaluations.
+MATLAB needs no second command. Every request carries a phase code.
+`main_initialization` answers code 0. When the driver sends its first
+optimization request, which carries code 1, `main_initialization` leaves its
+loop without serving that request and calls `main_BO`. `main_BO` reads the same
+request from the inbox and serves it, and the rest of the run.
 
-1. In MATLAB, run `main_BO`.
-2. In a shell, run `python main.py bo --case case1`.
+Press Ctrl-C in MATLAB when the launcher reports that it is done.
 
-To run the second case, repeat both phases with `--case case2`. Move `results/`
-aside first. The two cases write the same paths.
+For the second case, move `results/` aside and repeat with `--case case2`. The
+two cases write the same paths.
+
+To run one phase alone:
+
+    python run_pipeline.py --case case1 --phase init
+    python run_pipeline.py --case case1 --phase bo
 
 ## The surrogate phi
 
@@ -151,12 +163,14 @@ aside to start a new run.
 
 | Path | Role |
 |---|---|
+| `run_pipeline.py` | the launcher, and the only Python command you type |
 | `run_config.py` | the declared configuration, the cases, the budget, both z limits |
-| `main.py` | the driver: design, proposals, refits, ledger |
-| `provenance.py` | manifest, ledger, environment capture, reconciliation |
-| `matlab_interface.py` | the request and result exchange |
-| `J surrogate/runtime_surrogate/fit_beta_surrogate.py` | the fit of phi |
-| `main_initialization.m`, `main_BO.m` | the MATLAB entry points |
+| `main_initialization.m` | the MATLAB server for the design phase |
+| `main_BO.m` | the MATLAB server for the optimization phase |
+| `pipeline/driver.py` | the phase logic: design, proposals, refits, ledger |
+| `pipeline/provenance.py` | manifest, ledger, environment capture, reconciliation |
+| `pipeline/matlab_interface.py` | the request and result exchange |
+| `pipeline/phi_surrogate.py` | the fit of phi |
 | `dependencies/io/serve_requests.m` | the shared serve loop and failure handling |
 | `dependencies/simulation/phi_eval.m` | phi(z) = I_z(a, b) |
 | `dependencies/simulation/load_phi_coeffs.m` | coefficient load with validation |

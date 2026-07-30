@@ -8,7 +8,7 @@ function coeffs = load_phi_coeffs(path, opts)
 %   Every results row keeps the vintage. You can therefore trace a stored
 %   objective to the exact fit that scaled it.
 %
-%   J surrogate/runtime_surrogate/fit_beta_surrogate.py writes the file. It
+%   pipeline/phi_surrogate.py writes the file. It
 %   renames a temporary file over this path. A reader therefore sees the
 %   previous vintage or the new one. The rename can still collide with a read on
 %   Windows, so this function retries for a short time.

@@ -6,8 +6,7 @@ function y = phi_eval(z, a, b)
 %   exactly, so a full-fidelity evaluation divides by exactly one. The caller
 %   needs no special case at z = 1.
 %
-%   J surrogate/runtime_surrogate/fit_beta_surrogate.py fits the shape
-%   parameters.
+%   pipeline/phi_surrogate.py fits the shape parameters.
 %
 %   Note the argument order. MATLAB betainc takes (x, a, b).
 %   scipy.special.betainc takes (a, b, x). The two agree after you match the
