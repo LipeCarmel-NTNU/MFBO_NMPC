@@ -12,6 +12,14 @@ function base = nmpc_base(opts)
 %     Ts                sampling time in hours (default 1/60)
 %     tf                horizon in hours (default 10)
 %     Vsp, Xsp          setpoints passed to find_ss (default 1 and 20)
+%     Xmin, Xmax        state bounds (default [0.5 0 -0.1] and [2 50 20])
+%     umin, umax        input bounds (default zeros(1,3) and 0.4*ones(1,3))
+%     x_scale, u_scale  decision-variable scaling (default [1 20 1] and
+%                       0.4*ones(1,3))
+%     soft_mask         states whose bounds are relaxed by an L1 slack
+%                       (default [false true true]: the volume bounds stay
+%                       hard because the model divides by V)
+%     rho_L1            L1 penalty on the slacks (default 1e3)
 %     set_setpoint      store xsp/usp in base (default true). The
 %                       setpoint-schedule run sets this false because it
 %                       recomputes the setpoint for every segment.
@@ -29,6 +37,14 @@ function base = nmpc_base(opts)
         opts.tf (1,1) double {mustBePositive} = 10
         opts.Vsp (1,1) double = 1
         opts.Xsp (1,1) double = 20
+        opts.Xmin (1,:) double = [0.5 0 -0.1]
+        opts.Xmax (1,:) double = [2 50 20]
+        opts.umin (1,:) double = zeros(1, 3)
+        opts.umax (1,:) double = 0.4 * ones(1, 3)
+        opts.x_scale (1,:) double {mustBePositive} = [1 20 1]
+        opts.u_scale (1,:) double {mustBePositive} = 0.4 * ones(1, 3)
+        opts.soft_mask (1,:) logical = [false true true]
+        opts.rho_L1 (1,1) double {mustBeNonnegative} = 1e3
         opts.set_setpoint (1,1) logical = true
         opts.load_lqr (1,1) logical = true
         opts.phi_coeffs_path string = ""
@@ -55,6 +71,32 @@ function base = nmpc_base(opts)
 
     base.nx = 3;
     base.nu = 3;
+
+    %% Bounds, scaling and slack penalty
+    % The controller class takes these at construction, so they live here
+    % instead of as class defaults. Xmin/Xmax are the bounds on the predicted
+    % states, relaxed by an L1 slack wherever soft_mask is true, and the scales
+    % divide the decision variables so the solver works on comparable
+    % magnitudes.
+    base.Xmin = opts.Xmin;
+    base.Xmax = opts.Xmax;
+    base.umin = opts.umin;
+    base.umax = opts.umax;
+    base.x_scale = opts.x_scale;
+    base.u_scale = opts.u_scale;
+    base.soft_mask = opts.soft_mask;
+    base.rho_L1 = opts.rho_L1;
+
+    assert(numel(base.Xmin) == base.nx && numel(base.Xmax) == base.nx, ...
+        "Xmin and Xmax must have nx = %d entries.", base.nx);
+    assert(numel(base.umin) == base.nu && numel(base.umax) == base.nu, ...
+        "umin and umax must have nu = %d entries.", base.nu);
+    assert(numel(base.x_scale) == base.nx, ...
+        "x_scale must have nx = %d entries.", base.nx);
+    assert(numel(base.u_scale) == base.nu, ...
+        "u_scale must have nu = %d entries.", base.nu);
+    assert(numel(base.soft_mask) == base.nx, ...
+        "soft_mask must have nx = %d entries.", base.nx);
 
     %% Sampling grid
     base.dt = opts.Ts;

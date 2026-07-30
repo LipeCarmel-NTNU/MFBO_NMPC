@@ -98,7 +98,7 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
         iter_timer = tic;
 
         Y(i, :) = xk;
-        Ysp(i, :) = NMPC.xsp(1:base.nx);
+        Ysp(i, :) = NMPC.x_sp(1:base.nx);
 
         % Measurement is the state plus Gaussian noise, clipped to non-negative.
         yk_meas = xk + noise(i, :);

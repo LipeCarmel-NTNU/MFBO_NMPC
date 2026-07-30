@@ -39,6 +39,7 @@
 clear all; close all; clc; %#ok<CLALL>
 
 current_dir = fileparts(mfilename('fullpath'));
+
 addpath(genpath(current_dir))
 
 % The lock is cleared, but not inbox/theta.txt. main_initialization hands over

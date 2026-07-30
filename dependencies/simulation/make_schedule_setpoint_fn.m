@@ -9,6 +9,7 @@ function fn = make_schedule_setpoint_fn(base, schedule, is_benchmark, lqr_tuning
 %   setpoint. On the first step, and whenever the segment changes, the steady
 %   state is recomputed and the terminal matrix is rebuilt: from find_ss with
 %   P = 0 for the benchmark controller, and from terminal_P_xu_du otherwise.
+%   The terminal reference x_term/u_term follows the setpoint on every step.
 %
 %   Case 2 additionally overwrites the third setpoint with
 %   Ssp = min(3, 2*(Xsp - X)), which may be negative by design.
@@ -33,18 +34,24 @@ function sp_state = apply(NMPC, t_h, xk, case_id, sp_state, i, is_first, base, s
         else
             [P, ~, ~, ~, xss, uss, ~] = terminal_P_xu_du( ...
                 schedule.Vsp, xsp2_target, base.par, base.model, base.ode_opt, base.dt, ...
-                lqr_tuning, NMPC.Q, NMPC.Ru, NMPC.Rdu);
+                lqr_tuning, NMPC.Q, NMPC.R_u, NMPC.R_du);
         end
-        NMPC.xsp = xss;
-        NMPC.usp = uss;
+        NMPC.x_sp = xss;
+        NMPC.u_sp = uss;
         NMPC.P = P;
         sp_state.currentXsp2 = xsp2_target;
     end
 
     % Case 2 tracks a sugar setpoint that follows the biomass gap.
-    if case_id == 2 && numel(NMPC.xsp) >= 3
-        NMPC.xsp(3) = min(3, 2 * (sp_state.currentXsp2 - xk(2)));
+    if case_id == 2 && numel(NMPC.x_sp) >= 3
+        NMPC.x_sp(3) = min(3, 2 * (sp_state.currentXsp2 - xk(2)));
     end
+
+    % P is augmented, so it needs the reference point of its own coordinates.
+    % The terminal reference is the tracking setpoint, including the sugar
+    % override of case 2.
+    NMPC.x_term = NMPC.x_sp;
+    NMPC.u_term = NMPC.u_sp;
 
     idx = min(max(i, 1), numel(sp_state.Xsp2_trace));
     sp_state.Xsp2_trace(idx) = sp_state.currentXsp2;

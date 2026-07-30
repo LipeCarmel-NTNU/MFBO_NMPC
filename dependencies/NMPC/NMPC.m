@@ -21,7 +21,6 @@ classdef NMPC < handle
     %
     %   Construction is by name-value pairs; see the constructor.
     %
-    %   See LLM_refactor/minimal/STRUCTURE.md for the design rationale.
 
     properties
         %% Model & horizon (required)
@@ -47,7 +46,16 @@ classdef NMPC < handle
         umax                    % 1×nu
 
         %% Optional terminal cost
-        P              = []     % nx×nx, empty ⇒ skipped
+        % P may be either:
+        %   - nx×nx           : legacy quadratic on the terminal state error
+        %                       (x_end - x_sp)'P(x_end - x_sp).
+        %   - (nx+nu)×(nx+nu) : augmented incremental cost-to-go on
+        %                       z = [x_end - x_term; u_last - u_term], matching
+        %                       the Δu design used to synthesize P (build_plant
+        %                       'incremental'). Requires x_term and u_term.
+        P              = []     % empty ⇒ skipped
+        x_term         = []     % 1×nx terminal state ref (augmented P only)
+        u_term         = []     % 1×nu terminal input ref (augmented P only)
 
         %% Scaling (always present, default = ones)
         x_scale = []            % 1×nx, filled to ones in init
@@ -65,16 +73,12 @@ classdef NMPC < handle
         dumax  = []             % 1×nu (|Δu| ≤ dumax)
 
         %% Solver
-        % FiniteDifferenceType is 'central': the objective and constraint
-        % gradients are obtained by finite differences, and forward
-        % differences are too inaccurate near the flat regions of this
-        % problem.
         optimizer_options = optimoptions('fmincon', ...
             'Display','off','Algorithm','sqp', ...
             'MaxFunEvals',Inf,'MaxIterations',1000, ...
-            'StepTolerance',1e-9,'OptimalityTolerance',1e-6, ...
-            'FiniteDifferenceType','central', ...
-            'ScaleProblem',true);
+            'StepTolerance',1e-7,'OptimalityTolerance',1e-6, ...
+            'ScaleProblem',true, ...
+            'UseParallel',true);
 
         %% Optional history log
         log_enabled = false
@@ -163,10 +167,9 @@ classdef NMPC < handle
             %               x_sp=xsp, u_sp=usp, Q=Q, R_u=R_u, ...
             %               Xmin=Xmin, Xmax=Xmax, umin=umin, umax=umax, ...);
             %
-            %   Optional: y_sp (legacy alias for x_sp), Ymin/Ymax (legacy
-            %             aliases for Xmin/Xmax), P, x_scale, u_scale,
-            %             soft_mask, rho_L1, rho_L2, R_du, dumax,
-            %             optimizer_options, log_enabled.
+            %   Optional: P, x_term, u_term, x_scale, u_scale, soft_mask,
+            %             rho_L1, rho_L2, R_du, dumax, optimizer_options,
+            %             log_enabled.
 
             arguments
                 % Required: model & horizon
@@ -190,18 +193,15 @@ classdef NMPC < handle
                 opts.umax   (1,:) double {mustBeNonempty}
 
                 % Optional
-                opts.y_sp                double = []           % legacy alias for x_sp
-                opts.Ymin          (1,:) double = []           % legacy alias for Xmin
-                opts.Ymax          (1,:) double = []           % legacy alias for Xmax
-                opts.R                   double = []           % legacy alias for R_u
                 opts.P                   double = []
+                opts.x_term        (1,:) double = []
+                opts.u_term        (1,:) double = []
                 opts.x_scale       (1,:) double = []
                 opts.u_scale       (1,:) double = []
                 opts.soft_mask           = []           % logical or numeric mask
                 opts.rho_L1              double = 0
                 opts.rho_L2              double = 0
                 opts.R_du                double = []
-                opts.S                   double = []           % legacy alias for R_du
                 opts.dumax         (1,:) double = []
                 opts.optimizer_options          = []
                 opts.log_enabled   (1,1) logical = false
@@ -209,44 +209,11 @@ classdef NMPC < handle
 
             fn = fieldnames(opts);
             for k = 1 : numel(fn)
-                if ismember(fn{k}, {'y_sp', 'Ymin', 'Ymax', 'R', 'S'})
-                    continue        % handled below as a legacy alias
-                end
                 v = opts.(fn{k});
                 if strcmp(fn{k}, 'optimizer_options') && isempty(v)
                     continue        % keep class default
                 end
                 obj.(fn{k}) = v;
-            end
-            if isempty(obj.x_sp) && ~isempty(opts.y_sp)
-                obj.x_sp = opts.y_sp;
-            elseif ~isempty(obj.x_sp) && ~isempty(opts.y_sp)
-                assert(isequal(obj.x_sp, opts.y_sp), ...
-                    'NMPC:x_sp_alias', 'x_sp and legacy y_sp must match when both are supplied.');
-            end
-            if isempty(obj.Xmin) && ~isempty(opts.Ymin)
-                obj.Xmin = opts.Ymin;
-            elseif ~isempty(obj.Xmin) && ~isempty(opts.Ymin)
-                assert(isequal(obj.Xmin, opts.Ymin), ...
-                    'NMPC:Xmin_alias', 'Xmin and legacy Ymin must match when both are supplied.');
-            end
-            if isempty(obj.Xmax) && ~isempty(opts.Ymax)
-                obj.Xmax = opts.Ymax;
-            elseif ~isempty(obj.Xmax) && ~isempty(opts.Ymax)
-                assert(isequal(obj.Xmax, opts.Ymax), ...
-                    'NMPC:Xmax_alias', 'Xmax and legacy Ymax must match when both are supplied.');
-            end
-            if isempty(obj.R_u) && ~isempty(opts.R)
-                obj.R_u = opts.R;
-            elseif ~isempty(obj.R_u) && ~isempty(opts.R)
-                assert(isequal(obj.R_u, opts.R), ...
-                    'NMPC:R_u_alias', 'R_u and legacy R must match when both are supplied.');
-            end
-            if isempty(obj.R_du) && ~isempty(opts.S)
-                obj.R_du = opts.S;
-            elseif ~isempty(obj.R_du) && ~isempty(opts.S)
-                assert(isequal(obj.R_du, opts.S), ...
-                    'NMPC:R_du_alias', 'R_du and legacy S must match when both are supplied.');
             end
             obj.init();
         end
@@ -285,8 +252,16 @@ classdef NMPC < handle
                     'NMPC:R_usize', 'R_u must be nu×nu.');
             end
             if ~isempty(obj.P)
-                assert(isequal(size(obj.P), [obj.nx obj.nx]), ...
-                    'NMPC:Psize', 'P must be nx×nx.');
+                is_state = isequal(size(obj.P), [obj.nx obj.nx]);
+                is_aug   = isequal(size(obj.P), (obj.nx + obj.nu) * [1 1]);
+                assert(is_state || is_aug, 'NMPC:Psize', ...
+                    'P must be nx×nx or (nx+nu)×(nx+nu).');
+                if is_aug
+                    assert(numel(obj.x_term) == obj.nx, 'NMPC:x_term', ...
+                        'x_term must be 1×nx when P is augmented (nx+nu).');
+                    assert(numel(obj.u_term) == obj.nu, 'NMPC:u_term', ...
+                        'u_term must be 1×nu when P is augmented (nx+nu).');
+                end
             end
             if ~isempty(obj.R_du)
                 assert(isequal(size(obj.R_du), [obj.nu obj.nu]), ...
@@ -301,7 +276,7 @@ classdef NMPC < handle
             obj.constraints_initialized = true;
         end
 
-        %% Public solve  (mirrors NMPC_abstract.solve fallback flow)
+        %% Public solve
         function [uk, x_phys, u_phys, info] = solve(obj, x_init, u_init)
             % SOLVE  Compute the next control move.
             %
@@ -429,8 +404,19 @@ classdef NMPC < handle
 
             % Optional terminal cost
             if ~isempty(obj.P)
-                e = (x(end, :) - xsp(end, :)).';
-                J = J + e.' * obj.P * e;
+                if isequal(size(obj.P), [obj.nx obj.nx])
+                    % Legacy: quadratic on the terminal state error.
+                    e = (x(end, :) - xsp(end, :)).';
+                    J = J + e.' * obj.P * e;
+                else
+                    % Augmented incremental cost-to-go on
+                    % z = [x_end - x_term; u_last - u_term]. u_last is the last
+                    % commanded move (held to the terminal step for m < p),
+                    % matching u_{k-1} in the Δu design that produced P.
+                    z = [(x(end, :) - obj.x_term).'; ...
+                         (u(end, :) - obj.u_term).'];
+                    J = J + z.' * obj.P * z;
+                end
             end
 
             % Optional slack penalty (L1 + L2)
@@ -461,7 +447,7 @@ classdef NMPC < handle
             end
 
             % Initial-state and continuity equalities, scaled by x_scale
-            % so residuals are dimensionless (matches NMPC_abstract_scaled).
+            % so the residuals are dimensionless.
             sx = obj.x_scale;
             ceq_blk = [(x(2:end, :) - xhat(2:end, :)) ./ sx;
                        (x(1, :)     - x_init)         ./ sx];

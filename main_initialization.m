@@ -30,6 +30,7 @@
 clear all; close all; clc;
 
 current_dir = fileparts(mfilename('fullpath'));
+
 addpath(genpath(current_dir))
 
 % Clear the exchange before serving. A request or a lock left by an earlier run

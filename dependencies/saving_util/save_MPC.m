@@ -20,8 +20,9 @@ simulation_data.run(n).results.U = U;
 simulation_data.run(n).controller.type = 'MPC';
 simulation_data.run(n).controller.data.p  = MPC.p;
 simulation_data.run(n).controller.data.m  = MPC.m;
-simulation_data.run(n).controller.data.Rdu  = MPC.Rdu;
-simulation_data.run(n).controller.data.Q_S  = MPC.Q_S;
+simulation_data.run(n).controller.data.R_u  = MPC.R_u;
+simulation_data.run(n).controller.data.R_du = MPC.R_du;
+simulation_data.run(n).controller.data.Q    = MPC.Q;
 simulation_data.run(n).controller.data.Ts = MPC.Ts;
 
 save_simu_data(simulation_data)
