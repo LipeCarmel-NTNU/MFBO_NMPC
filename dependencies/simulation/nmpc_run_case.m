@@ -128,6 +128,8 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
         end
 
         if opts.verbosity == "full"
+            fprintf('\Flag: \n')
+            disp(NMPC.latest_flag)
             fprintf('\nMeasurement: \n')
             disp(yk_meas)
             fprintf('\nControl action: \n')

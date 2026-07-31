@@ -32,7 +32,7 @@ function nmpc = build_nmpc(base, cfg, opts)
         opts.terminal_cost (1,1) string {mustBeMember(opts.terminal_cost, ["lqr" "zero" "none"])} = "lqr"
         opts.set_setpoint (1,1) logical = true
         opts.max_iter double = []
-        opts.display (1,1) string = "final-detailed"
+        opts.display (1,1) string = "final"
         opts.rho_L1 double = []
     end
 
