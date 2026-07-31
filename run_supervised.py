@@ -146,8 +146,23 @@ def main(argv=None) -> int:
     print(f"[run_supervised] MATLAB console: {CONSOLE_LOG}")
     print("[run_supervised] follow it with: python watch_matlab_log.py")
 
+    # A sequence restarted after an interruption must not begin again at the
+    # first case. results/ names the case it holds, and the cases before that one
+    # in this sequence have already run and been archived. Beginning at the first
+    # case again would archive a tree that is still being filled and then rerun
+    # an earlier case from nothing.
+    cases = list(args.case)
+    declared = case_archive.declared_case()
+    if declared in cases and cases.index(declared) > 0:
+        skipped = cases[:cases.index(declared)]
+        cases = cases[cases.index(declared):]
+        print(f"[run_supervised] results/ holds {declared}, so {', '.join(skipped)} "
+              f"ran already and is under {case_archive.ARCHIVE_ROOT.name}/. "
+              f"Continuing with {', '.join(cases)}. To run {skipped[0]} again, "
+              f"name it on its own.")
+
     status = 0
-    for index, case in enumerate(args.case):
+    for index, case in enumerate(cases):
         try:
             code = run_case(case, args)
         except KeyboardInterrupt:
@@ -157,7 +172,7 @@ def main(argv=None) -> int:
             continue
 
         status = code
-        remaining = args.case[index + 1:]
+        remaining = cases[index + 1:]
         if remaining and not args.keep_going:
             print(f"\n[run_supervised] {case} stopped with code {code}. "
                   f"{', '.join(remaining)} will not start, so the state that "
@@ -168,8 +183,8 @@ def main(argv=None) -> int:
             print(f"\n[run_supervised] {case} stopped with code {code}. "
                   f"Continuing to {remaining[0]} because --keep-going was given.")
 
-    if len(args.case) > 1 and status == 0:
-        print(f"[run_supervised] all cases finished: {', '.join(args.case)}. "
+    if len(cases) > 1 and status == 0:
+        print(f"[run_supervised] all cases finished: {', '.join(cases)}. "
               f"Earlier cases are under {case_archive.ARCHIVE_ROOT.name}/, and the "
               f"last one is still in results/.")
     return status
