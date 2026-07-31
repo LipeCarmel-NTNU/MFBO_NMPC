@@ -21,12 +21,12 @@
 #   ssh <the node in squeue>
 #   cd <this directory> && python watch_matlab_log.py
 #
-# Set the account below before the first submission. `sacctmgr show assoc
-# format=Account%15,User,QOS | grep $USER` lists the accounts you may use, and a
-# share-* account carries the higher priority.
+# The account below is the one association this user holds, at normal priority.
+# `sacctmgr show assoc format=Account%15,User,QOS | grep $USER` lists them, and
+# `idun-slurm-quota` shows the CPU hours left this month.
 #
 #SBATCH --job-name=mfbo-nmpc
-#SBATCH --account=CHANGE_ME
+#SBATCH --account=nv-ikp-ps
 #SBATCH --partition=CPUQ
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
