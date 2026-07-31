@@ -11,3 +11,7 @@
 /results/graphical_results/*
 /results/graphics
 *.pyc
+
+/results/logs/*.log
+/results_archive
+slurm_mfbo_*.out
