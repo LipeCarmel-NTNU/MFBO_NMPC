@@ -1,0 +1,107 @@
+# init phase, started 2026-08-02T20:38:40+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/init_20260802_203840.log
+======================================================================
+PHASE 1 of 2: design of experiments, case2
+======================================================================
+[run] phase=init case=case2 (8 free dimensions) budget=20+100
+[registry] manifest written to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/registry/manifest_init.json
+[init] 0 of 20 design points already evaluated
+[init]   1/20  z=0.2111  SSE=45786.3  SSdU=2.88366  solver=68.6s  matlab=70.0s
+[wait] evaluation 2 running for 10 min
+[wait] evaluation 2 running for 20 min
+[init]   2/20  z=0.5375  SSE=17733.1  SSdU=0.0475243  solver=1470.9s  matlab=1472.6s
+       18 left, eta 3.9 h [21 min-7.4 h], finish ~Mon 00:55
+[wait] evaluation 3 running for 10 min
+[init]   3/20  z=0.9914  SSE=82870.6  SSdU=24.0087  solver=613.9s  matlab=616.6s
+       17 left, eta 2.9 h [20 min-7.0 h], finish ~Mon 00:09
+[wait] evaluation 4 running for 10 min
+[init]   4/20  z=0.2640  SSE=12145.5  SSdU=1.50553  solver=801.6s  matlab=803.4s
+       16 left, eta 3.2 h [19 min-6.5 h], finish ~Mon 00:37
+[init]   5/20  z=0.4092  SSE=15983.3  SSdU=2.77682  solver=474.9s  matlab=477.3s
+       15 left, eta 2.6 h [18 min-6.1 h], finish ~Mon 00:10
+[wait] evaluation 6 running for 10 min
+[wait] evaluation 6 running for 20 min
+[init]   6/20  z=0.8582  SSE=38635.1  SSdU=11.2985  solver=1324.5s  matlab=1326.8s
+       14 left, eta 3.1 h [1.9 h-5.7 h], finish ~Mon 01:05
+[wait] evaluation 7 running for 10 min
+[init]   7/20  z=0.6867  SSE=12458.8  SSdU=1.44725  solver=1036.1s  matlab=1037.6s
+       13 left, eta 2.9 h [1.7 h-4.8 h], finish ~Mon 01:09
+[init]   8/20  z=0.0819  SSE=9948.11  SSdU=1.92498  solver=26.0s  matlab=28.0s
+       12 left, eta 2.7 h [6 min-4.4 h], finish ~Mon 00:56
+[init]   9/20  z=0.0621  SSE=6963.33  SSdU=0.413891  solver=18.3s  matlab=21.0s
+       11 left, eta 1.5 h [4 min-4.1 h], finish ~Sun 23:43
+[wait] evaluation 10 running for 10 min
+[init]  10/20  z=0.6948  SSE=15153.7  SSdU=1.73437  solver=1184.3s  matlab=1185.7s
+       10 left, eta 2.9 h [4 min-3.7 h], finish ~Mon 01:28
+[wait] evaluation 11 running for 10 min
+[wait] evaluation 11 running for 20 min
+[wait] evaluation 11 running for 30 min
+[wait] evaluation 11 running for 40 min
+[wait] evaluation 11 running for 51 min
+[wait] evaluation 11 running for 61 min
+[wait] evaluation 11 running for 71 min
+[wait] evaluation 11 running for 81 min
+[wait] evaluation 11 running for 91 min
+[wait] evaluation 11 running for 101 min
+[wait] evaluation 11 running for 111 min
+[wait] evaluation 11 running for 121 min
+[wait] evaluation 11 running for 131 min
+[wait] evaluation 11 running for 142 min
+[wait] evaluation 11 running for 152 min
+[wait] evaluation 11 running for 162 min
+[wait] evaluation 11 running for 172 min
+[wait] evaluation 11 running for 182 min
+[wait] evaluation 11 running for 192 min
+[init]  11/20  z=0.7709  SSE=27368.8  SSdU=24.6381  solver=12001.1s  matlab=12003.3s
+       9 left, eta 2.6 h [3 min-30.0 h], finish ~Mon 04:31
+[wait] evaluation 12 running for 10 min
+[init]  12/20  z=0.4773  SSE=15711.1  SSdU=2.94101  solver=885.4s  matlab=886.6s
+       8 left, eta 2.0 h [3 min-26.7 h], finish ~Mon 04:09
+[wait] evaluation 13 running for 10 min
+[init]  13/20  z=0.3745  SSE=20095.8  SSdU=0.37666  solver=956.2s  matlab=958.7s
+       7 left, eta 1.9 h [2 min-23.3 h], finish ~Mon 04:18
+[wait] evaluation 14 running for 10 min
+[wait] evaluation 14 running for 20 min
+[wait] evaluation 14 running for 30 min
+[wait] evaluation 14 running for 40 min
+[wait] evaluation 14 running for 50 min
+[wait] evaluation 14 running for 60 min
+[wait] evaluation 14 running for 70 min
+[wait] evaluation 14 running for 80 min
+[wait] evaluation 14 running for 90 min
+[wait] evaluation 14 running for 100 min
+[wait] evaluation 14 running for 110 min
+[wait] evaluation 14 running for 120 min
+[wait] evaluation 14 running for 130 min
+[wait] evaluation 14 running for 140 min
+[wait] evaluation 14 running for 150 min
+[wait] evaluation 14 running for 160 min
+[wait] evaluation 14 running for 170 min
+[wait] evaluation 14 running for 180 min
+[wait] evaluation 14 running for 190 min
+[wait] evaluation 14 running for 200 min
+[wait] evaluation 14 running for 210 min
+[wait] evaluation 14 running for 220 min
+[wait] evaluation 14 running for 230 min
+[wait] evaluation 14 running for 240 min
+[wait] evaluation 14 running for 250 min
+[wait] evaluation 14 running for 260 min
+[wait] evaluation 14 running for 270 min
+[wait] evaluation 14 running for 280 min
+[wait] evaluation 14 running for 290 min
+[wait] evaluation 14 running for 300 min
+[wait] evaluation 14 running for 310 min
+[wait] evaluation 14 running for 320 min
+[wait] evaluation 14 running for 330 min
+[init]  14/20  z=0.8846  SSE=18497.9  SSdU=24.3705  solver=20002.1s  matlab=20004.4s
+       6 left, eta 2.0 h [1.5 h-33.3 h], finish ~Mon 09:58
+[wait] evaluation 15 running for 10 min
+[wait] evaluation 15 running for 20 min
+[wait] evaluation 15 running for 30 min
+[init]  15/20  z=0.5960  SSE=18825.5  SSdU=1.24632  solver=1813.3s  matlab=1814.3s
+       5 left, eta 2.5 h [1.2 h-27.8 h], finish ~Mon 11:01
+
+[run] interrupted. Every completed evaluation is on disk; restart the same command to resume.
+
+[run_pipeline] the design phase stopped with code 130. The optimization phase does not start.
+# ended 2026-08-03T08:36:22+0200
