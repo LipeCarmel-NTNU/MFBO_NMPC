@@ -109,6 +109,19 @@ CASES: Dict[str, CaseSpec] = {
         ),
         fixed={3: 0.0, 6: DISABLED_EXPONENT, 7: DISABLED_EXPONENT, 8: DISABLED_EXPONENT},
     ),
+    "baseline": CaseSpec(
+        name="baseline",
+        description=(
+            "Single-fidelity, runtime-unaware baseline. z is held at 1, so every "
+            "evaluation, in the design and in the optimisation, runs the full "
+            "10 h horizon and phi(1) = I_1(a, b) = 1 scales it by exactly one. The "
+            "remaining eleven components keep the bounds of case1, so Q, R_u and "
+            "R_du all take a diagonal value in [1e-3, 1e3]^3. It is the plain "
+            "qLogNEHVI counterpart of the multi-fidelity runs and shares their "
+            "budget and seeds."
+        ),
+        fixed={0: 1.0},
+    ),
 }
 
 
@@ -180,6 +193,26 @@ class RunConfig:
         return CASES[self.case]
 
     @property
+    def is_baseline(self) -> bool:
+        """The single-fidelity, runtime-unaware variant.
+
+        It fixes z at 1, so the fidelity surrogate scales by exactly one and the
+        driver publishes a static phi rather than fitting one. The acquisition
+        drops the runtime term and reduces to plain qLogNEHVI. These two
+        behaviours follow from the case name alone, so no separate flag can drift
+        out of step with it.
+        """
+        return self.case == "baseline"
+
+    @property
+    def runtime_aware(self) -> bool:
+        return not self.is_baseline
+
+    @property
+    def refit_phi(self) -> bool:
+        return not self.is_baseline
+
+    @property
     def n_total(self) -> int:
         return self.n_init + self.n_iter
 
@@ -204,6 +237,9 @@ class RunConfig:
                 "the surrogate fit. They are separate limits on separate steps."
             ),
             "case_description": spec.description,
+            "is_baseline": self.is_baseline,
+            "runtime_aware": self.runtime_aware,
+            "refit_phi": self.refit_phi,
             "fixed_components": {THETA_NAMES[i]: v for i, v in sorted(spec.fixed.items())},
             "optimised_components": [THETA_NAMES[i] for i in spec.opt_idxs],
             "search_dimension": spec.dimension,
@@ -221,6 +257,10 @@ class RunConfig:
                 f"first evaluation"
             ),
             "refit_rule": (
+                "the fidelity surrogate is not fitted: z is held at 1, so phi(1) = 1 "
+                "scales every cost by exactly one. A static phi (a = b = 1, "
+                "vintage 0) is published once and governs the whole run"
+                if self.is_baseline else
                 f"vintage 0 is fitted on the {self.n_init} initialisation runs and "
                 f"governs optimisation iterations 1-{self.refit_every}; a refit "
                 f"follows every {self.refit_every} optimisation iterations and "

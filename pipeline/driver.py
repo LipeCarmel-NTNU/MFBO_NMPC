@@ -153,28 +153,35 @@ def sobol_design(space: Space, n: int, seed: int) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 def build_models(space: Space, X_opt: torch.Tensor, Y_obj: torch.Tensor,
-                 Y_time: torch.Tensor, eps: float):
-    """Fit the objective GP and the log-runtime GP on the data collected so far.
+                 Y_time: torch.Tensor, eps: float, runtime_aware: bool = True):
+    """Fit the objective GP and, when runtime-aware, the log-runtime GP.
 
-    The function returns the two models and the wall time of each fit.
+    The function returns the objective model, the runtime model, and the wall
+    time of each fit. The baseline is not runtime-aware: it fits the objective
+    model alone, returns None for the runtime model, and reports a zero fit time
+    for it.
     """
     bounds = space.acq_bounds().to(device=DEVICE, dtype=DTYPE)
-    Y_time_log = torch.log(Y_time.clamp_min(eps))
 
     model_obj = SingleTaskGP(
         X_opt, Y_obj,
         input_transform=Normalize(d=X_opt.shape[-1], bounds=bounds),
         outcome_transform=Standardize(m=Y_obj.shape[-1]),
     )
+
+    t0 = time.perf_counter()
+    fit_gpytorch_mll(ExactMarginalLogLikelihood(model_obj.likelihood, model_obj))
+    wall_obj = time.perf_counter() - t0
+
+    if not runtime_aware:
+        return model_obj, None, {"gp_objective": wall_obj, "gp_log_runtime": 0.0}
+
+    Y_time_log = torch.log(Y_time.clamp_min(eps))
     model_time = SingleTaskGP(
         X_opt, Y_time_log,
         input_transform=Normalize(d=X_opt.shape[-1], bounds=bounds),
         outcome_transform=Standardize(m=1),
     )
-
-    t0 = time.perf_counter()
-    fit_gpytorch_mll(ExactMarginalLogLikelihood(model_obj.likelihood, model_obj))
-    wall_obj = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     fit_gpytorch_mll(ExactMarginalLogLikelihood(model_time.likelihood, model_time))
@@ -241,7 +248,8 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
     torch.manual_seed(seed)
 
     X_opt = space.to_opt(X)
-    model_obj, model_time, wall_fit = build_models(space, X_opt, Y_obj, Y_time, cfg.eps)
+    model_obj, model_time, wall_fit = build_models(
+        space, X_opt, Y_obj, Y_time, cfg.eps, runtime_aware=cfg.runtime_aware)
 
     y_min = Y_obj.min(dim=0).values
     y_range = (Y_obj.max(dim=0).values - y_min).clamp_min(1e-6)
@@ -257,12 +265,19 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
         max_iep=cfg.max_iep,
     )
 
+    # The runtime floor is recorded either way, so the CSV column keeps its
+    # meaning across runs. The baseline does not fit a runtime GP and maximises
+    # plain qLogNEHVI, so the fidelity bias and the runtime penalty are both
+    # absent from its acquisition.
     t_floor = float(Y_time.min().clamp_min(cfg.eps).item())
-    acq = RuntimeAwareLogAcq(
-        acq_inner, model_time,
-        ell_z=cfg.ell_z, gamma=cfg.gamma_time, eps=cfg.eps,
-        w_z=cfg.w_z, w_t=cfg.w_t, t_floor=t_floor,
-    )
+    if cfg.runtime_aware:
+        acq = RuntimeAwareLogAcq(
+            acq_inner, model_time,
+            ell_z=cfg.ell_z, gamma=cfg.gamma_time, eps=cfg.eps,
+            w_z=cfg.w_z, w_t=cfg.w_t, t_floor=t_floor,
+        )
+    else:
+        acq = acq_inner
 
     t0 = time.perf_counter()
     cand_opt, acq_at_optimum = optimize_acqf(
@@ -287,7 +302,8 @@ def propose(space: Space, cfg: RunConfig, X: torch.Tensor, Y_obj: torch.Tensor,
         "t_floor": t_floor,
         "n_train": int(X.shape[0]),
         "gp_objective": summarise_gp(model_obj, "objective"),
-        "gp_log_runtime": summarise_gp(model_time, "log_runtime"),
+        "gp_log_runtime": (summarise_gp(model_time, "log_runtime")
+                           if model_time is not None else None),
         "wall_s": {
             "gp_objective_fit": wall_fit["gp_objective"],
             "gp_log_runtime_fit": wall_fit["gp_log_runtime"],
@@ -335,6 +351,48 @@ def history_tensors(rows: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor, torch
 # ---------------------------------------------------------------------------
 # Surrogate refit
 # ---------------------------------------------------------------------------
+
+def publish_static_phi(created_at: str, vintage: int = 0) -> None:
+    """Publish the identity fidelity surrogate for the single-fidelity baseline.
+
+    The baseline holds z at 1. I_1(a, b) = 1 for every positive a and b, so the
+    surrogate scaling is the identity and no fit is needed. MATLAB still loads a
+    coefficient file before it serves, and the load validates the fields, so this
+    writes a fixed a = b = 1 with vintage 0. Every baseline row then records that
+    vintage and a divisor of exactly one. The write is atomic, matching
+    phi_surrogate.write_coefficients: a temporary file is renamed into place, so a
+    reader sees the previous file or this one and never a partial one.
+    """
+    import numpy as np
+    import scipy.io
+
+    PHI_COEFFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "vintage": np.array([[float(vintage)]]),
+        "created_at": str(created_at),
+        "model": ("phi(z) = I_z(a, b) with a = b = 1; z is held at 1, so "
+                  "phi = 1 exactly (single-fidelity baseline)"),
+    }
+    for name in ("SSE", "SSdU"):
+        payload[f"a_{name}"] = np.array([[1.0]])
+        payload[f"b_{name}"] = np.array([[1.0]])
+        payload[f"lambda_{name}"] = np.array([[float("nan")]])
+        payload[f"n_runs_{name}"] = np.array([[0.0]])
+
+    tmp = PHI_COEFFS_FILE.with_suffix(PHI_COEFFS_FILE.suffix + ".tmp")
+    scipy.io.savemat(str(tmp), payload, do_compression=False)
+
+    last: Optional[Exception] = None
+    for _ in range(10):
+        try:
+            tmp.replace(PHI_COEFFS_FILE)
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.15)
+    raise RuntimeError(
+        f"could not publish the baseline coefficients to {PHI_COEFFS_FILE}") from last
+
 
 def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
                 init_rows: List[Dict], bo_rows: List[Dict]) -> Dict:
@@ -516,7 +574,11 @@ def run_initialization(cfg: RunConfig) -> None:
     rows = load_history([path_results])
     print(f"\n[init] initialisation complete: {len(rows)} evaluations")
 
-    if not registry.vintage_exists(0):
+    if cfg.is_baseline:
+        publish_static_phi(time.strftime("%Y-%m-%dT%H:%M:%S%z"), vintage=0)
+        print("[init] baseline: static phi (a = b = 1, vintage 0) published; "
+              "no fit, because z = 1 makes phi = 1 exactly")
+    elif not registry.vintage_exists(0):
         bo_registry = Registry(RESULTS_DIR, "bo")
         fit_vintage(cfg, bo_registry, 0, rows, [])
         print("[init] vintage 0 fitted and published")
@@ -547,6 +609,12 @@ def run_bo(cfg: RunConfig) -> None:
     registry.reconcile(bo_rows)
     print(f"[bo] resuming with {len(init_rows)} DOE and {len(bo_rows)} OPT evaluations")
 
+    # The baseline publishes the identity phi once, here, so a bo phase started on
+    # its own, or resumed after the file was removed, still serves against it. It
+    # is never refitted, so nothing inside the loop republishes it.
+    if cfg.is_baseline:
+        publish_static_phi(time.strftime("%Y-%m-%dT%H:%M:%S%z"), vintage=0)
+
     done = {r["eval_id"] for r in bo_rows}
 
     # See the note in run_initialization: only this session's timings feed the
@@ -560,11 +628,18 @@ def run_bo(cfg: RunConfig) -> None:
             continue
 
         t_iter = time.perf_counter()
-        vintage = (bo_idx - 1) // cfg.refit_every
 
-        t0 = time.perf_counter()
-        ensure_vintage(cfg, registry, vintage, init_rows, bo_rows)
-        wall_vintage = time.perf_counter() - t0
+        # The baseline holds the static vintage 0 that was published before the
+        # loop, so it needs no per-iteration ensure_vintage and no refit. MATLAB
+        # reports vintage 0 on every row, which the handshake below then matches.
+        if cfg.is_baseline:
+            vintage = 0
+            wall_vintage = 0.0
+        else:
+            vintage = (bo_idx - 1) // cfg.refit_every
+            t0 = time.perf_counter()
+            ensure_vintage(cfg, registry, vintage, init_rows, bo_rows)
+            wall_vintage = time.perf_counter() - t0
 
         X, Y_obj, Y_time = history_tensors(init_rows + bo_rows)
         theta, diagnostics = propose(space, cfg, X, Y_obj, Y_time,
@@ -634,7 +709,7 @@ def run_bo(cfg: RunConfig) -> None:
         if eta:
             print(f"       {eta}")
 
-        if bo_idx % cfg.refit_every == 0:
+        if not cfg.is_baseline and bo_idx % cfg.refit_every == 0:
             next_vintage = bo_idx // cfg.refit_every
             is_terminal = bo_idx >= cfg.n_iter
             if not is_terminal or cfg.refit_after_last:
