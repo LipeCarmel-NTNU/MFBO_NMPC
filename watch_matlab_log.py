@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_LOG = Path(__file__).resolve().parent / "results" / "logs" / "matlab_console.log"
+DEFAULT_LOG = Path(__file__).resolve().parent / "results" / "running" / "logs" / "matlab_console.log"
 
 
 def parse(argv):
