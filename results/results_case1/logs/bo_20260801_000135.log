@@ -1,0 +1,83 @@
+# bo phase, started 2026-08-01T00:01:35+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/bo_20260801_000135.log
+======================================================================
+PHASE 2 of 2: optimization, case1
+======================================================================
+[run] phase=bo case=case1 (12 free dimensions) budget=20+100
+[registry] manifest written to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/registry/manifest_bo.json
+[bo] resuming with 20 DOE and 0 OPT evaluations
+[bo]   1/100 [phi v0]  z=0.8994  SSE=39988.3  SSdU=0.180445  acq=5.897
+       wall: propose 38.3s (gp 4.4+0.6s, acq 14.4s), matlab 185.1s, ledger 0.029s, iteration 223.5s
+[bo]   2/100 [phi v0]  z=0.8632  SSE=57627.4  SSdU=4.02955  acq=5.282
+       wall: propose 17.5s (gp 2.0+0.8s, acq 14.7s), matlab 191.1s, ledger 0.003s, iteration 208.7s
+       98 left, eta 5.9 h [5.7 h-6.1 h], finish ~Sat 06:01
+[bo]   3/100 [phi v0]  z=0.8473  SSE=37912.8  SSdU=0.0268656  acq=5.3
+       wall: propose 16.6s (gp 1.8+0.9s, acq 13.8s), matlab 140.1s, ledger 0.003s, iteration 156.7s
+       97 left, eta 5.6 h [4.2 h-6.0 h], finish ~Sat 05:48
+[bo]   4/100 [phi v0]  z=0.7935  SSE=19564.9  SSdU=0.753813  acq=5.28
+       wall: propose 17.5s (gp 1.9+0.6s, acq 15.0s), matlab 144.1s, ledger 0.002s, iteration 161.6s
+       96 left, eta 4.9 h [4.2 h-6.0 h], finish ~Sat 05:10
+[bo]   5/100 [phi v0]  z=0.6504  SSE=43265.7  SSdU=2.98535  acq=5.287
+       wall: propose 17.9s (gp 2.1+0.5s, acq 15.2s), matlab 167.1s, ledger 0.003s, iteration 185.0s
+       95 left, eta 4.9 h [4.1 h-5.9 h], finish ~Sat 05:10
+[bo]   6/100 [phi v0]  z=0.8737  SSE=55953.2  SSdU=2.9705  acq=5.664
+       wall: propose 17.7s (gp 2.2+0.5s, acq 14.9s), matlab 137.1s, ledger 0.002s, iteration 154.7s
+       94 left, eta 4.2 h [4.0 h-5.4 h], finish ~Sat 04:32
+[bo]   7/100 [phi v0]  z=0.8394  SSE=63963.9  SSdU=2.89105  acq=5.406
+       wall: propose 17.8s (gp 2.2+0.5s, acq 15.0s), matlab 141.1s, ledger 0.002s, iteration 158.9s
+       93 left, eta 4.1 h [4.0 h-4.8 h], finish ~Sat 04:28
+[bo]   8/100 [phi v0]  z=0.8565  SSE=24267.5  SSdU=0.940496  acq=5.456
+       wall: propose 17.2s (gp 1.7+0.4s, acq 15.1s), matlab 253.2s, ledger 0.002s, iteration 270.3s
+       92 left, eta 4.1 h [4.0 h-6.9 h], finish ~Sat 04:34
+[bo]   9/100 [phi v0]  z=0.9619  SSE=41563.4  SSdU=0.0505126  acq=5.096
+       wall: propose 16.7s (gp 2.8+0.6s, acq 13.2s), matlab 155.1s, ledger 0.002s, iteration 171.8s
+       91 left, eta 4.3 h [3.9 h-6.8 h], finish ~Sat 04:50
+[bo]  10/100 [phi v0]  z=0.7990  SSE=16584  SSdU=5.46147  acq=4.854
+       wall: propose 17.5s (gp 2.4+0.3s, acq 14.8s), matlab 138.1s, ledger 0.002s, iteration 155.5s
+       90 left, eta 4.0 h [3.9 h-6.8 h], finish ~Sat 04:30
+[fit] vintage 1: fitting on 30 runs (20 DOE + 10 OPT requested)
+[fit]   SSE: a = 0.641844, b = 1.118436, lambda = 0.01, loss = 1.2604e-02 (runs 29/30)
+[fit]   SSdU: a = 1.308731, b = 3.775980, lambda = 0, loss = 7.9341e-02 (runs 29/30)
+[fit] vintage 1 published to phi_coeffs.mat in 6.5 s
+[bo]  11/100 [phi v1]  z=0.9539  SSE=15245.6  SSdU=1.10754  acq=5.006
+       wall: propose 17.7s (gp 2.1+0.4s, acq 15.2s), matlab 180.1s, ledger 0.003s, iteration 197.8s
+       89 left, eta 4.2 h [3.8 h-6.7 h], finish ~Sat 04:50
+[bo]  12/100 [phi v1]  z=1.0000  SSE=16721.1  SSdU=0.128373  acq=5.635
+       wall: propose 15.3s (gp 2.4+0.7s, acq 12.1s), matlab 179.1s, ledger 0.002s, iteration 194.4s
+       88 left, eta 4.8 h [3.8 h-6.6 h], finish ~Sat 05:24
+[bo]  13/100 [phi v1]  z=0.8888  SSE=66349.7  SSdU=0.0489213  acq=5.394
+       wall: propose 18.0s (gp 2.7+0.6s, acq 14.7s), matlab 294.2s, ledger 0.021s, iteration 312.3s
+       87 left, eta 4.7 h [3.8 h-7.5 h], finish ~Sat 05:26
+[bo]  14/100 [phi v1]  z=0.9296  SSE=34468.9  SSdU=0.779825  acq=5.292
+       wall: propose 15.2s (gp 2.3+0.2s, acq 12.7s), matlab 158.1s, ledger 0.003s, iteration 173.3s
+       86 left, eta 4.6 h [3.7 h-7.5 h], finish ~Sat 05:25
+[bo]  15/100 [phi v1]  z=0.8662  SSE=57888.7  SSdU=10.37  acq=5.054
+       wall: propose 14.7s (gp 2.5+0.1s, acq 12.0s), matlab 184.2s, ledger 0.002s, iteration 198.9s
+       85 left, eta 4.7 h [4.1 h-7.4 h], finish ~Sat 05:30
+[bo]  16/100 [phi v1]  z=0.9743  SSE=62433.4  SSdU=0.261001  acq=5.952
+       wall: propose 11.2s (gp 2.6+0.3s, acq 8.3s), matlab 167.1s, ledger 0.002s, iteration 178.4s
+       84 left, eta 4.5 h [4.0 h-7.3 h], finish ~Sat 05:25
+[bo]  17/100 [phi v1]  z=0.8641  SSE=39504.3  SSdU=0.071638  acq=5.786
+       wall: propose 16.5s (gp 2.3+0.5s, acq 13.6s), matlab 153.1s, ledger 0.003s, iteration 169.6s
+       83 left, eta 4.1 h [3.9 h-7.2 h], finish ~Sat 05:02
+[bo]  18/100 [phi v1]  z=1.0000  SSE=28175.2  SSdU=0.448208  acq=5.662
+       wall: propose 12.6s (gp 2.9+0.8s, acq 8.8s), matlab 434.3s, ledger 0.002s, iteration 446.9s
+       82 left, eta 4.1 h [3.9 h-10.2 h], finish ~Sat 05:07
+[bo]  19/100 [phi v1]  z=0.7891  SSE=21302.2  SSdU=0.787043  acq=5.467
+       wall: propose 13.6s (gp 2.5+0.3s, acq 10.7s), matlab 429.6s, ledger 0.143s, iteration 443.4s
+       81 left, eta 4.5 h [3.8 h-10.1 h], finish ~Sat 05:39
+[bo]  20/100 [phi v1]  z=0.8743  SSE=33208.8  SSdU=0.89506  acq=5.837
+       wall: propose 21.1s (gp 4.7+0.3s, acq 15.8s), matlab 155.1s, ledger 0.012s, iteration 176.6s
+       80 left, eta 4.0 h [3.8 h-9.9 h], finish ~Sat 05:11
+[fit] vintage 2: fitting on 40 runs (20 DOE + 20 OPT requested)
+[fit]   SSE: a = 0.742594, b = 1.771149, lambda = 0, loss = 1.3983e-02 (runs 39/40)
+[fit]   SSdU: a = 0.993070, b = 2.541543, lambda = 0, loss = 1.8306e-01 (runs 39/40)
+[fit] vintage 2 published to phi_coeffs.mat in 9.2 s
+[wait] evaluation 41 running for 10 min
+[wait] evaluation 41 running for 20 min
+[wait] evaluation 41 running for 30 min
+[bo]  21/100 [phi v2]  z=0.8159  SSE=25973.3  SSdU=0.0490752  acq=5.646
+       wall: propose 20.0s (gp 4.3+0.5s, acq 15.2s), matlab 1904.2s, ledger 0.005s, iteration 1924.2s
+       79 left, eta 9.7 h [3.7 h-42.2 h], finish ~Sat 11:30
+[wait] evaluation 42 running for 10 min
+[wait] evaluation 42 running for 20 min

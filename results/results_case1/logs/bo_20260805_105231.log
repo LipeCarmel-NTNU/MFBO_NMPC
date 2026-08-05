@@ -1,0 +1,118 @@
+# bo phase, started 2026-08-05T10:52:31+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/running/logs/bo_20260805_105231.log
+======================================================================
+PHASE 2 of 2: optimization, case1
+======================================================================
+[run] phase=bo case=case1 (12 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_bo.json (3 restart(s) recorded)
+[bo] resuming with 20 DOE and 83 OPT evaluations
+[bo]  84/100 [phi v8]  z=0.7986  SSE=13694.5  SSdU=1.15572  acq=5.393
+       wall: propose 45.5s (gp 11.2+1.7s, acq 32.0s), matlab 326.9s, ledger 0.002s, iteration 372.4s
+[wait] evaluation 105 running for 10 min
+[wait] evaluation 105 running for 20 min
+[wait] evaluation 105 running for 30 min
+[wait] evaluation 105 running for 40 min
+[wait] evaluation 105 running for 50 min
+[bo]  85/100 [phi v8]  z=0.7577  SSE=22124.1  SSdU=4.61008  acq=5.683
+       wall: propose 45.2s (gp 11.2+0.8s, acq 32.9s), matlab 3286.9s, ledger 0.017s, iteration 3332.2s
+       15 left, eta 7.7 h [1.6 h-13.9 h], finish ~Wed 19:37
+[bo]  86/100 [phi v8]  z=0.8917  SSE=34453.5  SSdU=0.613385  acq=7.758
+       wall: propose 40.6s (gp 14.2+1.0s, acq 25.1s), matlab 216.6s, ledger 0.026s, iteration 257.3s
+       14 left, eta 1.4 h [1.0 h-13.0 h], finish ~Wed 13:25
+[bo]  87/100 [phi v8]  z=0.6656  SSE=18724.1  SSdU=0.87858  acq=5.714
+       wall: propose 52.8s (gp 15.5+0.9s, acq 35.7s), matlab 330.0s, ledger 0.006s, iteration 383.4s
+       13 left, eta 1.4 h [56 min-12.0 h], finish ~Wed 13:26
+[bo]  88/100 [phi v8]  z=0.5716  SSE=24872.5  SSdU=0.761131  acq=6.825
+       wall: propose 45.2s (gp 12.5+1.2s, acq 30.1s), matlab 122.4s, ledger 0.003s, iteration 167.9s
+       12 left, eta 1.2 h [34 min-11.1 h], finish ~Wed 13:22
+[bo]  89/100 [phi v8]  z=1.0000  SSE=56743.1  SSdU=14.8377  acq=5.577
+       wall: propose 40.1s (gp 13.9+0.6s, acq 25.4s), matlab 323.9s, ledger 0.019s, iteration 364.0s
+       11 left, eta 1.1 h [31 min-10.2 h], finish ~Wed 13:20
+[bo]  90/100 [phi v8]  z=0.7189  SSE=28020.3  SSdU=2.72235  acq=6.905
+       wall: propose 47.5s (gp 13.7+0.7s, acq 32.8s), matlab 157.5s, ledger 0.011s, iteration 205.0s
+       10 left, eta 43 min [28 min-1.1 h], finish ~Wed 13:00
+[fit] vintage 9: fitting on 110 runs (20 DOE + 90 OPT requested)
+[fit]   SSE: a = 0.744649, b = 2.086055, lambda = 0, loss = 1.3730e-02 (runs 109/110)
+[fit]   SSdU: a = 0.592043, b = 1.178609, lambda = 0.01, loss = 1.1227e-01 (runs 109/110)
+[fit] vintage 9 published to phi_coeffs.mat in 37.6 s
+[bo]  91/100 [phi v9]  z=0.8409  SSE=35846.4  SSdU=0.0270367  acq=6.24
+       wall: propose 41.0s (gp 10.2+1.0s, acq 29.4s), matlab 189.5s, ledger 0.010s, iteration 230.5s
+       9 left, eta 35 min [25 min-58 min], finish ~Wed 12:56
+[wait] evaluation 112 running for 10 min
+[bo]  92/100 [phi v9]  z=0.8283  SSE=14182.5  SSdU=0.442273  acq=5.77
+       wall: propose 51.5s (gp 17.7+1.0s, acq 32.5s), matlab 963.7s, ledger 0.023s, iteration 1015.3s
+       8 left, eta 31 min [22 min-2.3 h], finish ~Wed 13:09
+[bo]  93/100 [phi v9]  z=0.8439  SSE=35354.5  SSdU=0.091043  acq=6.243
+       wall: propose 50.5s (gp 15.9+0.8s, acq 33.5s), matlab 203.6s, ledger 0.015s, iteration 254.1s
+       7 left, eta 30 min [24 min-2.0 h], finish ~Wed 13:12
+[bo]  94/100 [phi v9]  z=0.5880  SSE=41192  SSdU=0.262655  acq=6.07
+       wall: propose 51.2s (gp 16.5+2.3s, acq 32.1s), matlab 170.5s, ledger 0.002s, iteration 221.7s
+       6 left, eta 23 min [20 min-1.7 h], finish ~Wed 13:09
+[wait] evaluation 115 running for 10 min
+[wait] evaluation 115 running for 20 min
+[wait] evaluation 115 running for 30 min
+[wait] evaluation 115 running for 40 min
+[wait] evaluation 115 running for 50 min
+[wait] evaluation 115 running for 60 min
+[wait] evaluation 115 running for 70 min
+[wait] evaluation 115 running for 80 min
+[wait] evaluation 115 running for 90 min
+[wait] evaluation 115 running for 100 min
+[wait] evaluation 115 running for 110 min
+[wait] evaluation 115 running for 120 min
+[wait] evaluation 115 running for 130 min
+[wait] evaluation 115 running for 140 min
+[wait] evaluation 115 running for 150 min
+[wait] evaluation 115 running for 160 min
+[wait] evaluation 115 running for 170 min
+[wait] evaluation 115 running for 180 min
+[wait] evaluation 115 running for 190 min
+[wait] evaluation 115 running for 200 min
+[wait] evaluation 115 running for 210 min
+[wait] evaluation 115 running for 220 min
+[bo]  95/100 [phi v9]  z=0.9992  SSE=25364.5  SSdU=0.183174  acq=5.617
+       wall: propose 47.4s (gp 14.9+3.5s, acq 28.7s), matlab 13251.0s, ledger 0.154s, iteration 13298.5s
+       5 left, eta 21 min [18 min-18.5 h], finish ~Wed 16:49
+[bo]  96/100 [phi v9]  z=0.5784  SSE=20955.7  SSdU=0.363958  acq=6.49
+       wall: propose 64.2s (gp 21.8+5.1s, acq 34.9s), matlab 129.4s, ledger 0.002s, iteration 194.8s
+       4 left, eta 17 min [13 min-14.8 h], finish ~Wed 16:48
+[wait] evaluation 117 running for 10 min
+[wait] evaluation 117 running for 20 min
+[wait] evaluation 117 running for 30 min
+[matlab] restart 1: the MATLAB process exited with code -9. Relaunching main_BO for pending evaluation 117.
+[matlab] MATLAB launched as pid 3004282 (main_BO, console /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/running/logs/matlab_console.log).
+[matlab] MATLAB is serving requests.
+[wait] evaluation 117 running for 40 min
+[wait] evaluation 117 running for 50 min
+[bo]  97/100 [phi v9]  z=1.0000  SSE=23963.7  SSdU=0.380492  acq=5.768
+       wall: propose 52.2s (gp 16.7+4.1s, acq 31.2s), matlab 3103.3s, ledger 0.018s, iteration 3155.5s
+       3 left, eta 13 min [10 min-11.1 h], finish ~Wed 17:36
+[bo]  98/100 [phi v9]  z=1.0000  SSE=17689  SSdU=1.17289  acq=5.781
+       wall: propose 59.1s (gp 21.3+3.4s, acq 34.0s), matlab 299.9s, ledger 0.002s, iteration 359.1s
+       2 left, eta 12 min [6 min-7.4 h], finish ~Wed 17:41
+[bo]  99/100 [phi v9]  z=1.0000  SSE=33604.2  SSdU=0.0684149  acq=6.278
+       wall: propose 50.3s (gp 13.8+1.6s, acq 34.7s), matlab 271.9s, ledger 0.002s, iteration 322.1s
+       1 left, eta 6 min [3 min-3.7 h], finish ~Wed 17:41
+[bo] 100/100 [phi v9]  z=0.6707  SSE=42156  SSdU=4.2428  acq=6.716
+       wall: propose 48.8s (gp 10.7+3.9s, acq 34.0s), matlab 130.4s, ledger 0.002s, iteration 179.2s
+[fit] vintage 10: fitting on 120 runs (20 DOE + 100 OPT requested)
+[fit]   SSE: a = 0.753662, b = 2.154618, lambda = 0, loss = 1.3130e-02 (runs 119/120)
+[fit]   SSdU: a = 0.587744, b = 1.174206, lambda = 0.01, loss = 1.0558e-01 (runs 119/120)
+[fit] vintage 10 published to phi_coeffs.mat in 41.0 s
+[fit] vintage 10 is terminal: it is recorded for post-hoc use and governs no evaluation
+
+[bo] budget complete: 100 optimisation evaluations
+
+[done] summary
+  evaluations         120
+  solver time         17.51 h
+  simulation wall     17.51 h
+  lowest SSE          2428.22  (eval 9)
+  lowest SSdU         0.00236482  (eval 9)
+  GP fits             14.3 min
+  acquisition         31.2 min
+  phi fits            3.6 min
+  driver overhead     4.5% of the total wall time
+
+[run_pipeline] done. You can stop MATLAB now.
+# ended 2026-08-05T17:39:03+0200

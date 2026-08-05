@@ -94,7 +94,13 @@ checks = sortrows(checks, {'case', 'id'});
 %% Surrogate vintages (produced by parse_registry.py)
 csv_path = fullfile(storage_dir, 'surrogate_vintages.csv');
 if exist(csv_path, 'file')
-    surrogate = readtable(csv_path);
+    % 'case' is a MATLAB reserved word, so readtable's default naming rule
+    % would rename that column to 'xCase'. Preserve the CSV headers instead,
+    % and rename defensively in case an old build slips through.
+    surrogate = readtable(csv_path, 'VariableNamingRule', 'preserve');
+    if ismember('xCase', surrogate.Properties.VariableNames)
+        surrogate = renamevars(surrogate, 'xCase', 'case');
+    end
     if ismember('case', surrogate.Properties.VariableNames)
         surrogate.case = categorical(surrogate.case);
     end
