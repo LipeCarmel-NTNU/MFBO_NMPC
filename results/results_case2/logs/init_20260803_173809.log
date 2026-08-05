@@ -1,0 +1,14 @@
+# init phase, started 2026-08-03T17:38:09+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/init_20260803_173809.log
+======================================================================
+PHASE 1 of 2: design of experiments, case2
+======================================================================
+[run] phase=init case=case2 (8 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_init.json (4 restart(s) recorded)
+[init] 20 of 20 design points already evaluated
+
+[init] initialisation complete: 20 evaluations
+[init] MATLAB hands over to main_BO on the first optimization request.
+
+[run_pipeline] design complete. Waiting 10 s for MATLAB to hand over to main_BO.
+# ended 2026-08-03T17:38:10+0200

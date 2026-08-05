@@ -1,0 +1,16 @@
+# bo phase, started 2026-08-04T16:01:19+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/bo_20260804_160119.log
+======================================================================
+PHASE 2 of 2: optimization, case2
+======================================================================
+[run] phase=bo case=case2 (8 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_bo.json (7 restart(s) recorded)
+[bo] resuming with 20 DOE and 98 OPT evaluations
+[bo]  99/100 [phi v9]  z=0.8130  SSE=14030.4  SSdU=0.349298  acq=5.484
+       wall: propose 36.0s (gp 3.7+0.8s, acq 30.8s), matlab 57.2s, ledger 0.002s, iteration 93.1s
+[wait] MATLAB is busy (matlab.lock present) ...
+
+[run] interrupted. Every completed evaluation is on disk; restart the same command to resume.
+
+[run_pipeline] the optimization phase stopped with code 130.
+# ended 2026-08-04T16:14:15+0200

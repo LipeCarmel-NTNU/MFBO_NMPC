@@ -1,0 +1,31 @@
+# init phase, started 2026-08-03T08:50:34+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/init_20260803_085034.log
+======================================================================
+PHASE 1 of 2: design of experiments, case2
+======================================================================
+[run] phase=init case=case2 (8 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_init.json (1 restart(s) recorded)
+[init] 15 of 20 design points already evaluated
+[init]  16/20  z=0.1799  SSE=20072.7  SSdU=4.08658  solver=231.3s  matlab=233.2s
+[init]  17/20  z=0.1601  SSE=9361.15  SSdU=0.213308  solver=143.9s  matlab=146.1s
+       3 left, eta 9 min [7 min-12 min], finish ~Mon 09:06
+[wait] evaluation 18 running for 10 min
+[wait] evaluation 18 running for 20 min
+[init]  18/20  z=0.6083  SSE=28221.7  SSdU=25.6064  solver=1535.0s  matlab=1537.2s
+       2 left, eta 8 min [5 min-51 min], finish ~Mon 09:30
+[wait] evaluation 19 running for 10 min
+[init]  19/20  z=0.9346  SSE=14002.6  SSdU=12.1872  solver=645.8s  matlab=647.5s
+       1 left, eta 7 min [2 min-26 min], finish ~Mon 09:40
+[wait] evaluation 20 running for 10 min
+[init]  20/20  z=0.3329  SSE=14659.4  SSdU=4.61869  solver=657.1s  matlab=659.5s
+
+[init] initialisation complete: 20 evaluations
+[fit] vintage 0: fitting on 20 runs (20 DOE + 0 OPT requested)
+[fit]   SSE: a = 1.005133, b = 4.407952, lambda = 0, loss = 1.0287e-02 (runs 18/20)
+[fit]   SSdU: a = 1.000305, b = 0.999907, lambda = 100, loss = 9.7980e-02 (runs 18/20)
+[fit] vintage 0 published to phi_coeffs.mat in 3.4 s
+[init] vintage 0 fitted and published
+[init] MATLAB hands over to main_BO on the first optimization request.
+
+[run_pipeline] design complete. Waiting 10 s for MATLAB to hand over to main_BO.
+# ended 2026-08-03T09:44:22+0200

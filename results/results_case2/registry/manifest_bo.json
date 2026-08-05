@@ -1,0 +1,212 @@
+{
+  "config": {
+    "acq_batch_limit": 5,
+    "acq_maxiter": 250,
+    "base_lower_bounds": [
+      0.01,
+      0.0,
+      0.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0,
+      -3.0
+    ],
+    "base_upper_bounds": [
+      1.0,
+      15.0,
+      7.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0
+    ],
+    "case": "case2",
+    "case_description": "Reduced 8-dimensional search. q1 is held at 0, so Q11 = 1, and the three input-magnitude exponents are set to the disabled value, so R_u vanishes from the NMPC objective. The remaining eight components keep the bounds of case1.",
+    "cv_seed": 1,
+    "ell_z": 0.25,
+    "eps": 1e-06,
+    "eval_timeout_s": 21600.0,
+    "fit_k_fold": 5,
+    "fit_lambda_grid": [
+      0.0,
+      0.01,
+      1.0,
+      100.0
+    ],
+    "fixed_components": {
+      "q1": 0.0,
+      "r_u1": -1000.0,
+      "r_u2": -1000.0,
+      "r_u3": -1000.0
+    },
+    "gamma_time": 1.0,
+    "horizon_hours": 10.0,
+    "integer_components": [
+      "theta_p",
+      "theta_m"
+    ],
+    "lock_stale_s": 21600.0,
+    "lower_bounds": [
+      0.01,
+      0.0,
+      0.0,
+      0.0,
+      -3.0,
+      -3.0,
+      -1000.0,
+      -1000.0,
+      -1000.0,
+      -3.0,
+      -3.0,
+      -3.0
+    ],
+    "matlab_wait_s": 2.0,
+    "max_consecutive_failures": 5,
+    "max_iep": 256,
+    "max_wait_matlab_s": 120.0,
+    "mc_samples": 128,
+    "n_init": 20,
+    "n_iter": 100,
+    "n_total_evaluations": 120,
+    "num_restarts": 20,
+    "optimised_components": [
+      "z",
+      "theta_p",
+      "theta_m",
+      "q2",
+      "q3",
+      "r_du1",
+      "r_du2",
+      "r_du3"
+    ],
+    "poll_s": 1.0,
+    "prune_baseline": true,
+    "q_batch": 1,
+    "raw_samples": 1024,
+    "ref_point_backoff": 0.2,
+    "refit_after_last": true,
+    "refit_every": 10,
+    "refit_rule": "vintage 0 is fitted on the 20 initialisation runs and governs optimisation iterations 1-10; a refit follows every 10 optimisation iterations and governs the next 10; past rows are never rescaled",
+    "search_dimension": 8,
+    "sobol_seed": 1234,
+    "stopping_rule": "fixed budget: 20 initialisation evaluations followed by 100 acquisition-driven evaluations, declared before the first evaluation",
+    "theta_dimension": 12,
+    "theta_names": [
+      "z",
+      "theta_p",
+      "theta_m",
+      "q1",
+      "q2",
+      "q3",
+      "r_u1",
+      "r_u2",
+      "r_u3",
+      "r_du1",
+      "r_du2",
+      "r_du3"
+    ],
+    "torch_seed": 0,
+    "upper_bounds": [
+      1.0,
+      15.0,
+      7.0,
+      0.0,
+      3.0,
+      3.0,
+      -1000.0,
+      -1000.0,
+      -1000.0,
+      3.0,
+      3.0,
+      3.0
+    ],
+    "w_t": 1.0,
+    "w_z": 1.0,
+    "z_min_bo": 0.01,
+    "z_min_note": "z_min_bo bounds the search space below. z_min_phi is the floor of the surrogate fit. They are separate limits on separate steps.",
+    "z_min_phi": 0.1
+  },
+  "environment": {
+    "cwd": "/cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC",
+    "executable": "/cluster/home/vitorn/.conda/envs/mfbo-nmpc/bin/python",
+    "git": {
+      "branch": "main",
+      "changed_source_files": [],
+      "commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "describe": null,
+      "diff_bytes": 0,
+      "diff_scope": [
+        "*.py",
+        "*.m",
+        "*.json",
+        "*.toml",
+        "*.cfg"
+      ],
+      "dirty": false
+    },
+    "machine": "x86_64",
+    "packages": {
+      "botorch": "0.17.2",
+      "gpytorch": "1.15.2",
+      "numpy": "2.5.1",
+      "scipy": "1.18.0",
+      "torch": "2.13.0"
+    },
+    "platform": "Linux-5.14.0-611.55.1.el9_7.0.3.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "python": "3.13.12 | packaged by conda-forge | (main, Feb  5 2026, 05:53:46) [GCC 14.3.0]",
+    "started_at": "2026-08-03T08:50:34+0200",
+    "started_at_epoch": 1785739834.7956994,
+    "torch_device": "cpu",
+    "torch_num_threads": 32
+  },
+  "phase": "bo",
+  "registry_version": 2,
+  "resumed": [
+    {
+      "at": "2026-08-03T13:09:09+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-03T14:04:56+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-03T17:38:09+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-04T09:08:43+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-04T15:04:54+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-04T15:57:18+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    },
+    {
+      "at": "2026-08-04T16:01:09+0200",
+      "git_commit": "157aa86ea715ed9e0c903acf21f1f0eaa300662c",
+      "git_dirty": false
+    }
+  ]
+}

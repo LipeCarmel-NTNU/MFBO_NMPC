@@ -1,0 +1,277 @@
+{
+  "context": {
+    "case": "case2",
+    "eval_ids_used": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "files_missing": 0,
+    "files_used": [
+      "out_20260802_203843.mat",
+      "out_20260802_203955.mat",
+      "out_20260802_210428.mat",
+      "out_20260802_211444.mat",
+      "out_20260802_212808.mat",
+      "out_20260802_213605.mat",
+      "out_20260802_215812.mat",
+      "out_20260802_221530.mat",
+      "out_20260802_221558.mat",
+      "out_20260802_221618.mat",
+      "out_20260802_223605.mat",
+      "out_20260803_015608.mat",
+      "out_20260803_021056.mat",
+      "out_20260803_022654.mat",
+      "out_20260803_080019.mat",
+      "out_20260803_085036.mat",
+      "out_20260803_085430.mat",
+      "out_20260803_085656.mat",
+      "out_20260803_092233.mat",
+      "out_20260803_093321.mat"
+    ],
+    "fit_wall_s": 3.4178678514435887,
+    "governs_iterations": [
+      1,
+      10
+    ],
+    "n_doe_rows": 20,
+    "n_opt_rows_used": 0,
+    "rescales_past_rows": false,
+    "wall_s": {
+      "fit_total": 3.4178678514435887,
+      "per_target": {
+        "SSE": {
+          "cross_validation": 2.3577636247500777,
+          "final_fit": 0.16534991748631,
+          "load_and_pool": 0.1422400362789631,
+          "total": 2.666972540318966
+        },
+        "SSdU": {
+          "cross_validation": 0.701853359118104,
+          "final_fit": 0.016662029549479485,
+          "load_and_pool": 0.031210333108901978,
+          "total": 0.7508253399282694
+        }
+      },
+      "publish_coefficients": 0.04105090815573931,
+      "total": 3.4783964436501265,
+      "write_record": 0.019423916935920715
+    }
+  },
+  "created_at": "2026-08-03T09:44:22+0200",
+  "model": "phi(z) = I_z(a, b), regularized incomplete beta",
+  "targets": {
+    "SSE": {
+      "a": 1.005132664295613,
+      "b": 4.407952340007707,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.009326075712651951,
+        0.012718998607213936,
+        0.059292530752845116,
+        0.0869499037369748
+      ],
+      "dropped_sources": [
+        "out_20260802_221530.mat",
+        "out_20260802_221558.mat"
+      ],
+      "lam": 0.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.010286635555262753,
+      "n_runs_total": 20,
+      "n_runs_used": 18,
+      "n_samples": 4928,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.010286635555262753,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+        "method": "L-BFGS-B",
+        "nfev": 20,
+        "nit": 18,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.16534991748631,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260802_203843.mat",
+        "out_20260802_203955.mat",
+        "out_20260802_210428.mat",
+        "out_20260802_211444.mat",
+        "out_20260802_212808.mat",
+        "out_20260802_213605.mat",
+        "out_20260802_215812.mat",
+        "out_20260802_221618.mat",
+        "out_20260802_223605.mat",
+        "out_20260803_015608.mat",
+        "out_20260803_021056.mat",
+        "out_20260803_022654.mat",
+        "out_20260803_080019.mat",
+        "out_20260803_085036.mat",
+        "out_20260803_085430.mat",
+        "out_20260803_085656.mat",
+        "out_20260803_092233.mat",
+        "out_20260803_093321.mat"
+      ],
+      "target": "SSE",
+      "wall_s": {
+        "cross_validation": 2.3577636247500777,
+        "final_fit": 0.16534991748631,
+        "load_and_pool": 0.1422400362789631,
+        "total": 2.666972540318966
+      }
+    },
+    "SSdU": {
+      "a": 1.0003047068182909,
+      "b": 0.9999074615298285,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.12287319898513545,
+        0.11815814768641322,
+        0.10655099084579178,
+        0.10461458506579883
+      ],
+      "dropped_sources": [
+        "out_20260802_221530.mat",
+        "out_20260802_221558.mat"
+      ],
+      "lam": 100.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.0979803713631567,
+      "n_runs_total": 20,
+      "n_runs_used": 18,
+      "n_samples": 4928,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.09799051232451415,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "method": "L-BFGS-B",
+        "nfev": 4,
+        "nit": 2,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.016662029549479485,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260802_203843.mat",
+        "out_20260802_203955.mat",
+        "out_20260802_210428.mat",
+        "out_20260802_211444.mat",
+        "out_20260802_212808.mat",
+        "out_20260802_213605.mat",
+        "out_20260802_215812.mat",
+        "out_20260802_221618.mat",
+        "out_20260802_223605.mat",
+        "out_20260803_015608.mat",
+        "out_20260803_021056.mat",
+        "out_20260803_022654.mat",
+        "out_20260803_080019.mat",
+        "out_20260803_085036.mat",
+        "out_20260803_085430.mat",
+        "out_20260803_085656.mat",
+        "out_20260803_092233.mat",
+        "out_20260803_093321.mat"
+      ],
+      "target": "SSdU",
+      "wall_s": {
+        "cross_validation": 0.701853359118104,
+        "final_fit": 0.016662029549479485,
+        "load_and_pool": 0.031210333108901978,
+        "total": 0.7508253399282694
+      }
+    }
+  },
+  "vintage": 0
+}

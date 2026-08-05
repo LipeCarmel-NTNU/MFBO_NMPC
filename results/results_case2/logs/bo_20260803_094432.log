@@ -1,0 +1,33 @@
+# bo phase, started 2026-08-03T09:44:32+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/bo_20260803_094432.log
+======================================================================
+PHASE 2 of 2: optimization, case2
+======================================================================
+[run] phase=bo case=case2 (8 free dimensions) budget=20+100
+[registry] manifest written to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/registry/manifest_bo.json
+[bo] resuming with 20 DOE and 0 OPT evaluations
+[wait] evaluation 21 running for 10 min
+[wait] evaluation 21 running for 20 min
+[wait] evaluation 21 running for 30 min
+[bo]   1/100 [phi v0]  z=0.9262  SSE=69755.9  SSdU=1.61486  acq=5.927
+       wall: propose 34.3s (gp 2.4+0.3s, acq 15.0s), matlab 2387.0s, ledger 0.006s, iteration 2421.4s
+[wait] evaluation 22 running for 10 min
+[wait] evaluation 22 running for 20 min
+[wait] evaluation 22 running for 30 min
+[wait] evaluation 22 running for 40 min
+[wait] evaluation 22 running for 50 min
+[wait] evaluation 22 running for 60 min
+[wait] evaluation 22 running for 70 min
+[wait] evaluation 22 running for 80 min
+[wait] evaluation 22 running for 90 min
+[wait] evaluation 22 running for 100 min
+[wait] evaluation 22 running for 110 min
+[wait] evaluation 22 running for 120 min
+[wait] evaluation 22 running for 130 min
+[wait] evaluation 22 running for 140 min
+[wait] evaluation 22 running for 150 min
+
+[run] interrupted. Every completed evaluation is on disk; restart the same command to resume.
+
+[run_pipeline] the optimization phase stopped with code 130.
+# ended 2026-08-03T12:56:26+0200

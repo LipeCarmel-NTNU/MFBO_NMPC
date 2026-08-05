@@ -1,0 +1,45 @@
+# bo phase, started 2026-08-04T15:05:06+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/bo_20260804_150506.log
+======================================================================
+PHASE 2 of 2: optimization, case2
+======================================================================
+[run] phase=bo case=case2 (8 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_bo.json (5 restart(s) recorded)
+[bo] resuming with 20 DOE and 96 OPT evaluations
+[wait] evaluation 117 running for 10 min
+[wait] evaluation 117 running for 20 min
+[wait] evaluation 117 running for 30 min
+[wait] evaluation 117 running for 40 min
+[bo]  97/100 [phi v9]  z=0.8775  SSE=15713.6  SSdU=0.392197  acq=5.202
+       wall: propose 49.0s (gp 4.6+1.6s, acq 28.2s), matlab 2580.6s, ledger 0.022s, iteration 2629.6s
+[bo]  98/100 [phi v9]  z=0.7916  SSE=17181  SSdU=0.950627  acq=5.932
+       wall: propose 29.7s (gp 4.0+1.4s, acq 24.1s), matlab 206.6s, ledger 0.002s, iteration 236.3s
+       2 left, eta 48 min [8 min-1.5 h], finish ~Tue 16:40
+[bo]  99/100 [phi v9]  z=0.8130  SSE=14030.4  SSdU=0.349298  acq=5.484
+       wall: propose 33.3s (gp 3.4+0.7s, acq 29.0s), matlab 567.7s, ledger 0.002s, iteration 601.0s
+       1 left, eta 10 min [4 min-44 min], finish ~Tue 16:12
+[wait] evaluation 120 running for 10 min
+[wait] evaluation 120 running for 20 min
+[bo] 100/100 [phi v9]  z=0.7937  SSE=13241.1  SSdU=3.36942  acq=4.896
+       wall: propose 54.4s (gp 10.6+0.9s, acq 41.0s), matlab 1463.4s, ledger 0.041s, iteration 1517.8s
+[fit] vintage 10: fitting on 120 runs (20 DOE + 100 OPT requested)
+[fit]   SSE: a = 0.841967, b = 2.972575, lambda = 0, loss = 1.3189e-02 (runs 118/120)
+[fit]   SSdU: a = 0.895713, b = 2.374661, lambda = 0, loss = 8.4173e-02 (runs 118/120)
+[fit] vintage 10 published to phi_coeffs.mat in 41.7 s
+[fit] vintage 10 is terminal: it is recorded for post-hoc use and governs no evaluation
+
+[bo] budget complete: 100 optimisation evaluations
+
+[done] summary
+  evaluations         120
+  solver time         25.71 h
+  simulation wall     25.71 h
+  lowest SSE          6963.33  (eval 9)
+  lowest SSdU         0.0331584  (eval 85)
+  GP fits             5.0 min
+  acquisition         28.4 min
+  phi fits            3.2 min
+  driver overhead     2.3% of the total wall time
+
+[run_pipeline] done. You can stop MATLAB now.
+# ended 2026-08-04T16:28:52+0200

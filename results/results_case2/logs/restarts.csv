@@ -1,0 +1,2 @@
+timestamp,attempt,reason,exit_code,entry,pending_eval_id,republished
+20260803_235754,1,the MATLAB process exited with code -9,-9,main_BO,72,0
