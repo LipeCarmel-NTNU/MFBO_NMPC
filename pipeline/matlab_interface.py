@@ -24,18 +24,25 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 LOCK_FILE = BASE_DIR / "matlab.lock"
 THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 
+# The results tree may live in a subfolder instead of results/, so several cases
+# can sit side by side without moving files between runs. MFBO_RESULTS_DIR sets
+# it (relative to the project root, e.g. "results/running"); it defaults to
+# "results". The MATLAB entry scripts read the same variable with getenv. The
+# exchange (inbox/theta.txt, matlab.lock) stays at the project root regardless.
+RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results")
+
 # The initialisation phase and the optimisation phase write separate files, so
 # that the costs measured at the simulated fidelity stay distinguishable from
 # the surrogate-scaled costs of the optimisation runs.
-INIT_RESULTS_FILE = BASE_DIR / "results" / "init" / "results.csv"
-BO_RESULTS_FILE = BASE_DIR / "results" / "results.csv"
+INIT_RESULTS_FILE = RESULTS_DIR / "init" / "results.csv"
+BO_RESULTS_FILE = RESULTS_DIR / "results.csv"
 # One failures file for both phases. The MATLAB serve loop writes it, and that
 # loop does not know which phase a request belongs to.
-FAILURES_FILE = BASE_DIR / "results" / "failures.csv"
-INIT_OUT_DIR = BASE_DIR / "results" / "init"
-BO_OUT_DIR = BASE_DIR / "results"
+FAILURES_FILE = RESULTS_DIR / "failures.csv"
+INIT_OUT_DIR = RESULTS_DIR / "init"
+BO_OUT_DIR = RESULTS_DIR
 
-PHI_COEFFS_FILE = BASE_DIR / "results" / "surrogate" / "phi_coeffs.mat"
+PHI_COEFFS_FILE = RESULTS_DIR / "surrogate" / "phi_coeffs.mat"
 
 THETA_LEN = 12
 

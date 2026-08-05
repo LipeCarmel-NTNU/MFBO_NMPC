@@ -48,7 +48,7 @@ from typing import List, Optional, Tuple
 from pipeline import matlab_interface as mi
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-LOG_DIR = BASE_DIR / "results" / "logs"
+LOG_DIR = mi.RESULTS_DIR / "logs"
 CONSOLE_LOG = LOG_DIR / "matlab_console.log"
 RESTART_LOG = LOG_DIR / "restarts.csv"
 

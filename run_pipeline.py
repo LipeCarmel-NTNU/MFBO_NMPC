@@ -29,10 +29,12 @@ from pathlib import Path
 
 from pipeline.console_log import ConsoleLog
 from pipeline.driver import main as run_phase
+from pipeline.matlab_interface import RESULTS_DIR
 from run_config import CASES
 
-# Both phases copy their console output here, one file for each start.
-LOG_ROOT = Path(__file__).resolve().parent / "results"
+# Both phases copy their console output here, one file for each start. This
+# follows MFBO_RESULTS_DIR (see matlab_interface.RESULTS_DIR).
+LOG_ROOT = RESULTS_DIR
 
 # The pause covers the handover. MATLAB has to notice the optimization request,
 # leave the design loop, clear its workspace and start main_BO. The driver

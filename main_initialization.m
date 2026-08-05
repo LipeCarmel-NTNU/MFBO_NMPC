@@ -47,11 +47,15 @@ configure_pool(USE_PARALLEL, NumWorkers);
 
 %% Run configuration
 cfg_run = struct();
+% Results tree, overridable with MFBO_RESULTS_DIR (default "results"); matches
+% pipeline/matlab_interface.py RESULTS_DIR. The exchange stays at the root.
+results_root = getenv("MFBO_RESULTS_DIR");
+if isempty(results_root); results_root = "results"; end
 cfg_run.theta_txt = fullfile("inbox", "theta.txt");
 cfg_run.poll_s = 2.0;
-cfg_run.out_dir = fullfile("results", "init");
-cfg_run.results_csv = fullfile("results", "init", "results.csv");
-cfg_run.failures_csv = fullfile("results", "failures.csv");
+cfg_run.out_dir = fullfile(results_root, "init");
+cfg_run.results_csv = fullfile(results_root, "init", "results.csv");
+cfg_run.failures_csv = fullfile(results_root, "failures.csv");
 cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
 cfg_run.lock_path = "matlab.lock";
 cfg_run.lock_stale_s = 6 * 3600;

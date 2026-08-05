@@ -49,6 +49,7 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 
 from pipeline.matlab_interface import (
     PHI_COEFFS_FILE,
+    RESULTS_DIR,
     EvaluationFailed,
     failures_file,
     out_dir,
@@ -453,7 +454,7 @@ def _results_from_record(record: Dict):
 
 def run_initialization(cfg: RunConfig) -> None:
     space = Space(cfg)
-    registry = Registry(BASE_DIR / "results", "init")
+    registry = Registry(RESULTS_DIR, "init")
     registry.write_manifest(cfg.to_dict(), BASE_DIR)
 
     path_results = results_file("init")
@@ -516,7 +517,7 @@ def run_initialization(cfg: RunConfig) -> None:
     print(f"\n[init] initialisation complete: {len(rows)} evaluations")
 
     if not registry.vintage_exists(0):
-        bo_registry = Registry(BASE_DIR / "results", "bo")
+        bo_registry = Registry(RESULTS_DIR, "bo")
         fit_vintage(cfg, bo_registry, 0, rows, [])
         print("[init] vintage 0 fitted and published")
     print("[init] MATLAB hands over to main_BO on the first optimization request.")
@@ -524,7 +525,7 @@ def run_initialization(cfg: RunConfig) -> None:
 
 def run_bo(cfg: RunConfig) -> None:
     space = Space(cfg)
-    registry = Registry(BASE_DIR / "results", "bo")
+    registry = Registry(RESULTS_DIR, "bo")
     registry.write_manifest(cfg.to_dict(), BASE_DIR)
 
     path_init = results_file("init")

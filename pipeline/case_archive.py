@@ -15,13 +15,15 @@ back.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
 from typing import List, Optional
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-RESULTS_DIR = BASE_DIR / "results"
+# Same override as matlab_interface.RESULTS_DIR: MFBO_RESULTS_DIR, default results.
+RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results")
 ARCHIVE_ROOT = BASE_DIR / "results_archive"
 SIM_LOG = BASE_DIR / "SIMULATIONS_LOG.txt"
 
