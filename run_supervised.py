@@ -46,6 +46,7 @@ import sys
 
 import run_pipeline
 from pipeline import case_archive
+from pipeline import driver
 from pipeline.matlab_supervisor import CONSOLE_LOG, MatlabSupervisor
 from run_config import CASES
 
@@ -126,10 +127,16 @@ def run_case(case: str, args) -> int:
     # before then: main_initialization deletes the inbox on startup.
     supervisor.start()
     supervisor.watch()
+    # The driver calls this when an evaluation exceeds its timeout: it kills the
+    # wedged MATLAB and relaunches it so the run continues. It is set only while a
+    # supervisor is attached, so a manual run_pipeline leaves it None and stops
+    # with instructions instead.
+    driver.TIMEOUT_RESTART_HOOK = supervisor.abandon
     try:
         code = run_pipeline.main(["--case", case, "--phase", args.phase,
                                   "--pause", str(args.pause)])
     finally:
+        driver.TIMEOUT_RESTART_HOOK = None
         supervisor.stop()
 
     if supervisor.restarts:

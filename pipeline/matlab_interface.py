@@ -305,11 +305,7 @@ def wait_for_result(eval_id: int, results_path: Path, failures_path: Path, *,
 
         now = time.time()
         if now - t0 > timeout_s:
-            raise TimeoutError(
-                f"evaluation {eval_id} produced neither a results row nor a failure "
-                f"row within {timeout_s / 3600:.1f} h. Check that MATLAB is still "
-                f"running main_initialization.m or main_BO.m."
-            )
+            raise EvaluationTimedOut(eval_id, timeout_s)
 
         # MATLAB holds the lock for as long as it works on a request. A missing
         # lock while this function waits therefore means that MATLAB is not
@@ -349,6 +345,92 @@ class EvaluationFailed(RuntimeError):
             f"evaluation {eval_id} failed in MATLAB: "
             f"{failure.get('identifier', '')} {failure.get('message', '')}"
         )
+
+
+class EvaluationTimedOut(RuntimeError):
+    """The evaluation produced no row within the timeout.
+
+    Distinct from EvaluationFailed, which is a failure MATLAB reported and wrote a
+    row for. A timeout means MATLAB never answered: it is still working past the
+    cutoff, or it died without writing. The driver imputes a dominated point for
+    the candidate so the optimiser does not propose it again, and it has the
+    supervisor relaunch MATLAB so the next request is served by a fresh process.
+    """
+
+    def __init__(self, eval_id: int, timeout_s: float):
+        self.eval_id = eval_id
+        self.timeout_s = timeout_s
+        super().__init__(
+            f"evaluation {eval_id} produced neither a results row nor a failure "
+            f"row within {timeout_s / 3600:.1f} h."
+        )
+
+
+def _fmt17(v) -> str:
+    """Format a number as %.17g, matching the MATLAB CSV writers."""
+    return f"{float(v):.17g}"
+
+
+def append_imputed_result(phase: str, row: Dict) -> None:
+    """Append a driver-imputed results row, e.g. for a timed-out evaluation.
+
+    MATLAB writes results.csv for a measured evaluation. When the driver gives an
+    evaluation up on a timeout it records the point itself, so the optimiser sees
+    it in the history and does not propose it again, and so a resumed run finds it
+    on disk. The row matches RESULTS_COLUMNS exactly, so read_results parses it
+    like any measured row. `row` holds every non-theta column by name plus
+    `theta`, a length-THETA_LEN sequence. The append is one buffered write,
+    flushed and fsynced, so a concurrent reader sees a whole row or none.
+    """
+    path = results_file(phase)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        with path.open("w", encoding="ascii", newline="") as fh:
+            fh.write(",".join(RESULTS_COLUMNS) + "\n")
+
+    cells: List[str] = []
+    for col in RESULTS_COLUMNS:
+        if col.startswith("theta_"):
+            continue
+        if col == "eval_id":
+            cells.append(str(int(row["eval_id"])))
+        elif col in ("timestamp", "phase"):
+            cells.append(str(row[col]))
+        else:
+            cells.append(_fmt17(row[col]))
+    cells.extend(_fmt17(v) for v in row["theta"])
+
+    with path.open("a", encoding="ascii", newline="") as fh:
+        fh.write(",".join(cells) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def append_timeout_failure(phase: str, eval_id: int, timestamp: str,
+                           message: str, theta: Sequence[float]) -> None:
+    """Record a timed-out evaluation in the failures file, identifier 'timeout'.
+
+    This is what makes a timed-out point identifiable after the fact: failures.csv
+    lists it with the 'timeout' identifier, next to the ledger entry that carries
+    the imputed penalty. The format matches dependencies/io/append_failure_row.m,
+    the twelve theta columns included, so read_failures parses either writer.
+    """
+    path = failures_file(phase)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    theta = list(theta)
+    if not path.exists():
+        header = "eval_id,timestamp,identifier,message" + "".join(
+            f",theta_{k}" for k in range(1, len(theta) + 1))
+        with path.open("w", encoding="ascii", newline="") as fh:
+            fh.write(header + "\n")
+
+    flat = " ".join(str(message).split()).replace('"', "''")
+    cells = [str(int(eval_id)), str(timestamp), "timeout", f'"{flat}"']
+    cells.extend(_fmt17(v) for v in theta)
+    with path.open("a", encoding="ascii", newline="") as fh:
+        fh.write(",".join(cells) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def wait_for_matlab_ready(results_path: Path, max_wait_s: float = 120.0,

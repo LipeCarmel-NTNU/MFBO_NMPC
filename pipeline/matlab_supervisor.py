@@ -99,6 +99,10 @@ class MatlabSupervisor:
         self._startup_failures = 0
         self._lock_absent_since: Optional[float] = None
         self.restarts = 0
+        # Serialises the process lifecycle between the monitor thread and a
+        # driver-initiated abandon(). Both kill and relaunch MATLAB, and they must
+        # not interleave.
+        self._proc_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public interface
@@ -154,33 +158,81 @@ class MatlabSupervisor:
 
     def _monitor(self) -> None:
         while not self._stop.wait(self.poll_s):
-            reason, exit_code = self._failure()
-            if reason is None:
-                continue
+            # The lock keeps this relaunch from interleaving with a driver
+            # abandon(), which kills and relaunches the same process.
+            with self._proc_lock:
+                reason, exit_code = self._failure()
+                if reason is None:
+                    continue
+                if self._stop.is_set():
+                    return
+
+                pending = self._pending_request()
+                saved = self._read_theta_raw() if pending else None
+                entry = ENTRY_FOR_PHASE.get(pending[1], self.entry) if pending else self.entry
+
+                self.restarts += 1
+                self._log(f"restart {self.restarts}: {reason}. "
+                          f"Relaunching {entry}"
+                          + (f" for pending evaluation {pending[0]}." if pending else "."))
+
+                self._terminate()
+                # acquire_lock warns about a lock it did not create, and the driver
+                # treats one as a busy server. Neither is true after a kill.
+                mi.LOCK_FILE.unlink(missing_ok=True)
+                self._lock_absent_since = None
+
+                republished = False
+                while not self._stop.is_set():
+                    self._launch(entry)
+                    if self._await_ready():
+                        self._startup_failures = 0
+                        republished = self._republish(saved, pending)
+                        break
+                    self._startup_failures += 1
+                    delay = min(5.0 * 2 ** (self._startup_failures - 1), self.backoff_max_s)
+                    self._log(f"the relaunch did not reach the serve loop "
+                              f"({self._startup_failures} in a row). Retrying in {delay:.0f} s.")
+                    self._tail_console(20)
+                    self._sleep(delay)
+
+                self._record_restart(reason, exit_code, entry, pending, republished)
+
+    def abandon(self, eval_id: int) -> None:
+        """Kill the server the driver gave up on after a timeout, and relaunch it.
+
+        The server is still inside that evaluation and holds matlab.lock, so the
+        driver cannot acquire the lock to send the next request. This terminates
+        the process, removes the pending request so the fresh server does not read
+        the abandoned theta and run it again, and starts a new server. It returns
+        once that server is polling. The phase of the pending request selects the
+        entry point, so a timeout in the optimisation phase relaunches main_BO.
+
+        Runs under the same lock as the monitor, so the two never relaunch at once.
+        """
+        with self._proc_lock:
             if self._stop.is_set():
                 return
 
             pending = self._pending_request()
-            saved = self._read_theta_raw() if pending else None
             entry = ENTRY_FOR_PHASE.get(pending[1], self.entry) if pending else self.entry
 
             self.restarts += 1
-            self._log(f"restart {self.restarts}: {reason}. "
-                      f"Relaunching {entry}"
-                      + (f" for pending evaluation {pending[0]}." if pending else "."))
+            self._log(f"restart {self.restarts}: driver abandoned evaluation "
+                      f"{eval_id} after a timeout. Relaunching {entry}.")
 
+            # Remove the request before the relaunch, so the fresh server does not
+            # serve the abandoned theta again. The driver has already recorded, or
+            # is about to record, the imputed point for this eval_id.
+            mi.THETA_FILE.unlink(missing_ok=True)
             self._terminate()
-            # acquire_lock warns about a lock it did not create, and the driver
-            # treats one as a busy server. Neither is true after a kill.
             mi.LOCK_FILE.unlink(missing_ok=True)
             self._lock_absent_since = None
 
-            republished = False
             while not self._stop.is_set():
                 self._launch(entry)
                 if self._await_ready():
                     self._startup_failures = 0
-                    republished = self._republish(saved, pending)
                     break
                 self._startup_failures += 1
                 delay = min(5.0 * 2 ** (self._startup_failures - 1), self.backoff_max_s)
@@ -189,7 +241,8 @@ class MatlabSupervisor:
                 self._tail_console(20)
                 self._sleep(delay)
 
-            self._record_restart(reason, exit_code, entry, pending, republished)
+            self._record_restart(f"driver abandoned evaluation {eval_id} after timeout",
+                                 None, entry, pending, False)
 
     def _failure(self) -> Tuple[Optional[str], Optional[int]]:
         """Name the condition that calls for a relaunch, or return None."""

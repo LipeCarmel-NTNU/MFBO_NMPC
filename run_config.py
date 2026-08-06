@@ -112,15 +112,17 @@ CASES: Dict[str, CaseSpec] = {
     "baseline": CaseSpec(
         name="baseline",
         description=(
-            "Single-fidelity, runtime-unaware baseline. z is held at 1, so every "
-            "evaluation, in the design and in the optimisation, runs the full "
-            "10 h horizon and phi(1) = I_1(a, b) = 1 scales it by exactly one. The "
-            "remaining eleven components keep the bounds of case1, so Q, R_u and "
-            "R_du all take a diagonal value in [1e-3, 1e3]^3. It is the plain "
-            "qLogNEHVI counterpart of the multi-fidelity runs and shares their "
-            "budget and seeds."
+            "Single-fidelity, runtime-unaware counterpart of case2. z is held at "
+            "1, so every evaluation, in the design and in the optimisation, runs "
+            "the full 10 h horizon and phi(1) = I_1(a, b) = 1 scales it by exactly "
+            "one. It carries case2's reduced structure as well: q1 is held at 0, so "
+            "Q11 = 1, and the three input-magnitude exponents are disabled, so R_u "
+            "vanishes from the NMPC objective. The remaining seven components, "
+            "theta_p, theta_m, q2, q3 and the three R_du exponents, keep the "
+            "bounds of case1. It is the plain qLogNEHVI counterpart of case2 and "
+            "shares the budget and seeds."
         ),
-        fixed={0: 1.0},
+        fixed={0: 1.0, 3: 0.0, 6: DISABLED_EXPONENT, 7: DISABLED_EXPONENT, 8: DISABLED_EXPONENT},
     ),
 }
 
@@ -182,9 +184,26 @@ class RunConfig:
     poll_s: float = 1.0
     matlab_wait_s: float = 2.0
     max_wait_matlab_s: float = 120.0
-    eval_timeout_s: float = 6 * 3600.0
-    lock_stale_s: float = 6 * 3600.0
+    # A single-fidelity evaluation runs the full 10 h horizon over two cases and
+    # can take many hours. The cutoff is the wall time a driver waits for one row
+    # before it gives the evaluation up. lock_stale_s must not sit below it: a
+    # legitimately busy MATLAB holds matlab.lock for the whole evaluation, and a
+    # shorter staleness would treat that lock as abandoned and unlink it while the
+    # work is still running.
+    eval_timeout_s: float = 10 * 3600.0
+    lock_stale_s: float = 10 * 3600.0
     max_consecutive_failures: int = 5
+
+    # Timeout imputation. An evaluation that exceeds eval_timeout_s is recorded as
+    # a dominated point rather than skipped, so the optimiser does not propose it
+    # again. The penalty is per objective, just beyond the worst measured so far,
+    # so the imputed point is strictly dominated without introducing an outlier
+    # that would distort the objective GP or the reference point:
+    #     penalty_j = (1 + margin) * max_i observed_j
+    # The fallback applies only before any objective has been measured, which can
+    # happen if the very first design point times out.
+    timeout_penalty_margin: float = 0.1
+    timeout_penalty_fallback: float = 1e6
 
     def spec(self) -> CaseSpec:
         if self.case not in CASES:
