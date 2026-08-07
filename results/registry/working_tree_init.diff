@@ -1,0 +1,497 @@
+diff --git a/pipeline/driver.py b/pipeline/driver.py
+index c8064c8..9ab9c89 100644
+--- a/pipeline/driver.py
++++ b/pipeline/driver.py
+@@ -29,11 +29,12 @@ The driver measures the wall time of each step and stores it in the ledger.
+ 
+ from __future__ import annotations
+ 
++import math
+ import sys
+ import time
+ import traceback
+ from pathlib import Path
+-from typing import Dict, List, Optional, Tuple
++from typing import Callable, Dict, List, Optional, Tuple
+ 
+ import torch
+ from botorch.acquisition.acquisition import AcquisitionFunction
+@@ -51,6 +52,9 @@ from pipeline.matlab_interface import (
+     PHI_COEFFS_FILE,
+     RESULTS_DIR,
+     EvaluationFailed,
++    EvaluationTimedOut,
++    append_imputed_result,
++    append_timeout_failure,
+     failures_file,
+     out_dir,
+     read_results,
+@@ -76,6 +80,72 @@ DEVICE = torch.device("cpu")
+ DTYPE = torch.double
+ 
+ 
++# Set by run_supervised.py so the driver can have MATLAB relaunched when it gives
++# an evaluation up on a timeout. The hook receives the eval_id and is expected to
++# kill the wedged MATLAB, clear the pending request, and return once a fresh
++# server is polling. It stays None under manual run_pipeline, where the driver
++# cannot kill a MATLAB it did not start; a timeout there stops the run with
++# instructions instead, and the imputed point is already on disk for the resume.
++TIMEOUT_RESTART_HOOK: Optional[Callable[[int], None]] = None
++
++
++def _timeout_penalty(cfg: RunConfig, history_rows: List[Dict]) -> Tuple[float, float]:
++    """Per-objective penalty for a timed-out evaluation.
++
++    The value sits just beyond the worst measured cost on each objective, so the
++    imputed point is strictly dominated by everything seen so far without adding
++    an outlier that would distort the objective GP or the reference point. The
++    fallback applies only before any objective has been measured.
++    """
++    sse = [r["SSE"] for r in history_rows if math.isfinite(r.get("SSE", float("nan")))]
++    ssdu = [r["SSdU"] for r in history_rows if math.isfinite(r.get("SSdU", float("nan")))]
++    m = cfg.timeout_penalty_margin
++    pen_sse = (1.0 + m) * max(sse) if sse else cfg.timeout_penalty_fallback
++    pen_ssdu = (1.0 + m) * max(ssdu) if ssdu else cfg.timeout_penalty_fallback
++    return pen_sse, pen_ssdu
++
++
++def _impute_timeout(cfg: RunConfig, phase_key: str, phase_label: str, eval_id: int,
++                    theta_list: List[float], vintage: Optional[int],
++                    history_rows: List[Dict], timeout_s: float
++                    ) -> Tuple[Dict, float, float]:
++    """Record a timed-out evaluation as a dominated point, durably.
++
++    Writes a results row so the optimiser and every resumed run see the point in
++    the history and do not propose it again, and a failures row with the
++    'timeout' identifier so the point is identifiable afterwards. Returns the
++    in-memory row and the two penalty values. Runtime is set to the timeout, which
++    is a true lower bound on how long the evaluation ran and is the honest value
++    for the runtime GP of a runtime-aware case.
++    """
++    pen_sse, pen_ssdu = _timeout_penalty(cfg, history_rows)
++    z = min(max(float(theta_list[0]), 0.0), 1.0)
++    ts = time.strftime("%Y%m%d_%H%M%S")
++    row = {
++        "eval_id": int(eval_id),
++        "timestamp": ts,
++        "phase": phase_label,
++        "phi_vintage": float(vintage) if vintage is not None else float("nan"),
++        "z": z,
++        "SSE_measured": pen_sse, "SSdU_measured": pen_ssdu,
++        "phi_SSE": 1.0, "phi_SSdU": 1.0,
++        "SSE": pen_sse, "SSdU": pen_ssdu,
++        "J": pen_sse + 1e4 * pen_ssdu,
++        "runtime_s": float(timeout_s),
++        "n_flag_not_one": 0.0,
++        "phi_floored": 0.0,
++        "wall_total_s": float(timeout_s), "wall_cases_s": float(timeout_s),
++        "wall_phi_s": 0.0, "wall_build_s": 0.0, "wall_save_s": 0.0,
++        "theta": [float(v) for v in theta_list],
++    }
++    append_imputed_result(phase_key, row)
++    append_timeout_failure(
++        phase_key, eval_id, ts,
++        f"evaluation exceeded eval_timeout_s ({timeout_s / 3600:.1f} h); imputed "
++        f"SSE={pen_sse:.6g}, SSdU={pen_ssdu:.6g}", theta_list)
++    return row, pen_sse, pen_ssdu
++
++
+ # ---------------------------------------------------------------------------
+ # Search space helpers
+ # ---------------------------------------------------------------------------
+@@ -553,6 +623,35 @@ def run_initialization(cfg: RunConfig) -> None:
+             })
+             print(f"[init] design point {eval_id} failed; it is recorded and skipped")
+             continue
++        except EvaluationTimedOut:
++            restarted = TIMEOUT_RESTART_HOOK is not None
++            if restarted:
++                TIMEOUT_RESTART_HOOK(eval_id)
++            row, pen_sse, pen_ssdu = _impute_timeout(
++                cfg, "init", "DOE", eval_id, theta_list, None,
++                load_history([path_results]), cfg.eval_timeout_s)
++            registry.append_evaluation({
++                "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
++                "doe_index": eval_id, "theta": theta_list, "sent_at": sent_at,
++                "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
++                "phi_vintage_applied": None,
++                "imputed_timeout": True, "timeout_s": cfg.eval_timeout_s,
++                "penalty": {"SSE": pen_sse, "SSdU": pen_ssdu,
++                            "margin": cfg.timeout_penalty_margin},
++                "matlab_restarted": restarted, "result": row,
++            })
++            done.add(eval_id)
++            print(f"[init] design point {eval_id} timed out after "
++                  f"{cfg.eval_timeout_s / 3600:.1f} h; imputed SSE={pen_sse:.6g}, "
++                  f"SSdU={pen_ssdu:.6g}, "
++                  + ("MATLAB relaunched." if restarted
++                     else "MATLAB not driver-owned."))
++            if not restarted:
++                raise RuntimeError(
++                    f"design point {eval_id} timed out and no supervisor is "
++                    f"attached to relaunch MATLAB. The imputed point is on disk, so "
++                    f"restart MATLAB and rerun to resume, or use run_supervised.py.")
++            continue
+ 
+         wall_matlab = time.perf_counter() - t_wait
+         registry.append_evaluation({
+@@ -662,6 +761,42 @@ def run_bo(cfg: RunConfig) -> None:
+             })
+             print(f"[bo] iteration {bo_idx} failed in MATLAB; recorded and skipped")
+             continue
++        except EvaluationTimedOut:
++            # Kill the wedged MATLAB first, so it cannot later write a row for this
++            # eval_id, then record the imputed dominated point. The pending
++            # request still names this eval_id, so the hook relaunches the right
++            # server (main_BO) and clears the inbox before the next request.
++            restarted = TIMEOUT_RESTART_HOOK is not None
++            if restarted:
++                TIMEOUT_RESTART_HOOK(eval_id)
++            row, pen_sse, pen_ssdu = _impute_timeout(
++                cfg, "bo", "OPT", eval_id, theta_list, vintage,
++                init_rows + bo_rows, cfg.eval_timeout_s)
++            registry.append_evaluation({
++                "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
++                "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
++                "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
++                "phi_vintage_expected": vintage, "phi_vintage_applied": vintage,
++                "proposal": diagnostics, "acquisition_settings": _acq_settings(cfg),
++                "imputed_timeout": True, "timeout_s": cfg.eval_timeout_s,
++                "penalty": {"SSE": pen_sse, "SSdU": pen_ssdu,
++                            "margin": cfg.timeout_penalty_margin},
++                "matlab_restarted": restarted, "result": row,
++            })
++            bo_rows.append(row)
++            done.add(eval_id)
++            print(f"[bo] iteration {bo_idx} timed out after "
++                  f"{cfg.eval_timeout_s / 3600:.1f} h; imputed SSE={pen_sse:.6g}, "
++                  f"SSdU={pen_ssdu:.6g}, "
++                  + ("MATLAB relaunched." if restarted
++                     else "MATLAB not driver-owned."))
++            if not restarted:
++                raise RuntimeError(
++                    f"evaluation {eval_id} timed out and no supervisor is attached "
++                    f"to relaunch MATLAB. The imputed point is on disk, so restart "
++                    f"MATLAB and rerun to resume, or use run_supervised.py so "
++                    f"timeouts recover on their own.")
++            continue
+         wall_matlab = time.perf_counter() - t_wait
+ 
+         applied = int(row["phi_vintage"]) if row["phi_vintage"] == row["phi_vintage"] else None
+diff --git a/pipeline/matlab_interface.py b/pipeline/matlab_interface.py
+index 5acf40a..a9f4d47 100644
+--- a/pipeline/matlab_interface.py
++++ b/pipeline/matlab_interface.py
+@@ -305,11 +305,7 @@ def wait_for_result(eval_id: int, results_path: Path, failures_path: Path, *,
+ 
+         now = time.time()
+         if now - t0 > timeout_s:
+-            raise TimeoutError(
+-                f"evaluation {eval_id} produced neither a results row nor a failure "
+-                f"row within {timeout_s / 3600:.1f} h. Check that MATLAB is still "
+-                f"running main_initialization.m or main_BO.m."
+-            )
++            raise EvaluationTimedOut(eval_id, timeout_s)
+ 
+         # MATLAB holds the lock for as long as it works on a request. A missing
+         # lock while this function waits therefore means that MATLAB is not
+@@ -351,6 +347,92 @@ class EvaluationFailed(RuntimeError):
+         )
+ 
+ 
++class EvaluationTimedOut(RuntimeError):
++    """The evaluation produced no row within the timeout.
++
++    Distinct from EvaluationFailed, which is a failure MATLAB reported and wrote a
++    row for. A timeout means MATLAB never answered: it is still working past the
++    cutoff, or it died without writing. The driver imputes a dominated point for
++    the candidate so the optimiser does not propose it again, and it has the
++    supervisor relaunch MATLAB so the next request is served by a fresh process.
++    """
++
++    def __init__(self, eval_id: int, timeout_s: float):
++        self.eval_id = eval_id
++        self.timeout_s = timeout_s
++        super().__init__(
++            f"evaluation {eval_id} produced neither a results row nor a failure "
++            f"row within {timeout_s / 3600:.1f} h."
++        )
++
++
++def _fmt17(v) -> str:
++    """Format a number as %.17g, matching the MATLAB CSV writers."""
++    return f"{float(v):.17g}"
++
++
++def append_imputed_result(phase: str, row: Dict) -> None:
++    """Append a driver-imputed results row, e.g. for a timed-out evaluation.
++
++    MATLAB writes results.csv for a measured evaluation. When the driver gives an
++    evaluation up on a timeout it records the point itself, so the optimiser sees
++    it in the history and does not propose it again, and so a resumed run finds it
++    on disk. The row matches RESULTS_COLUMNS exactly, so read_results parses it
++    like any measured row. `row` holds every non-theta column by name plus
++    `theta`, a length-THETA_LEN sequence. The append is one buffered write,
++    flushed and fsynced, so a concurrent reader sees a whole row or none.
++    """
++    path = results_file(phase)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    if not path.exists():
++        with path.open("w", encoding="ascii", newline="") as fh:
++            fh.write(",".join(RESULTS_COLUMNS) + "\n")
++
++    cells: List[str] = []
++    for col in RESULTS_COLUMNS:
++        if col.startswith("theta_"):
++            continue
++        if col == "eval_id":
++            cells.append(str(int(row["eval_id"])))
++        elif col in ("timestamp", "phase"):
++            cells.append(str(row[col]))
++        else:
++            cells.append(_fmt17(row[col]))
++    cells.extend(_fmt17(v) for v in row["theta"])
++
++    with path.open("a", encoding="ascii", newline="") as fh:
++        fh.write(",".join(cells) + "\n")
++        fh.flush()
++        os.fsync(fh.fileno())
++
++
++def append_timeout_failure(phase: str, eval_id: int, timestamp: str,
++                           message: str, theta: Sequence[float]) -> None:
++    """Record a timed-out evaluation in the failures file, identifier 'timeout'.
++
++    This is what makes a timed-out point identifiable after the fact: failures.csv
++    lists it with the 'timeout' identifier, next to the ledger entry that carries
++    the imputed penalty. The format matches dependencies/io/append_failure_row.m,
++    the twelve theta columns included, so read_failures parses either writer.
++    """
++    path = failures_file(phase)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    theta = list(theta)
++    if not path.exists():
++        header = "eval_id,timestamp,identifier,message" + "".join(
++            f",theta_{k}" for k in range(1, len(theta) + 1))
++        with path.open("w", encoding="ascii", newline="") as fh:
++            fh.write(header + "\n")
++
++    flat = " ".join(str(message).split()).replace('"', "''")
++    cells = [str(int(eval_id)), str(timestamp), "timeout", f'"{flat}"']
++    cells.extend(_fmt17(v) for v in theta)
++    with path.open("a", encoding="ascii", newline="") as fh:
++        fh.write(",".join(cells) + "\n")
++        fh.flush()
++        os.fsync(fh.fileno())
++
++
+ def wait_for_matlab_ready(results_path: Path, max_wait_s: float = 120.0,
+                           poll_s: float = 2.0) -> None:
+     """Wait for MATLAB to create the results file at startup."""
+diff --git a/pipeline/matlab_supervisor.py b/pipeline/matlab_supervisor.py
+index a939c49..6299553 100644
+--- a/pipeline/matlab_supervisor.py
++++ b/pipeline/matlab_supervisor.py
+@@ -99,6 +99,10 @@ class MatlabSupervisor:
+         self._startup_failures = 0
+         self._lock_absent_since: Optional[float] = None
+         self.restarts = 0
++        # Serialises the process lifecycle between the monitor thread and a
++        # driver-initiated abandon(). Both kill and relaunch MATLAB, and they must
++        # not interleave.
++        self._proc_lock = threading.Lock()
+ 
+     # ------------------------------------------------------------------
+     # Public interface
+@@ -154,33 +158,81 @@ class MatlabSupervisor:
+ 
+     def _monitor(self) -> None:
+         while not self._stop.wait(self.poll_s):
+-            reason, exit_code = self._failure()
+-            if reason is None:
+-                continue
++            # The lock keeps this relaunch from interleaving with a driver
++            # abandon(), which kills and relaunches the same process.
++            with self._proc_lock:
++                reason, exit_code = self._failure()
++                if reason is None:
++                    continue
++                if self._stop.is_set():
++                    return
++
++                pending = self._pending_request()
++                saved = self._read_theta_raw() if pending else None
++                entry = ENTRY_FOR_PHASE.get(pending[1], self.entry) if pending else self.entry
++
++                self.restarts += 1
++                self._log(f"restart {self.restarts}: {reason}. "
++                          f"Relaunching {entry}"
++                          + (f" for pending evaluation {pending[0]}." if pending else "."))
++
++                self._terminate()
++                # acquire_lock warns about a lock it did not create, and the driver
++                # treats one as a busy server. Neither is true after a kill.
++                mi.LOCK_FILE.unlink(missing_ok=True)
++                self._lock_absent_since = None
++
++                republished = False
++                while not self._stop.is_set():
++                    self._launch(entry)
++                    if self._await_ready():
++                        self._startup_failures = 0
++                        republished = self._republish(saved, pending)
++                        break
++                    self._startup_failures += 1
++                    delay = min(5.0 * 2 ** (self._startup_failures - 1), self.backoff_max_s)
++                    self._log(f"the relaunch did not reach the serve loop "
++                              f"({self._startup_failures} in a row). Retrying in {delay:.0f} s.")
++                    self._tail_console(20)
++                    self._sleep(delay)
++
++                self._record_restart(reason, exit_code, entry, pending, republished)
++
++    def abandon(self, eval_id: int) -> None:
++        """Kill the server the driver gave up on after a timeout, and relaunch it.
++
++        The server is still inside that evaluation and holds matlab.lock, so the
++        driver cannot acquire the lock to send the next request. This terminates
++        the process, removes the pending request so the fresh server does not read
++        the abandoned theta and run it again, and starts a new server. It returns
++        once that server is polling. The phase of the pending request selects the
++        entry point, so a timeout in the optimisation phase relaunches main_BO.
++
++        Runs under the same lock as the monitor, so the two never relaunch at once.
++        """
++        with self._proc_lock:
+             if self._stop.is_set():
+                 return
+ 
+             pending = self._pending_request()
+-            saved = self._read_theta_raw() if pending else None
+             entry = ENTRY_FOR_PHASE.get(pending[1], self.entry) if pending else self.entry
+ 
+             self.restarts += 1
+-            self._log(f"restart {self.restarts}: {reason}. "
+-                      f"Relaunching {entry}"
+-                      + (f" for pending evaluation {pending[0]}." if pending else "."))
++            self._log(f"restart {self.restarts}: driver abandoned evaluation "
++                      f"{eval_id} after a timeout. Relaunching {entry}.")
+ 
++            # Remove the request before the relaunch, so the fresh server does not
++            # serve the abandoned theta again. The driver has already recorded, or
++            # is about to record, the imputed point for this eval_id.
++            mi.THETA_FILE.unlink(missing_ok=True)
+             self._terminate()
+-            # acquire_lock warns about a lock it did not create, and the driver
+-            # treats one as a busy server. Neither is true after a kill.
+             mi.LOCK_FILE.unlink(missing_ok=True)
+             self._lock_absent_since = None
+ 
+-            republished = False
+             while not self._stop.is_set():
+                 self._launch(entry)
+                 if self._await_ready():
+                     self._startup_failures = 0
+-                    republished = self._republish(saved, pending)
+                     break
+                 self._startup_failures += 1
+                 delay = min(5.0 * 2 ** (self._startup_failures - 1), self.backoff_max_s)
+@@ -189,7 +241,8 @@ class MatlabSupervisor:
+                 self._tail_console(20)
+                 self._sleep(delay)
+ 
+-            self._record_restart(reason, exit_code, entry, pending, republished)
++            self._record_restart(f"driver abandoned evaluation {eval_id} after timeout",
++                                 None, entry, pending, False)
+ 
+     def _failure(self) -> Tuple[Optional[str], Optional[int]]:
+         """Name the condition that calls for a relaunch, or return None."""
+diff --git a/run_config.py b/run_config.py
+index 8d2ecbf..8456109 100644
+--- a/run_config.py
++++ b/run_config.py
+@@ -112,15 +112,17 @@ CASES: Dict[str, CaseSpec] = {
+     "baseline": CaseSpec(
+         name="baseline",
+         description=(
+-            "Single-fidelity, runtime-unaware baseline. z is held at 1, so every "
+-            "evaluation, in the design and in the optimisation, runs the full "
+-            "10 h horizon and phi(1) = I_1(a, b) = 1 scales it by exactly one. The "
+-            "remaining eleven components keep the bounds of case1, so Q, R_u and "
+-            "R_du all take a diagonal value in [1e-3, 1e3]^3. It is the plain "
+-            "qLogNEHVI counterpart of the multi-fidelity runs and shares their "
+-            "budget and seeds."
++            "Single-fidelity, runtime-unaware counterpart of case2. z is held at "
++            "1, so every evaluation, in the design and in the optimisation, runs "
++            "the full 10 h horizon and phi(1) = I_1(a, b) = 1 scales it by exactly "
++            "one. It carries case2's reduced structure as well: q1 is held at 0, so "
++            "Q11 = 1, and the three input-magnitude exponents are disabled, so R_u "
++            "vanishes from the NMPC objective. The remaining seven components, "
++            "theta_p, theta_m, q2, q3 and the three R_du exponents, keep the "
++            "bounds of case1. It is the plain qLogNEHVI counterpart of case2 and "
++            "shares the budget and seeds."
+         ),
+-        fixed={0: 1.0},
++        fixed={0: 1.0, 3: 0.0, 6: DISABLED_EXPONENT, 7: DISABLED_EXPONENT, 8: DISABLED_EXPONENT},
+     ),
+ }
+ 
+@@ -182,10 +184,27 @@ class RunConfig:
+     poll_s: float = 1.0
+     matlab_wait_s: float = 2.0
+     max_wait_matlab_s: float = 120.0
+-    eval_timeout_s: float = 6 * 3600.0
+-    lock_stale_s: float = 6 * 3600.0
++    # A single-fidelity evaluation runs the full 10 h horizon over two cases and
++    # can take many hours. The cutoff is the wall time a driver waits for one row
++    # before it gives the evaluation up. lock_stale_s must not sit below it: a
++    # legitimately busy MATLAB holds matlab.lock for the whole evaluation, and a
++    # shorter staleness would treat that lock as abandoned and unlink it while the
++    # work is still running.
++    eval_timeout_s: float = 10 * 3600.0
++    lock_stale_s: float = 10 * 3600.0
+     max_consecutive_failures: int = 5
+ 
++    # Timeout imputation. An evaluation that exceeds eval_timeout_s is recorded as
++    # a dominated point rather than skipped, so the optimiser does not propose it
++    # again. The penalty is per objective, just beyond the worst measured so far,
++    # so the imputed point is strictly dominated without introducing an outlier
++    # that would distort the objective GP or the reference point:
++    #     penalty_j = (1 + margin) * max_i observed_j
++    # The fallback applies only before any objective has been measured, which can
++    # happen if the very first design point times out.
++    timeout_penalty_margin: float = 0.1
++    timeout_penalty_fallback: float = 1e6
++
+     def spec(self) -> CaseSpec:
+         if self.case not in CASES:
+             raise ValueError(
+diff --git a/run_supervised.py b/run_supervised.py
+index 4a7ac60..b3a8c87 100644
+--- a/run_supervised.py
++++ b/run_supervised.py
+@@ -46,6 +46,7 @@ import sys
+ 
+ import run_pipeline
+ from pipeline import case_archive
++from pipeline import driver
+ from pipeline.matlab_supervisor import CONSOLE_LOG, MatlabSupervisor
+ from run_config import CASES
+ 
+@@ -126,10 +127,16 @@ def run_case(case: str, args) -> int:
+     # before then: main_initialization deletes the inbox on startup.
+     supervisor.start()
+     supervisor.watch()
++    # The driver calls this when an evaluation exceeds its timeout: it kills the
++    # wedged MATLAB and relaunches it so the run continues. It is set only while a
++    # supervisor is attached, so a manual run_pipeline leaves it None and stops
++    # with instructions instead.
++    driver.TIMEOUT_RESTART_HOOK = supervisor.abandon
+     try:
+         code = run_pipeline.main(["--case", case, "--phase", args.phase,
+                                   "--pause", str(args.pause)])
+     finally:
++        driver.TIMEOUT_RESTART_HOOK = None
+         supervisor.stop()
+ 
+     if supervisor.restarts:
