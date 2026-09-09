@@ -176,34 +176,14 @@
     "platform": "Linux-5.14.0-611.55.1.el9_7.0.3.x86_64-x86_64-with-glibc2.34",
     "processor": "x86_64",
     "python": "3.13.12 | packaged by conda-forge | (main, Feb  5 2026, 05:53:46) [GCC 14.3.0]",
-    "started_at": "2026-08-06T15:12:27+0200",
-    "started_at_epoch": 1786021947.6081035,
+    "started_at": "2026-09-07T12:32:26+0200",
+    "started_at_epoch": 1788777146.774564,
     "torch_device": "cpu",
     "torch_num_threads": 32
   },
-  "phase": "init",
+  "phase": "bo",
   "registry_version": 2,
   "resumed": [
-    {
-      "at": "2026-08-07T10:24:02+0200",
-      "git_commit": "c4ce551e93778730880346026f0bec92b3590baf",
-      "git_dirty": true
-    },
-    {
-      "at": "2026-08-07T10:33:38+0200",
-      "git_commit": "c4ce551e93778730880346026f0bec92b3590baf",
-      "git_dirty": true
-    },
-    {
-      "at": "2026-08-07T10:51:54+0200",
-      "git_commit": "c4ce551e93778730880346026f0bec92b3590baf",
-      "git_dirty": true
-    },
-    {
-      "at": "2026-09-07T12:32:26+0200",
-      "git_commit": "c4ce551e93778730880346026f0bec92b3590baf",
-      "git_dirty": true
-    },
     {
       "at": "2026-09-08T08:37:12+0200",
       "git_commit": "c4ce551e93778730880346026f0bec92b3590baf",

@@ -3,3 +3,7 @@ timestamp,attempt,reason,exit_code,entry,pending_eval_id,republished
 20260806_214538,2,the MATLAB process exited with code -9,-9,main_initialization,10,1
 20260807_093733,3,the MATLAB process exited with code -9,-9,main_initialization,14,0
 20260807_112643,1,the MATLAB process exited with code -9,-9,main_initialization,14,1
+20260907_152944,1,the MATLAB process exited with code -9,-9,main_initialization,20,1
+20260908_143359,1,the MATLAB process exited with code -9,-9,main_BO,27,0
+20260909_003728,1,the MATLAB process exited with code -9,-9,main_BO,31,0
+20260909_055726,2,the MATLAB process exited with code -9,-9,main_BO,34,0
