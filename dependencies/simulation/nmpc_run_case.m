@@ -17,11 +17,15 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
 %                   that recomputing a terminal matrix is not counted as solve
 %                   time. sp_state carries the hook's own state between steps
 %                   and is stored in case_out.sp_state.
-%     checkpoint_fn function handle called as checkpoint_fn(case_state, i) on
-%                   the hour and on the last step, for long runs that must
-%                   survive an interruption.
+%     checkpoint_fn function handle called as checkpoint_fn(case_state, i)
+%                   every ckpt_every_s seconds and on the last step, for long
+%                   runs that must survive an interruption. The seconds it
+%                   spends are returned in case_out.wall_ckpt_s and are not in
+%                   case_out.runtime_s.
 %     resume        state returned in an earlier case_state, to continue a
-%                   partially completed case.
+%                   partially completed case. It carries the solver state,
+%                   which is written back into NMPC, so the resumed steps warm
+%                   start exactly as they would have without the interruption.
 %     verbosity     "full" prints the measurement, the action and a progress
 %                   estimate; "control" prints the action only; "quiet"
 %                   prints nothing.
@@ -75,6 +79,14 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
         if isfield(r, "RUNTIME"), RUNTIME = double(r.RUNTIME); end
         if isfield(r, "EXITFLAG"), EXITFLAG = double(r.EXITFLAG); end
         if isfield(r, "sp_state"), sp_state = r.sp_state; end
+        % latest_wopt and latest_flag are the whole per-step solver state, and
+        % solve() branches on both: a negative flag selects a cold guess and
+        % the infeasibility fallback. NMPC is a handle object, so writing them
+        % back here resumes the case from the state it had reached. Without
+        % this the step after the interruption solves cold, which changes the
+        % trajectory and inflates its runtime.
+        if isfield(r, "wopt"), NMPC.latest_wopt = r.wopt; end
+        if isfield(r, "flag"), NMPC.latest_flag = r.flag; end
     end
 
     has_setpoint_fn = ~isempty(opts.setpoint_fn);
@@ -85,6 +97,14 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
     % the loop below.
     max_flag_log = 20;
     n_flagged = 0;
+
+    % Checkpoints go on the wall clock and not on simulated time, so an
+    % interruption costs at most this much work whatever the fidelity. The
+    % whole hour of simulated time that this used to fire on never came around
+    % at all in a run shorter than an hour.
+    ckpt_every_s = 600;
+    ckpt_timer = tic;
+    wall_ckpt_s = 0;
 
     %% Control loop
     for i = i_start:N
@@ -154,7 +174,9 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
                 case_id, 100*progress, elapsed_min, total_min, total_min - elapsed_min);
         end
 
-        if has_checkpoint_fn && is_checkpoint_step(t_now, i, N)
+        % The test and the write sit after RUNTIME(i) is recorded, so neither
+        % enters the per-step time that case_out.runtime_s sums.
+        if has_checkpoint_fn && (i == N || toc(ckpt_timer) >= ckpt_every_s)
             case_state = struct();
             case_state.i_next = min(i + 1, N + 1);
             case_state.uk = uk;
@@ -166,7 +188,12 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
             case_state.RUNTIME = RUNTIME;
             case_state.EXITFLAG = EXITFLAG;
             case_state.sp_state = sp_state;
+            case_state.wopt = NMPC.latest_wopt;
+            case_state.flag = NMPC.latest_flag;
+            t_ck = tic;
             opts.checkpoint_fn(case_state, i);
+            wall_ckpt_s = wall_ckpt_s + toc(t_ck);
+            ckpt_timer = tic;
         end
     end
 
@@ -182,15 +209,9 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
 
     case_out = finalize_case(base, x0, case_id, T, noise, Y, Y_meas, Ysp, U, RUNTIME, EXITFLAG, N);
 
+    % Wall time this case spent on checkpoints, for the caller to subtract.
+    case_out.wall_ckpt_s = wall_ckpt_s;
+
     % Whatever the setpoint hook accumulated, for callers that log a schedule.
     case_out.sp_state = sp_state;
-end
-
-function tf = is_checkpoint_step(t_h, i, N)
-%IS_CHECKPOINT_STEP True on the last step and on every whole hour after t = 0.
-    if i == N
-        tf = true;
-        return
-    end
-    tf = abs(t_h - round(t_h)) < 1e-12 && t_h > 0;
 end

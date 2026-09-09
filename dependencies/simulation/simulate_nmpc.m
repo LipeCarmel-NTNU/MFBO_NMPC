@@ -24,7 +24,11 @@ function out = simulate_nmpc(base, theta, opts)
 %     under a later fit without a new simulation.
 %
 %   Timing
-%     out.wall_s holds the wall time of each stage of this function.
+%     out.wall_s holds the wall time of each stage of this function. The
+%     seconds spent writing and reading checkpoints are not part of it: they
+%     are subtracted from total and cases and kept in out.wall_s.checkpoint.
+%     A resumed evaluation reports the wall time of its last segment only,
+%     while out.runtime_s covers every segment.
 %
 %   Name-value options:
 %     horizon        "fidelity" (default) or "full"
@@ -37,6 +41,11 @@ function out = simulate_nmpc(base, theta, opts)
 %     run_id         identifier for the log and for checkpoint validation
 %     log_path       SIMULATIONS_LOG.txt path; empty disables flag logging
 %     checkpoint_path  partial .mat path; empty disables checkpoint and resume
+%     checkpoint_id  key that ties a checkpoint to this evaluation. Defaults to
+%                    run_id. A caller whose run_id is a fresh timestamp on
+%                    every attempt cannot recognise its own file after a
+%                    restart, so it passes something stable, such as the
+%                    eval_id.
 %     max_iter       fmincon MaxIterations (default base.optimizer_max_iter)
 
     arguments
@@ -52,10 +61,22 @@ function out = simulate_nmpc(base, theta, opts)
         opts.run_id (1,1) string = ""
         opts.log_path (1,1) string = ""
         opts.checkpoint_path (1,1) string = ""
+        opts.checkpoint_id (1,1) string = ""
         opts.max_iter double = []
     end
 
     t_call = tic;
+
+    % Checkpoint I/O is not work this function was asked to do, so the load and
+    % the writes are timed and taken back out of wall_s at the end.
+    wall_ckpt_load_s = 0;
+    wall_ckpt_save_s = 0;
+
+    ckpt_id = opts.checkpoint_id;
+    if strlength(ckpt_id) == 0
+        ckpt_id = opts.run_id;
+    end
+
     cfg = decode_theta(theta, base.nx, base.nu);
     if opts.verbosity ~= "quiet"
         disp('Run cfg:')
@@ -145,7 +166,9 @@ function out = simulate_nmpc(base, theta, opts)
     start_case = 1;
     resume_state = struct();
     if strlength(opts.checkpoint_path) > 0
-        partial = load_partial_state(opts.checkpoint_path, opts.run_id);
+        t_ck = tic;
+        partial = load_partial_state(opts.checkpoint_path, ckpt_id);
+        wall_ckpt_load_s = wall_ckpt_load_s + toc(t_ck);
         if partial.valid
             out = partial.out;
             start_case = partial.case_id;
@@ -155,7 +178,13 @@ function out = simulate_nmpc(base, theta, opts)
     end
 
     if start_case > n_cases
+        % Every case was already done when the run was interrupted, so nothing
+        % is simulated. wall_s then covers this recovery and not the work,
+        % which is the undercount that runtime_consistency.m flags as a
+        % negative t_total - t_nmpc gap.
         out = aggregate_cases(out);
+        out.wall_s.checkpoint = wall_ckpt_load_s;
+        out.wall_s.total = toc(t_call) - wall_ckpt_load_s;
         return
     end
 
@@ -169,9 +198,13 @@ function out = simulate_nmpc(base, theta, opts)
         end
 
         if strlength(opts.checkpoint_path) > 0
-            checkpoint_fn = @(case_state, i) save_case_checkpoint( ...
-                opts.checkpoint_path, opts.run_id, out, case_id, case_state, ...
-                base, opts.x0(case_id, :), i);
+            % out carries the finished cases; case_state carries the one in
+            % progress. The costs of the case in progress are not summarised
+            % into out: the resume rebuilds that case from case_state, and a
+            % mid-case summary has fewer fields than a finished case, which
+            % cannot share a struct array with it.
+            checkpoint_fn = @(case_state, i) save_partial_state( ...
+                opts.checkpoint_path, ckpt_id, out, case_id, case_state);
         else
             checkpoint_fn = [];
         end
@@ -190,6 +223,7 @@ function out = simulate_nmpc(base, theta, opts)
         case_out.SSE = case_out.SSE_measured / phi_SSE;
         case_out.SSdU = case_out.SSdU_measured / phi_SSdU;
         case_out.cost_total = case_out.SSE + 1e4 * case_out.SSdU;
+        wall_ckpt_save_s = wall_ckpt_save_s + case_out.wall_ckpt_s;
 
         if isempty(out.case)
             out.case = case_out;
@@ -200,19 +234,27 @@ function out = simulate_nmpc(base, theta, opts)
         out = aggregate_cases(out);
 
         if strlength(opts.checkpoint_path) > 0
-            save_partial_state(opts.checkpoint_path, opts.run_id, out, case_id + 1, struct());
+            % i_next = 1 starts the next case at its first step, and the
+            % solver state rides along because NMPC is shared across the
+            % cases: an uninterrupted run enters case k+1 warm from case k.
+            t_ck = tic;
+            save_partial_state(opts.checkpoint_path, ckpt_id, out, case_id + 1, ...
+                struct("i_next", 1, "wopt", NMPC.latest_wopt, "flag", NMPC.latest_flag));
+            wall_ckpt_save_s = wall_ckpt_save_s + toc(t_ck);
         end
     end
 
     out = aggregate_cases(out);
-    out.wall_s.cases = toc(t_cases);
+    % The load runs before t_cases starts, so only the writes come out of cases.
+    out.wall_s.cases = toc(t_cases) - wall_ckpt_save_s;
 
     % Flush any line that the logger had to buffer because the file was busy.
     if strlength(opts.log_path) > 0
         log_simulation_event(opts.log_path);
     end
 
-    out.wall_s.total = toc(t_call);
+    out.wall_s.checkpoint = wall_ckpt_load_s + wall_ckpt_save_s;
+    out.wall_s.total = toc(t_call) - out.wall_s.checkpoint;
 end
 
 function out = aggregate_cases(out)
@@ -254,21 +296,6 @@ function out = aggregate_cases(out)
         if isfinite(m_SSdU), out.SSdU_measured = out.SSdU_measured + m_SSdU; end
     end
     out.J = out.SSE + 1e4 * out.SSdU;
-end
-
-function save_case_checkpoint(path, run_id, out, case_id, case_state, base, x0, i)
-%SAVE_CASE_CHECKPOINT Store a mid-case checkpoint with costs summarised so far.
-    partial_case = finalize_case(base, x0, case_id, base.T(1:size(case_state.Y,1)), ...
-        base.noise(1:size(case_state.Y,1), :), case_state.Y, case_state.Y_meas, ...
-        case_state.Ysp, case_state.U, case_state.RUNTIME, case_state.EXITFLAG, i);
-
-    if ~isfield(out, "case") || isempty(out.case)
-        out.case = partial_case;
-    else
-        out.case(case_id) = partial_case;
-    end
-    out = aggregate_cases(out);
-    save_partial_state(path, run_id, out, case_id, case_state);
 end
 
 function save_partial_state(path, run_id, out, case_id, case_state)

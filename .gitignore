@@ -15,3 +15,6 @@
 /results/logs/*.log
 /results_archive
 slurm_mfbo_*.out
+
+# Partial state of the evaluation in flight
+checkpoints/

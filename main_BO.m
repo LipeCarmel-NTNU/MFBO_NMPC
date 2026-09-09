@@ -114,12 +114,22 @@ function run_and_log(cfg_run, base, req)
 
     ts = timestamp_compact();
 
+    % Partial state of this evaluation, so a node that goes down costs one
+    % checkpoint interval instead of the whole evaluation. The file is keyed on
+    % the eval_id and not on ts, because a restart gives the same request a new
+    % timestamp and the resume has to find the file the earlier attempt wrote.
+    ckpt_dir = fullfile(cfg_run.out_dir, "checkpoints");
+    ensure_dir(ckpt_dir);
+    ckpt_path = fullfile(ckpt_dir, sprintf("eval_%d.mat", req.eval_id));
+
     out = simulate_nmpc(base, req.theta, ...
         horizon = "fidelity", ...
         extrapolate = true, ...
         terminal_cost = "lqr", ...
         run_id = string(ts), ...
-        log_path = cfg_run.log_path);
+        log_path = cfg_run.log_path, ...
+        checkpoint_path = ckpt_path, ...
+        checkpoint_id = sprintf("eval_%d", req.eval_id));
 
     out.wall_s.phi_load = wall_load_s;
 
@@ -133,6 +143,10 @@ function run_and_log(cfg_run, base, req)
 
     append_results_row(cfg_run.results_csv, req.eval_id, ts, "OPT", out, ...
         req.theta, wall_save_s);
+
+    % The row is the record that the evaluation finished, so the checkpoint
+    % goes only once it is on disk.
+    delete_if_exists(ckpt_path);
 
     fprintf(['  OPT eval %d [phi v%d]: SSE=%.6g, SSdU=%.6g, z=%.4f, ' ...
              'solver=%.1fs, wall=%.1fs (save %.2fs)\n'], ...
