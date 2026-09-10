@@ -32,11 +32,20 @@ COLUMNS = [
 ]
 
 
+# A campaign folder holds the BO rows; "init" is the design-of-experiments
+# subfolder of a campaign and has a results.csv of its own, so a run whose
+# campaign sits at the root of results/ would otherwise be discovered twice:
+# once as the campaign and once as its own DOE phase.
+NOT_A_CASE = {"init"}
+
+
 def discover_cases(results_root):
     """Every subfolder of results_root that holds a results.csv, natural-sorted."""
     names = []
     for name in sorted(os.listdir(results_root)):
         d = os.path.join(results_root, name)
+        if name in NOT_A_CASE:
+            continue
         if os.path.isdir(d) and os.path.exists(os.path.join(d, "results.csv")):
             names.append(name)
 

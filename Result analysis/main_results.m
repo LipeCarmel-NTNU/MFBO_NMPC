@@ -81,6 +81,7 @@ function steps = local_steps()
       'runtime_iteration'       'figures'  @gen_fig_runtime_iteration          'per-evaluation runtime and z over iterations'
       'pareto_combined'         'figures'  @gen_fig_pareto_combined            'pooled samples and per-case frontiers'
       'runtime_cumulative'      'figures'  @gen_fig_runtime_cumulative         'cumulative runtime per case'
+      'best_so_far'             'figures'  @gen_fig_best_so_far                'running best of each objective over the BO iterations'
       'refined_frontier'        'figures'  @gen_fig_refined_frontier           'low-fidelity frontier vs its z=1 refinement (guarded)'
       'runtime_consistency'     'figures'  @gen_fig_runtime_consistency        'solve time vs wall time, gap, failed solves'
       'surrogate_coefficients'  'figures'  @gen_fig_surrogate_coefficients     'fitted a, b, lambda per vintage'

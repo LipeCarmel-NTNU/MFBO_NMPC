@@ -5,6 +5,7 @@ function gen_fig_runtime_iteration(ctx)
 %   Paper:  fig:runtime_iter. Left axis t_iter in hours, right axis z, dashed
 %   line at the DOE cutoff. DOE and BO run on one iteration axis per case.
 F = ra_require(ctx, "frontier");
+F = ra_select_cases(F, "mf");   % baseline is shown only in the combined frontier and the cumulative runtime
 E = F.E; D = F.D; nCases = F.nCases;
 fontSize = ctx.fontSize; plotColors = ctx.plotColors; accentColor = ctx.accentColor;
 graphicsDir = ctx.graphicsDir;

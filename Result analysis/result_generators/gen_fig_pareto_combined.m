@@ -6,7 +6,7 @@ function gen_fig_pareto_combined(ctx)
 %
 %   The multi-fidelity cases are pooled and their merged frontier is drawn in
 %   the accent colour, exactly as before. A single-fidelity baseline case is
-%   NOT pooled: it is overlaid as red crosses, its frontier points larger.
+%   NOT pooled: it is overlaid as orange crosses, its frontier points larger.
 %   Keeping it out of the pooling means the merged frontier stays the
 %   published two-case result and the figure gains the comparison without
 %   restating it, and it is also the honest call while the baseline has fewer
@@ -30,18 +30,14 @@ function gen_fig_pareto_combined(ctx)
             ctx.caseMarkers(mf), ctx.accentColor, xLimAll, yLimAll);
     end
 
-    % Red crosses, not a Wong hue: this series is deliberately outside the
-    % case palette because it is a different kind of run, not a third case.
-    % good_colors.m C.red. Swap for nature_methods_colors().Vermillion to keep
-    % the whole figure inside COLOR_SCHEME.md's colourblind-safe set.
-    baselineColor = [255, 31, 91] / 255;
+    baselineColor = ctx.baselineColor;   % Wong Vermillion, see ra_context
     for k = base(:)'
         Tb = F.E{k};
         scatter(ax, double(Tb.SSdU), double(Tb.SSE), 70, baselineColor, 'x', ...
             'LineWidth', 1.3, 'DisplayName', F.caseLabels(k) + " samples");
         scatter(ax, double(F.Tp{k}.SSdU), double(F.Tp{k}.SSE), 200, baselineColor, 'x', ...
             'LineWidth', 2.4, 'DisplayName', F.caseLabels(k) + " frontier");
-        fprintf(['%s overlaid as red crosses: %d samples, %d on its own frontier. ' ...
+        fprintf(['%s overlaid as orange crosses: %d samples, %d on its own frontier. ' ...
                  'It is excluded from the merged frontier.\n'], ...
             F.caseLabels(k), height(Tb), height(F.Tp{k}));
     end

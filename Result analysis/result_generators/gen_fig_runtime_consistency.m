@@ -7,6 +7,7 @@ function gen_fig_runtime_consistency(ctx)
 %   failed solves. A resumed evaluation reports wall time for its last segment
 %   only, so it falls below the reference in a and negative in b.
 T = ra_require(ctx, "timeline");
+T = ra_select_cases(T, "mf");   % baseline is shown only in the combined frontier and the cumulative runtime
 A = T.A; doeCount = T.doeCount; nCases = T.nCases; caseLabels = T.caseLabels;
 fontSize = ctx.fontSize; plotColors = ctx.plotColors; accentColor = ctx.accentColor;
 caseMarkers = ctx.caseMarkers; graphicsDir = ctx.graphicsDir;

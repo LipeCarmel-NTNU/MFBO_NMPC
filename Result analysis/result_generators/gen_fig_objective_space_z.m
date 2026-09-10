@@ -6,6 +6,7 @@ function gen_fig_objective_space_z(ctx)
 %   case frontier as open accent rings over a continuum guide.
 %   A single-fidelity case comes out uniformly at the top of the colorbar.
 F = ra_require(ctx, "frontier");
+F = ra_select_cases(F, "mf");   % baseline is shown only in the combined frontier and the cumulative runtime
 E = F.E; isPareto = F.isPareto; nCases = F.nCases;
 xLimAll = F.xLimAll; yLimAll = F.yLimAll; zLo = F.zLo;
 fontSize = ctx.fontSize; seqMap = ctx.seqMap; accentColor = ctx.accentColor;

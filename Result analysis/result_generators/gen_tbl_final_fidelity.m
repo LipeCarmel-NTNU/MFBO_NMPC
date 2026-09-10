@@ -6,5 +6,6 @@ function gen_tbl_final_fidelity(ctx)
 %   re-evaluation outputs on disk.
 
     F = ra_require(ctx, "frontier");
+    F = ra_select_cases(F, "mf");   % nothing to refine in a run already at z = 1
     report_final_frontier_f1_metrics(F.E, F.caseNames, ctx.repo_root, ctx.numericalDir);
 end

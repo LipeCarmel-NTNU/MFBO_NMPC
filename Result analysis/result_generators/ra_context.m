@@ -42,6 +42,11 @@ function ctx = ra_context()
     NC = nature_methods_colors();
     ctx.plotColors  = [NC.Blue; NC.BluishGreen; NC.Vermillion];
     ctx.accentColor = NC.ReddishPurple;
+    % The single-fidelity baseline is drawn in Wong Vermillion wherever it
+    % appears, deliberately outside the case sequence: it is a reference run,
+    % not a third case. Wong Orange (#E69F00) is the lighter amber and sits at
+    % 2.19:1 on a white ground, too faint for unlabelled markers.
+    ctx.baselineColor = NC.Vermillion;
     ctx.caseMarkers = ["o", "^", "d"];
     ctx.caseLines   = ["-", "-.", ":"];
     ctx.seqMap      = load_navia_colormap(256);

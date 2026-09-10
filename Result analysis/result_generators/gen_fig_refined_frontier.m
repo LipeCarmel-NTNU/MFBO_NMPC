@@ -10,6 +10,7 @@ function gen_fig_refined_frontier(ctx)
 %   already ran at z = 1: there is nothing to refine.
 
     F = ra_require(ctx, "frontier");
+    F = ra_select_cases(F, "mf");   % nothing to refine in a run already at z = 1
     run_refined_frontier_change(F.E, F.caseNames, F.caseLabels, ctx.repo_root, ...
         ctx.graphicsDir, ctx.plotColors, ctx.caseMarkers, ctx.accentColor, ctx.fontSize);
 end
