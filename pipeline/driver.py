@@ -66,8 +66,10 @@ from pipeline.matlab_interface import (
 from pipeline.provenance import Registry, summarise_gp
 from run_config import INTEGER_IDXS, THETA_D, RunConfig, parse_args
 
+from pipeline.fidelity_rows import doe_prefix_rows
 from pipeline.phi_surrogate import (
     fit_all_targets,
+    phi,
     write_coefficients,
     write_vintage_record,
 )
@@ -76,6 +78,12 @@ from pipeline.phi_surrogate import (
 # off it, so moving this file deeper would need this line changed and nothing
 # else.
 BASE_DIR = Path(__file__).resolve().parents[1]
+
+# Same floor simulate_nmpc applies, so a cost re-measured here matches what
+# MATLAB would have written for that evaluation at that fidelity. It caps the
+# scaling at 100x so a tiny phi cannot turn a small partial cost into a huge
+# estimate.
+PHI_FLOOR = 0.01
 DEVICE = torch.device("cpu")
 DTYPE = torch.double
 
@@ -397,13 +405,45 @@ def load_history(paths: List[Path]) -> List[Dict]:
     return rows
 
 
-def history_tensors(rows: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _vintage_ab(registry: Registry,
+                vintage: int) -> Optional[Dict[str, Tuple[float, float]]]:
+    """The (a, b) of each target in one vintage, or None if it has no record.
+
+    A run with a static phi publishes coefficients without writing a vintage
+    record, so None means "use the recorded estimates", which for that run are
+    already full-horizon.
+    """
+    record = registry.load_vintage(vintage)
+    if not record or "targets" not in record:
+        return None
+    try:
+        return {name: (float(t["a"]), float(t["b"]))
+                for name, t in record["targets"].items()}
+    except (KeyError, TypeError, ValueError):
+        print(f"[bo] vintage {vintage} record has no usable coefficients; "
+              f"using the estimates as recorded")
+        return None
+
+
+def history_tensors(rows: List[Dict],
+                    ab: Optional[Dict[str, Tuple[float, float]]] = None
+                    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Assemble the optimiser's view of the history.
 
-    Y_obj is the negated objective vector as it was recorded. The values scaled
-    by an earlier surrogate vintage are used unchanged: a refit does not revise
-    them. The measured costs and the divisors are in the CSV, so the whole
-    history can be recomputed under one vintage afterwards.
+    With ab given, every row is re-measured under that one surrogate: the
+    objective is the measured cost at the fidelity it ran at, divided by phi(z)
+    of the vintage in force now. The GP then fits one function measured with one
+    instrument, instead of a mixture of estimates left by successive vintages.
+    Only the correction changes; SSE_measured and z are untouched observations.
+
+    Consequences worth knowing. The estimate of an early row improves when a
+    later vintage is fitted on more curves, so "best so far" is not monotone
+    over a run, and a trajectory can only be replayed if the vintage in force at
+    each proposal is known: the ledger records it as phi_vintage_applied.
+
+    With ab None the recorded values are used unchanged, which is what a run
+    with a static phi wants (the baseline: z is held at 1, phi(1) = 1, and the
+    recorded cost is already the full-horizon cost).
     """
     if not rows:
         return (torch.empty((0, THETA_D), dtype=DTYPE, device=DEVICE),
@@ -411,8 +451,16 @@ def history_tensors(rows: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor, torch
                 torch.empty((0, 1), dtype=DTYPE, device=DEVICE))
 
     X = torch.tensor([r["theta"] for r in rows], dtype=DTYPE, device=DEVICE)
-    Y_obj = torch.tensor([[-r["SSE"], -r["SSdU"]] for r in rows],
-                         dtype=DTYPE, device=DEVICE)
+    if ab is None:
+        obj = [[-r["SSE"], -r["SSdU"]] for r in rows]
+    else:
+        obj = []
+        for r in rows:
+            z = float(r["z"])
+            p_sse = max(float(phi(z, ab["SSE"])), PHI_FLOOR)
+            p_ssdu = max(float(phi(z, ab["SSdU"])), PHI_FLOOR)
+            obj.append([-r["SSE_measured"] / p_sse, -r["SSdU_measured"] / p_ssdu])
+    Y_obj = torch.tensor(obj, dtype=DTYPE, device=DEVICE)
     Y_time = torch.tensor([[r["runtime_s"]] for r in rows],
                           dtype=DTYPE, device=DEVICE).clamp_min(1e-9)
     return X, Y_obj, Y_time
@@ -512,7 +560,9 @@ def fit_vintage(cfg: RunConfig, registry: Registry, vintage: int,
         "fit_wall_s": elapsed,
         "governs_iterations": [vintage * cfg.refit_every + 1,
                                (vintage + 1) * cfg.refit_every],
-        "rescales_past_rows": False,
+        # Every row is re-expressed under the vintage in force before each
+        # proposal, so this fit revises the estimate of every earlier row.
+        "rescales_past_rows": True,
     }
 
     wall_record = write_vintage_record(results, registry.vintage_path(vintage),
@@ -708,6 +758,24 @@ def run_bo(cfg: RunConfig) -> None:
     registry.reconcile(bo_rows)
     print(f"[bo] resuming with {len(init_rows)} DOE and {len(bo_rows)} OPT evaluations")
 
+    # Extra design rows read off the full-fidelity runs: what each design point
+    # would have reported had it stopped at a lower fidelity. Measured, not
+    # modelled. They give the runtime GP its only evidence on how cost varies
+    # with z when the design itself ran at z = 1, and they give the objective GP
+    # low-fidelity labels whose error against the full horizon is exactly the
+    # extrapolation error the method incurs.
+    #
+    # Off for the baseline: z is fixed there, so space.to_opt drops that column
+    # and the rows would collapse onto their own z = 1 point carrying a
+    # different objective.
+    prefix_rows_extra: List[Dict] = []
+    if cfg.doe_prefix_z and not cfg.is_baseline:
+        init_mats = [out_dir("init") / f"out_{r['timestamp']}.mat" for r in init_rows]
+        prefix_rows_extra = doe_prefix_rows(
+            [p for p in init_mats if p.exists()], cfg.doe_prefix_z)
+        print(f"[bo] {len(prefix_rows_extra)} design prefix row(s) at z = "
+              f"{', '.join(f'{z:g}' for z in cfg.doe_prefix_z)}")
+
     # The baseline publishes the identity phi once, here, so a bo phase started on
     # its own, or resumed after the file was removed, still serves against it. It
     # is never refitted, so nothing inside the loop republishes it.
@@ -740,7 +808,9 @@ def run_bo(cfg: RunConfig) -> None:
             ensure_vintage(cfg, registry, vintage, init_rows, bo_rows)
             wall_vintage = time.perf_counter() - t0
 
-        X, Y_obj, Y_time = history_tensors(init_rows + bo_rows)
+        ab = _vintage_ab(registry, vintage)
+        X, Y_obj, Y_time = history_tensors(
+            init_rows + prefix_rows_extra + bo_rows, ab)
         theta, diagnostics = propose(space, cfg, X, Y_obj, Y_time,
                                      seed=cfg.torch_seed + eval_id)
         theta_list = [float(v) for v in theta.tolist()]

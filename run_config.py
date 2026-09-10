@@ -143,11 +143,18 @@ class RunConfig:
     # Surrogate refit. Vintage 0 uses the initialization runs alone. It governs
     # optimization iterations 1 to refit_every. The driver fits vintage v after
     # iteration v * refit_every completes. Vintage v then governs the next
-    # refit_every iterations. The driver never rescales an earlier row. A row
-    # keeps the estimate that the vintage in force produced when MATLAB measured
-    # it.
-    refit_every: int = 10
+    # refit_every iterations. Every row is then re-measured under that vintage
+    # before the next proposal, so the objective GP fits one function measured
+    # with one instrument rather than a mixture left by successive vintages. The
+    # fit is cheap next to an evaluation, so it runs often.
+    refit_every: int = 5
     refit_after_last: bool = True   # fit a last vintage for later analysis
+
+    # Fidelities read off each full-fidelity design run and added to the GP
+    # history as extra rows: measured cost and measured time at that truncation,
+    # taken from the stored per-step trends. z = 1 is excluded because the design
+    # row itself already carries it. Empty disables the whole block.
+    doe_prefix_z: Tuple[float, ...] = (0.25, 0.50, 0.75)
 
     # Seeds.
     sobol_seed: int = 1234          # scrambled Sobol stream of the DOE
