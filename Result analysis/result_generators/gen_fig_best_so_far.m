@@ -15,11 +15,11 @@ function gen_fig_best_so_far(ctx)
 %   Log y on both panels: J_TV spans about two decades across the campaigns
 %   and the steps down would be invisible on a linear axis.
 %
-%   Styled after runtime_cumulative — line per campaign, the baseline dotted
-%   in Wong Vermillion, ending where its budget ran out.
+%   Styled after runtime_cumulative — line per campaign, SF dotted in Wong
+%   Vermillion, ending where its budget ran out.
 
     F = ra_require(ctx, "frontier");
-    isBase = contains(lower(string(F.caseNames)), "baseline");
+    S = ra_case_style(ctx, F.caseNames);
 
     cols   = ["SSE", "SSdU"];
     labels = ["$\min J_{\mathrm{track}}$ so far", "$\min J_{\mathrm{TV}}$ so far"];
@@ -35,14 +35,7 @@ function gen_fig_best_so_far(ctx)
             T    = F.E{k};
             it   = double(T.iter);
             best = cummin(double(T.(char(cols(ip)))));
-            if isBase(k)
-                style = ':';
-                col   = ctx.baselineColor;
-            else
-                style = ctx.caseLines(k);
-                col   = ctx.plotColors(k, :);
-            end
-            plot(ax, it, best, style, 'LineWidth', 2.0, 'Color', col, ...
+            plot(ax, it, best, S.line(k), 'LineWidth', 2.0, 'Color', S.color(k, :), ...
                 'DisplayName', F.caseLabels(k));
             kMax = max(kMax, max(it));
         end

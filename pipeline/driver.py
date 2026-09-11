@@ -67,6 +67,7 @@ from pipeline.provenance import Registry, summarise_gp
 from run_config import INTEGER_IDXS, THETA_D, RunConfig, parse_args
 
 from pipeline.fidelity_rows import doe_prefix_rows
+from pipeline.version import print_banner
 from pipeline.phi_surrogate import (
     fit_all_targets,
     phi,
@@ -1031,6 +1032,12 @@ def main(argv: List[str]) -> int:
     print(f"[run] phase={phase} case={cfg.case} "
           f"({cfg.spec().dimension} free dimensions) "
           f"budget={cfg.n_init}+{cfg.n_iter}")
+
+    # What is about to run, before it runs. The digest identifies the pipeline
+    # across machines and the feature line is read out of the loaded code, so a
+    # cluster carrying a stale driver beside a current run_config says so here
+    # instead of silently dropping the feature. See pipeline/version.py.
+    print_banner(cfg)
 
     try:
         if phase == "init":

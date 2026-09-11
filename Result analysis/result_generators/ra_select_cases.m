@@ -1,18 +1,22 @@
 function F = ra_select_cases(F, mode)
-%RA_SELECT_CASES Keep the multi-fidelity cases, or only the baseline.
+%RA_SELECT_CASES Keep the runtime-aware arm, or only the single-fidelity one.
 %
 %   F = ra_select_cases(F, "mf")       drops every campaign whose folder name
 %                                      contains "baseline"
-%   F = ra_select_cases(F, "baseline") keeps only those
+%   F = ra_select_cases(F, "baseline") keeps only SF
 %
 %   Works on either storage artifact: the frontier struct (E, D, Tp,
 %   isPareto) or the timeline struct (A, doeCount). Shared axis limits are
 %   recomputed from the retained evaluations, so a figure never pads its axes
 %   for points it does not draw.
 %
-%   The baseline is a single-fidelity reference run, not a third case: it
-%   belongs in the two figures that compare cost and frontier position, and
-%   nowhere else, or it would imply a like-for-like third arm.
+%   Use this only where the split is structural. With the cost-aware arm and
+%   SF as the two arms of one experiment, SF belongs in every figure that
+%   compares them;
+%   the remaining callers are the z=1 refinement figure and table, where a run
+%   that never left z = 1 has nothing to refine and would plot as an empty
+%   panel. Styling, not filtering, is what separates the arms elsewhere --
+%   see ra_case_style.
 
     names  = string(F.caseNames);
     isBase = contains(lower(names), "baseline");

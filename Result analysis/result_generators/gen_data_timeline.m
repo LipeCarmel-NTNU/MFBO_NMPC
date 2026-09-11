@@ -19,7 +19,7 @@ function gen_data_timeline(ctx)
     evals.case = removecats(categorical(evals.case));
     doe.case   = removecats(categorical(doe.case));
     caseNames  = categories(evals.case);
-    caseNames  = caseNames(ra_order_cases(caseNames));   % MF cases first, baseline last
+    caseNames  = caseNames(ra_order_cases(caseNames));   % studied campaigns first, baseline last
     nCases     = numel(caseNames);
     caseLabels = arrayfun(@pretty_case, string(caseNames));
 

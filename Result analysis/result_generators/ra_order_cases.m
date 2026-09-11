@@ -1,12 +1,13 @@
 function ord = ra_order_cases(names)
-%RA_ORDER_CASES Canonical case order: multi-fidelity cases first, baseline last.
+%RA_ORDER_CASES Canonical arm order: the studied campaigns first, SF last.
 %
 %   categories() returns its levels alphabetically, so "results_baseline"
-%   would sort ahead of "results_case1" and every index-based style lookup
-%   (plotColors(k,:), caseMarkers(k), caseLines(k)) would shift: Case 1 would
-%   be drawn in the colour Case 2 had in the submitted figures. Ordering here
-%   keeps colour attached to the case and leaves the two-case figures
-%   byte-identical to what the paper already shows.
+%   would sort ahead of "results_cost_aware" and the cost-aware arm would lose
+%   the first slot in every ordered list -- legends, table rows, tiled panels.
+%   Ordering here puts it first and SF last wherever both are drawn.
+%
+%   Colour no longer rides on this order (ra_case_style keys on the folder
+%   name), but reading order still does, so it stays.
 %
 %   Within the multi-fidelity group the order is natural: a trailing number
 %   sorts numerically, everything else alphabetically after it.

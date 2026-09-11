@@ -17,7 +17,7 @@ function gen_data_frontier(ctx)
     evals.case = removecats(categorical(evals.case));
     doe.case   = removecats(categorical(doe.case));
     caseNames  = categories(evals.case);
-    caseNames  = caseNames(ra_order_cases(caseNames));   % MF cases first, baseline last
+    caseNames  = caseNames(ra_order_cases(caseNames));   % studied campaigns first, baseline last
     nCases     = numel(caseNames);
     if nCases > numel(ctx.caseMarkers)
         error('gen_data_frontier:tooManyCases', ...
