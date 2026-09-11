@@ -1,0 +1,295 @@
+{
+  "context": {
+    "case": "case2",
+    "eval_ids_used": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25
+    ],
+    "files_missing": 0,
+    "files_used": [
+      "out_20260806_151235.mat",
+      "out_20260806_152802.mat",
+      "out_20260806_163631.mat",
+      "out_20260806_170703.mat",
+      "out_20260806_181227.mat",
+      "out_20260806_183019.mat",
+      "out_20260806_194436.mat",
+      "out_20260806_202421.mat",
+      "out_20260806_204822.mat",
+      "out_20260806_214539.mat",
+      "out_20260806_231048.mat",
+      "out_20260806_234703.mat",
+      "out_20260807_002530.mat",
+      "out_20260807_112645.mat",
+      "out_20260907_123233.mat",
+      "out_20260907_124849.mat",
+      "out_20260907_132034.mat",
+      "out_20260907_132449.mat",
+      "out_20260907_143436.mat",
+      "out_20260907_152945.mat",
+      "out_20260910_154451.mat",
+      "out_20260910_155128.mat",
+      "out_20260910_155919.mat",
+      "out_20260910_160506.mat",
+      "out_20260910_161433.mat"
+    ],
+    "fit_wall_s": 6.800331501290202,
+    "governs_iterations": [
+      6,
+      10
+    ],
+    "n_doe_rows": 20,
+    "n_opt_rows_used": 5,
+    "rescales_past_rows": false,
+    "wall_s": {
+      "fit_total": 6.800331501290202,
+      "per_target": {
+        "SSE": {
+          "cross_validation": 3.464031934738159,
+          "final_fit": 0.2909018099308014,
+          "load_and_pool": 0.04992595128715038,
+          "total": 3.8089478854089975
+        },
+        "SSdU": {
+          "cross_validation": 2.839517390355468,
+          "final_fit": 0.09647177532315254,
+          "load_and_pool": 0.0509601216763258,
+          "total": 2.990960044786334
+        }
+      },
+      "publish_coefficients": 0.0030283592641353607,
+      "total": 6.8065353110432625,
+      "write_record": 0.003056555986404419
+    }
+  },
+  "created_at": "2026-09-10T16:19:53+0200",
+  "model": "phi(z) = I_z(a, b), regularized incomplete beta",
+  "targets": {
+    "SSE": {
+      "a": 0.7976268972834161,
+      "b": 2.7188791364473603,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.015304935467956615,
+        0.017064521464096913,
+        0.07519270944559966,
+        0.12765684201704214
+      ],
+      "dropped_sources": [],
+      "lam": 0.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.014048484627480115,
+      "n_runs_total": 25,
+      "n_runs_used": 25,
+      "n_samples": 13525,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.014048484627480115,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "method": "L-BFGS-B",
+        "nfev": 16,
+        "nit": 15,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.2909018099308014,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260806_151235.mat",
+        "out_20260806_152802.mat",
+        "out_20260806_163631.mat",
+        "out_20260806_170703.mat",
+        "out_20260806_181227.mat",
+        "out_20260806_183019.mat",
+        "out_20260806_194436.mat",
+        "out_20260806_202421.mat",
+        "out_20260806_204822.mat",
+        "out_20260806_214539.mat",
+        "out_20260806_231048.mat",
+        "out_20260806_234703.mat",
+        "out_20260807_002530.mat",
+        "out_20260807_112645.mat",
+        "out_20260907_123233.mat",
+        "out_20260907_124849.mat",
+        "out_20260907_132034.mat",
+        "out_20260907_132449.mat",
+        "out_20260907_143436.mat",
+        "out_20260907_152945.mat",
+        "out_20260910_154451.mat",
+        "out_20260910_155128.mat",
+        "out_20260910_155919.mat",
+        "out_20260910_160506.mat",
+        "out_20260910_161433.mat"
+      ],
+      "target": "SSE",
+      "wall_s": {
+        "cross_validation": 3.464031934738159,
+        "final_fit": 0.2909018099308014,
+        "load_and_pool": 0.04992595128715038,
+        "total": 3.8089478854089975
+      }
+    },
+    "SSdU": {
+      "a": 0.965725207047362,
+      "b": 1.0162592321195258,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.0858217621240517,
+        0.08523214482972892,
+        0.08034945545581654,
+        0.08065747377953758
+      ],
+      "dropped_sources": [],
+      "lam": 1.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.07721353752661698,
+      "n_runs_total": 25,
+      "n_runs_used": 25,
+      "n_samples": 13525,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.0786526615876798,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+        "method": "L-BFGS-B",
+        "nfev": 6,
+        "nit": 4,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.09647177532315254,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260806_151235.mat",
+        "out_20260806_152802.mat",
+        "out_20260806_163631.mat",
+        "out_20260806_170703.mat",
+        "out_20260806_181227.mat",
+        "out_20260806_183019.mat",
+        "out_20260806_194436.mat",
+        "out_20260806_202421.mat",
+        "out_20260806_204822.mat",
+        "out_20260806_214539.mat",
+        "out_20260806_231048.mat",
+        "out_20260806_234703.mat",
+        "out_20260807_002530.mat",
+        "out_20260807_112645.mat",
+        "out_20260907_123233.mat",
+        "out_20260907_124849.mat",
+        "out_20260907_132034.mat",
+        "out_20260907_132449.mat",
+        "out_20260907_143436.mat",
+        "out_20260907_152945.mat",
+        "out_20260910_154451.mat",
+        "out_20260910_155128.mat",
+        "out_20260910_155919.mat",
+        "out_20260910_160506.mat",
+        "out_20260910_161433.mat"
+      ],
+      "target": "SSdU",
+      "wall_s": {
+        "cross_validation": 2.839517390355468,
+        "final_fit": 0.09647177532315254,
+        "load_and_pool": 0.0509601216763258,
+        "total": 2.990960044786334
+      }
+    }
+  },
+  "vintage": 1
+}

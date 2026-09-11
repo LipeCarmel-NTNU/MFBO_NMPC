@@ -1,0 +1,275 @@
+{
+  "context": {
+    "case": "case2",
+    "eval_ids_used": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "files_missing": 0,
+    "files_used": [
+      "out_20260806_151235.mat",
+      "out_20260806_152802.mat",
+      "out_20260806_163631.mat",
+      "out_20260806_170703.mat",
+      "out_20260806_181227.mat",
+      "out_20260806_183019.mat",
+      "out_20260806_194436.mat",
+      "out_20260806_202421.mat",
+      "out_20260806_204822.mat",
+      "out_20260806_214539.mat",
+      "out_20260806_231048.mat",
+      "out_20260806_234703.mat",
+      "out_20260807_002530.mat",
+      "out_20260807_112645.mat",
+      "out_20260907_123233.mat",
+      "out_20260907_124849.mat",
+      "out_20260907_132034.mat",
+      "out_20260907_132449.mat",
+      "out_20260907_143436.mat",
+      "out_20260907_152945.mat"
+    ],
+    "fit_wall_s": 4.914708288386464,
+    "governs_iterations": [
+      1,
+      5
+    ],
+    "n_doe_rows": 20,
+    "n_opt_rows_used": 0,
+    "rescales_past_rows": false,
+    "wall_s": {
+      "fit_total": 4.914708288386464,
+      "per_target": {
+        "SSE": {
+          "cross_validation": 3.14116252027452,
+          "final_fit": 0.2454155571758747,
+          "load_and_pool": 0.09304492361843586,
+          "total": 3.4827537927776575
+        },
+        "SSdU": {
+          "cross_validation": 1.3640510514378548,
+          "final_fit": 0.025516794994473457,
+          "load_and_pool": 0.04072035104036331,
+          "total": 1.4318821765482426
+        }
+      },
+      "publish_coefficients": 0.01663093827664852,
+      "total": 4.947076074779034,
+      "write_record": 0.015686577185988426
+    }
+  },
+  "created_at": "2026-09-10T15:43:15+0200",
+  "model": "phi(z) = I_z(a, b), regularized incomplete beta",
+  "targets": {
+    "SSE": {
+      "a": 0.8446080884449858,
+      "b": 3.2032290787419595,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.012639620433981574,
+        0.015236135272260937,
+        0.08043459720424338,
+        0.1390541166761221
+      ],
+      "dropped_sources": [],
+      "lam": 0.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.011805853885575633,
+      "n_runs_total": 20,
+      "n_runs_used": 20,
+      "n_samples": 10820,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.011805853885575633,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "method": "L-BFGS-B",
+        "nfev": 17,
+        "nit": 16,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.2454155571758747,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260806_151235.mat",
+        "out_20260806_152802.mat",
+        "out_20260806_163631.mat",
+        "out_20260806_170703.mat",
+        "out_20260806_181227.mat",
+        "out_20260806_183019.mat",
+        "out_20260806_194436.mat",
+        "out_20260806_202421.mat",
+        "out_20260806_204822.mat",
+        "out_20260806_214539.mat",
+        "out_20260806_231048.mat",
+        "out_20260806_234703.mat",
+        "out_20260807_002530.mat",
+        "out_20260807_112645.mat",
+        "out_20260907_123233.mat",
+        "out_20260907_124849.mat",
+        "out_20260907_132034.mat",
+        "out_20260907_132449.mat",
+        "out_20260907_143436.mat",
+        "out_20260907_152945.mat"
+      ],
+      "target": "SSE",
+      "wall_s": {
+        "cross_validation": 3.14116252027452,
+        "final_fit": 0.2454155571758747,
+        "load_and_pool": 0.09304492361843586,
+        "total": 3.4827537927776575
+      }
+    },
+    "SSdU": {
+      "a": 1.0000126285663056,
+      "b": 1.0000452047057828,
+      "cv_folds_scored": 5,
+      "cv_loss": [
+        0.055062624260047786,
+        0.05503465177662995,
+        0.05391802202087546,
+        0.05313774383276744
+      ],
+      "dropped_sources": [],
+      "lam": 100.0,
+      "lambda_grid": [
+        0.0,
+        0.01,
+        1.0,
+        100.0
+      ],
+      "loss": 0.053126524359558745,
+      "n_runs_total": 20,
+      "n_runs_used": 20,
+      "n_samples": 10820,
+      "optimizer": {
+        "bounds": [
+          [
+            0.05,
+            0.05
+          ],
+          [
+            25.0,
+            25.0
+          ]
+        ],
+        "fd_step": 1e-06,
+        "fd_type": "central",
+        "ftol": 1e-12,
+        "fun": 0.05312674465416993,
+        "gtol": 1e-10,
+        "maxiter": 400,
+        "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "method": "L-BFGS-B",
+        "nfev": 4,
+        "nit": 2,
+        "status": 0,
+        "success": true,
+        "wall_s": 0.025516794994473457,
+        "x0": [
+          1.0,
+          1.0
+        ]
+      },
+      "settings": {
+        "ab_clip": [
+          1e-06,
+          10000.0
+        ],
+        "cv_partitions": 1,
+        "cv_seed": 1,
+        "horizon_hours": 10.0,
+        "k_fold": 5,
+        "lambda_selection": "argmin of the mean held-out loss, no one-standard-error rule",
+        "min_samples_per_run": 2,
+        "model": "phi(z) = I_z(a, b)",
+        "phi_floor": 1e-12,
+        "z_min": 0.1
+      },
+      "sources": [
+        "out_20260806_151235.mat",
+        "out_20260806_152802.mat",
+        "out_20260806_163631.mat",
+        "out_20260806_170703.mat",
+        "out_20260806_181227.mat",
+        "out_20260806_183019.mat",
+        "out_20260806_194436.mat",
+        "out_20260806_202421.mat",
+        "out_20260806_204822.mat",
+        "out_20260806_214539.mat",
+        "out_20260806_231048.mat",
+        "out_20260806_234703.mat",
+        "out_20260807_002530.mat",
+        "out_20260807_112645.mat",
+        "out_20260907_123233.mat",
+        "out_20260907_124849.mat",
+        "out_20260907_132034.mat",
+        "out_20260907_132449.mat",
+        "out_20260907_143436.mat",
+        "out_20260907_152945.mat"
+      ],
+      "target": "SSdU",
+      "wall_s": {
+        "cross_validation": 1.3640510514378548,
+        "final_fit": 0.025516794994473457,
+        "load_and_pool": 0.04072035104036331,
+        "total": 1.4318821765482426
+      }
+    }
+  },
+  "vintage": 0
+}
