@@ -29,7 +29,10 @@ THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 # it (relative to the project root, e.g. "results/running"); it defaults to
 # "results". The MATLAB entry scripts read the same variable with getenv. The
 # exchange (inbox/theta.txt, matlab.lock) stays at the project root regardless.
-RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results")
+# The default names the campaign this checkout is set up to run, so no
+# environment variable has to be exported before starting. Point a run
+# somewhere else with MFBO_RESULTS_DIR, which still overrides.
+RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3")
 
 # The initialisation phase and the optimisation phase write separate files, so
 # that the costs measured at the simulated fidelity stay distinguishable from

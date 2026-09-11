@@ -290,7 +290,8 @@ class RunConfig:
                 f"vintage 0 is fitted on the {self.n_init} initialisation runs and "
                 f"governs optimisation iterations 1-{self.refit_every}; a refit "
                 f"follows every {self.refit_every} optimisation iterations and "
-                f"governs the next {self.refit_every}; past rows are never rescaled"
+                f"governs the next {self.refit_every}; the whole history is "
+                f"re-measured under the vintage in force before each proposal"
             ),
         })
         return d

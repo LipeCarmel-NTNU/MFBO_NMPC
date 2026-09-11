@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import List, Optional
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-# Same override as matlab_interface.RESULTS_DIR: MFBO_RESULTS_DIR, default results.
-RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results")
+# Same override as matlab_interface.RESULTS_DIR: MFBO_RESULTS_DIR, default results/case2_v3.
+RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3")
 ARCHIVE_ROOT = BASE_DIR / "results_archive"
 SIM_LOG = BASE_DIR / "SIMULATIONS_LOG.txt"
 

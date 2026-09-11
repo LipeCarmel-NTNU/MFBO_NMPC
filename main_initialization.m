@@ -47,10 +47,10 @@ configure_pool(USE_PARALLEL, NumWorkers);
 
 %% Run configuration
 cfg_run = struct();
-% Results tree, overridable with MFBO_RESULTS_DIR (default "results"); matches
+% Results tree, overridable with MFBO_RESULTS_DIR (default "results/case2_v3"); matches
 % pipeline/matlab_interface.py RESULTS_DIR. The exchange stays at the root.
 results_root = getenv("MFBO_RESULTS_DIR");
-if isempty(results_root); results_root = "results"; end
+if isempty(results_root); results_root = "results/case2_v3"; end
 cfg_run.theta_txt = fullfile("inbox", "theta.txt");
 cfg_run.poll_s = 2.0;
 cfg_run.out_dir = fullfile(results_root, "init");

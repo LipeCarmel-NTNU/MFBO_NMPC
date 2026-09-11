@@ -29,7 +29,7 @@ from pathlib import Path
 
 # Same override as pipeline.matlab_interface.RESULTS_DIR: MFBO_RESULTS_DIR, default results.
 DEFAULT_LOG = (Path(__file__).resolve().parent
-               / os.environ.get("MFBO_RESULTS_DIR", "results") / "logs" / "matlab_console.log")
+               / os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3") / "logs" / "matlab_console.log")
 
 
 def parse(argv):
