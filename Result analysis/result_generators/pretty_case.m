@@ -25,6 +25,10 @@ function label = pretty_case(name)
         label = "Cost-aware";
         return
     end
+    if contains(lower(name), "case2_v3")
+        label = "MF";
+        return
+    end
 
     tok = regexp(name, 'case(\d+)\s*$', 'tokens', 'once');
     if isempty(tok)

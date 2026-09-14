@@ -84,6 +84,8 @@ function steps = local_steps()
       'best_so_far'             'figures'  @gen_fig_best_so_far                'running best of each objective over the BO iterations'
       'refined_frontier'        'figures'  @gen_fig_refined_frontier           'low-fidelity frontier vs its z=1 refinement (guarded)'
       'runtime_consistency'     'figures'  @gen_fig_runtime_consistency        'solve time vs wall time, gap, failed solves'
+      'selected_states'         'figures'  @gen_fig_selected_states            'states of the SF frontier and the 3 lowest J_track MF points'
+      'selected_inputs'         'figures'  @gen_fig_selected_inputs            'inputs of the same selected controllers'
       'surrogate_coefficients'  'figures'  @gen_fig_surrogate_coefficients     'fitted a, b, lambda per vintage'
       'surrogate_fit_quality'   'figures'  @gen_fig_surrogate_fit_quality      'fit loss and refit cost per vintage'
       'surrogate_phi_curves'    'figures'  @gen_fig_surrogate_phi_curves       'phi(z) per published vintage'
