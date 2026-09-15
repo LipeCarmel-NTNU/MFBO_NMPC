@@ -17,8 +17,6 @@ function base = nmpc_base(opts)
 %     x_scale, u_scale  decision-variable scaling (default [1 20 1] and
 %                       0.4*ones(1,3))
 %     soft_mask         states whose bounds are relaxed by an L1 slack
-%                       (default [false true true]: the volume bounds stay
-%                       hard because the model divides by V)
 %     rho_L1            L1 penalty on the slacks (default 1e3)
 %     set_setpoint      store xsp/usp in base (default true). The
 %                       setpoint-schedule run sets this false because it
