@@ -48,6 +48,10 @@ function F = ra_select_cases(F, mode)
         kept = vertcat(F.E{:});
         F.xLimAll = padded_log_limits(double(kept.SSdU), 1.25);
         F.yLimAll = padded_log_limits(double(kept.SSE),  1.25);
-        F.zLo     = min(0.5, min(double(kept.z)));
+        F.zLo     = min(double(kept.z));
+        F.zHi     = max(double(kept.z));
+        if ~(F.zHi > F.zLo)
+            F.zLo = F.zHi - 0.01;
+        end
     end
 end

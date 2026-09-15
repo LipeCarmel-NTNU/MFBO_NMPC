@@ -9,7 +9,8 @@ function ctx = ra_context()
 %
 %   Fields:
 %     repo_root, resultsRoot, graphicsDir, numericalDir, storageDir
-%     fontSize, plotColors, accentColor, caseMarkers, caseLines, seqMap
+%     fontSize, plotColors, accentColor, caseMarkers, caseLines
+%     seqMapZ (markers, navia), seqMapVintage (surrogate, batlow), seqCrFloor
 %
 %   Palette note: plotColors carries Blue, BluishGreen, Vermillion and the
 %   accent is ReddishPurple. The previous scripts took the accent from
@@ -49,5 +50,16 @@ function ctx = ra_context()
     ctx.baselineColor = NC.Vermillion;
     ctx.caseMarkers = ["o", "^", "d"];
     ctx.caseLines   = ["-", "-.", ":"];
-    ctx.seqMap      = load_navia_colormap(256);
+    % Two sequential maps, both truncated for marks on white and reversed so
+    % the HIGH value takes the dark end. ra_seq_colormap explains why the
+    % truncation is needed; seqCrFloor is the contrast ratio the pale end is
+    % cut at, so lowering it lengthens the ramp and weakens its faintest
+    % colour. navia carries the fidelity z on the objective-space markers and
+    % batlow the vintage index on the surrogate curves: two different
+    % quantities in two different figures, so they read as separate scales
+    % rather than one continued across the figure set.
+    ctx.seqCrFloor    = 3.0;
+    ctx.seqMapZ       = ra_seq_colormap("navia",  ctx.seqCrFloor);
+    ctx.seqMapVintage = ra_seq_colormap("batlow", ctx.seqCrFloor);
+    ctx.seqMap        = ctx.seqMapZ;   % kept: older generators still read it
 end

@@ -34,6 +34,42 @@ Source: `dependencies/plot_utils/navia/navia.mat` (licence and README in the
 same folder). Loaded via a local `load_navia_colormap(n)` helper that
 interpolates the stored map to `n` levels and clips to [0, 1].
 
+**Truncated and reversed, and there are now two of them.** `ra_context` calls
+`ra_seq_colormap(name, ctx.seqCrFloor)` with `seqCrFloor = 3.0`:
+
+| Field | Map | Used by |
+|---|---|---|
+| `ctx.seqMapZ` | navia | fidelity `z` on the objective-space markers |
+| `ctx.seqMapVintage` | batlow | vintage index on the surrogate phi(z) curves |
+
+`ctx.seqMap` remains as an alias of `seqMapZ` for generators that still read it.
+
+A perceptually uniform sequential map is uniform in *lightness*, which is what
+drives one end of it to paper-white: navia ends at `#FCF4D9`, 1.10:1 against
+white. That is right for a filled field, which is what these maps are drawn for,
+and useless for discrete markers and thin lines on white paper. `ra_seq_colormap`
+therefore orients the map dark-first, cuts the pale end where contrast against
+white falls through `seqCrFloor`, and reverses it so the HIGH value takes the
+dark end. Cut this way every map ends near L\* 61, so the choice between them is
+a choice of hue path, not of how much was trimmed. Lowering `seqCrFloor`
+lengthens the ramp and weakens its faintest colour.
+
+Two maps rather than one because `z` and the vintage index are different
+quantities in different figures; a shared ramp would read as one scale carried
+across the figure set.
+
+Maps are stored in `dependencies/plot_utils/colormaps/seq_maps.mat`. The README
+beside it carries provenance and the citation each map needs — **batlow needs the
+same Crameri citation as navia**, so adding it changes nothing in the
+bibliography. `Result analysis/pick_seq_colormap.m` renders the candidates side
+by side.
+
+**Colour axis.** `caxis` spans the pooled data, never a fixed floor:
+`gen_data_frontier` stores `zLo`/`zHi` as the min and max of `z` over every case
+in the run, so the panels of one figure share a scale and equal colour means
+equal `z` across them. The old `min(0.5, min(z))` floor spent two thirds of the
+ramp on an empty range and flattened every marker to one colour.
+
 Used for any *continuous* quantity mapped to color:
 
 - fidelity `z` in the SSE-vs-SSdU scatter (`caxis [0.5, 1]`, colorbar labeled
@@ -76,7 +112,8 @@ results analysis only its orange is used, for benchmarks.
 ```matlab
 addpath(genpath(fullfile(repo_root, "dependencies")));
 plotColors = nature_methods_colors(3); % Blue, BluishGreen, ReddishPurple
-seqMap     = load_navia_colormap(256); % sequential map for continuous color
+seqMapZ       = ra_seq_colormap("navia",  3.0); % markers: truncated, high = dark
+seqMapVintage = ra_seq_colormap("batlow", 3.0); % surrogate curves
 % Case 1 -> plotColors(1,:), marker "o"
 % Case 2 -> plotColors(2,:), marker "^"
 % accent / frontier -> plotColors(3,:)

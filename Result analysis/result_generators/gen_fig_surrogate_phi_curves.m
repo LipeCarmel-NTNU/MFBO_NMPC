@@ -9,9 +9,9 @@ nCases = numel(caseNames);
 targets      = ["SSE", "SSdU"];
 targetLabels = ["J_{\mathrm{track}}", "J_{\mathrm{TV}}"];
 plotColors = ctx.plotColors; caseMarkers = ctx.caseMarkers;
-fontSize = ctx.fontSize; seqMap = ctx.seqMap; graphics_dir = ctx.graphicsDir;
+fontSize = ctx.fontSize; seqMap = ctx.seqMapVintage; graphics_dir = ctx.graphicsDir;
 
-%% Figure 3: phi(z) curves per vintage, colored by vintage (navia)
+%% Figure 3: phi(z) curves per vintage, colored by vintage (batlow)
 fig3 = figure('Color', 'w', 'Name', 'phi(z) Curves by Vintage');
 tiledlayout(fig3, numel(targets), nCases, 'Padding', 'compact', 'TileSpacing', 'compact');
 zq = linspace(0, 1, 201);

@@ -3,7 +3,9 @@ function gen_fig_selected_states(ctx)
 %   Result: results/graphical_results/selected_states.png/.pdf
 %
 %   Diagnostic grid, 3 states by one column per controller, columns ordered by
-%   increasing J_track (see ra_selected_controllers). Scenario 1 solid,
+%   increasing J_track (see ra_selected_controllers): the best single-fidelity
+%   point, the 3 lowest-J_track multi-fidelity points, and every damped-Rdu
+%   blend in results/rdu_damping/. Scenario 1 solid,
 %   scenario 2 dashed, setpoint grey dotted. Every trace runs to its own
 %   i_last, so the multi-fidelity columns stop short of 10 h; the x limit is
 %   pinned at the full horizon so that is visible rather than rescaled away.

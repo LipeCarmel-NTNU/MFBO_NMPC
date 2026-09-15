@@ -3,8 +3,8 @@ function gen_fig_selected_inputs(ctx)
 %   Result: results/graphical_results/selected_inputs.png/.pdf
 %
 %   Same grid as gen_fig_selected_states: 3 inputs by one column per
-%   controller, columns ordered by increasing J_track. u1 and u2 are the feed
-%   flows, u3 the outflow. Drawn with stairs because the input is held over
+%   controller, columns ordered by increasing J_track, the damped-Rdu blends
+%   included. u1 and u2 are the feed flows, u3 the outflow. Drawn with stairs because the input is held over
 %   the sample. Scenario 1 solid, scenario 2 dashed.
 %
 %   This is where the J_TV gap lives: the multi-fidelity columns move the
@@ -43,7 +43,7 @@ for r = 1:3
         xlim(ax, [0 tfH]);
         ylim(ax, [0 1.05 * uMax]);
         if r == 1
-            title(ax, sprintf('%s  ($N_c=%d$)', ra_tex_label(Sel(k).label), Sel(k).Nc), ...
+            title(ax, sprintf('%s  ($N_c=%d$)', ra_tex_label(Sel(k).label), round(Sel(k).Nc)), ...
                 'Interpreter', 'latex');
         end
         if k == 1

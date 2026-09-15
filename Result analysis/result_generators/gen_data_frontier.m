@@ -51,10 +51,20 @@ function gen_data_frontier(ctx)
 
     xLimAll = padded_log_limits(double(evals.SSdU), 1.25);
     yLimAll = padded_log_limits(double(evals.SSE),  1.25);
-    zLo     = min(0.5, min(double(evals.z)));
+    % The colour axis spans the POOLED data, so the panels of one figure
+    % share a scale and a marker means the same colour in each. A floor of 0.5
+    % used to be forced here; with z running 0.833 to 1 that spent two thirds
+    % of the ramp on an empty range and every marker came out one colour.
+    zLo     = min(double(evals.z));
+    zHi     = max(double(evals.z));
+    if ~(zHi > zLo)
+        % A campaign set can be all-z=1 (the single-fidelity arm on its own).
+        % caxis needs an increasing pair, so open a nominal window below it.
+        zLo = zHi - 0.01;
+    end
 
     outPath = fullfile(ctx.storageDir, 'frontier.mat');
     save(outPath, 'E', 'D', 'Tp', 'isPareto', 'caseNames', 'caseLabels', ...
-        'nCases', 'xLimAll', 'yLimAll', 'zLo');
+        'nCases', 'xLimAll', 'yLimAll', 'zLo', 'zHi');
     fprintf('Wrote %s\n', outPath);
 end

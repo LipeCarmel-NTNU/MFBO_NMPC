@@ -8,8 +8,13 @@ function gen_fig_objective_space_z(ctx)
 %   which is the visual statement that it never varied its horizon.
 F = ra_require(ctx, "frontier");
 E = F.E; isPareto = F.isPareto; nCases = F.nCases;
-xLimAll = F.xLimAll; yLimAll = F.yLimAll; zLo = F.zLo;
-fontSize = ctx.fontSize; seqMap = ctx.seqMap; accentColor = ctx.accentColor;
+if ~isfield(F, 'zHi')
+    error('gen_fig_objective_space_z:staleFrontier', ...
+        ['storage/frontier.mat predates the pooled colour axis and carries no ' ...
+         'zHi. Re-run main_results(''frontier'').']);
+end
+xLimAll = F.xLimAll; yLimAll = F.yLimAll; zLo = F.zLo; zHi = F.zHi;
+fontSize = ctx.fontSize; seqMap = ctx.seqMapZ; accentColor = ctx.accentColor;
 graphicsDir = ctx.graphicsDir;
 
 %% Figure 1: SSE vs SSdU per case, color mapped by fidelity z
@@ -28,7 +33,7 @@ for k = 1:nCases
     set(ax, 'XScale', 'log', 'YScale', 'log', 'FontSize', fontSize);
     xlim(ax, xLimAll); ylim(ax, yLimAll);
     colormap(ax, seqMap);
-    caxis(ax, [zLo, 1]);
+    caxis(ax, [zLo, zHi]);   % pooled over every case, so the panels agree
     xlabel(ax, '$J_{\mathrm{TV}}$');
     ylabel(ax, '$J_{\mathrm{track}}$');
     title(ax, "$\mathbf{" + char('a' + k - 1) + "}$", 'Interpreter', 'latex');
