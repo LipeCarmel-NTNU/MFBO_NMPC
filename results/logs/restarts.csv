@@ -1,0 +1,15 @@
+timestamp,attempt,reason,exit_code,entry,pending_eval_id,republished
+20260815_002109,1,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_002226,2,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_002336,3,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_051531,1,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_051629,2,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_051746,3,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_051922,4,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_052012,5,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_052047,6,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_052145,7,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_052245,8,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260815_052345,9,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260917_100502,1,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
+20260917_100608,2,the MATLAB process exited with code 3221225477,3221225477,main_initialization,1,1
