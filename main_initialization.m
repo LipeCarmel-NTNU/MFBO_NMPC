@@ -42,7 +42,7 @@ delete_if_exists(fullfile('inbox', 'theta.txt'))
 rng(123)
 
 USE_PARALLEL = true;
-NumWorkers = 31;
+NumWorkers = 8;
 configure_pool(USE_PARALLEL, NumWorkers);
 
 %% Run configuration

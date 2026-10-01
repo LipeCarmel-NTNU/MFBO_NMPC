@@ -30,7 +30,7 @@
 #SBATCH --partition=CPUQ
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=9
 #SBATCH --mem=64G
 #SBATCH --time=3-00:00:00
 #SBATCH --output=slurm_mfbo_%j.out
@@ -46,7 +46,7 @@ PHASE="${2:-both}"
 MATLAB_MODULE="MATLAB/2025a"
 CONDA_MODULE="Anaconda3/2024.02-1"   # `module spider anaconda` lists what is installed
 CONDA_ENV="mfbo-nmpc"                # the name declared in environment.yml
-MATLAB_WORKERS=31                    # NumWorkers in main_initialization.m and main_BO.m
+MATLAB_WORKERS=8                     # NumWorkers in main_initialization.m and main_BO.m
 
 # Argument and resource checks
 # These run before MATLAB starts, so a mistake costs a few seconds of queue time
