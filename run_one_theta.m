@@ -10,7 +10,7 @@ function out = run_one_theta(theta_or_id, opts)
 %   out = run_one_theta()             uses benchmark_theta().
 %
 %   This calls the same simulate_nmpc the driver uses, so the result matches a
-%   real evaluation. rng(1) is set first to reproduce the campaign noise draw.
+%   real evaluation. rng(123) is set first to reproduce the campaign noise draw.
 %
 %   Name-value options:
 %     horizon       "full" (default, whole base.tf) or "fidelity" (tf = f*base.tf,
@@ -67,7 +67,7 @@ function out = run_one_theta(theta_or_id, opts)
         phi_path = fullfile(here, opts.results_root, "surrogate", "phi_coeffs.mat");
     end
 
-    rng(1);
+    rng(123);
     base = nmpc_base(sigma_y = opts.sigma_y, phi_coeffs_path = phi_path);
 
     sim_args = {"horizon", opts.horizon, "extrapolate", opts.extrapolate, ...

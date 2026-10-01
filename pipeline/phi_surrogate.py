@@ -80,7 +80,7 @@ from run_config import Z_MIN_PHI  # noqa: E402
 HORIZON_HOURS = 10.0        # T in z = t / T
 LAMBDA_GRID = (0.0, 1e-2, 1e0, 1e2)   # [0, logspace(-2, 2, 3)]
 K_FOLD = 5                  # folds of the cross-validation, split over runs
-RNG_SEED = 1                # fixes the fold partition
+RNG_SEED = 123              # fixes the fold partition
 AB0 = (1.0, 1.0)            # start point, phi(z) = z
 AB_LB = (0.05, 0.05)
 AB_UB = (25.0, 25.0)

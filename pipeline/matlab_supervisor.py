@@ -45,12 +45,18 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from pipeline import log_blocks
 from pipeline import matlab_interface as mi
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 LOG_DIR = mi.RESULTS_DIR / "logs"
 CONSOLE_LOG = LOG_DIR / "matlab_console.log"
 RESTART_LOG = LOG_DIR / "restarts.csv"
+
+# The console log is one appended file for the whole campaign. pipeline/log_blocks
+# mirrors it into bounded blocks under logs/console_blocks/ so the recent output
+# can be read without opening the whole thing. The mirror only reads, so MATLAB's
+# file descriptor on the raw log is untouched.
 
 # serve_requests prints this line once it is polling the inbox. It prints it
 # after the startup deletions, which makes it the point from which a request is
@@ -90,6 +96,8 @@ class MatlabSupervisor:
         self.diary = diary
         self.console_log = Path(console_log)
         self.restart_log = Path(restart_log)
+        self.splitter = (log_blocks.LogSplitter(self.console_log)
+                         if log_blocks.blocks_enabled() else None)
 
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
@@ -148,6 +156,7 @@ class MatlabSupervisor:
             self._log("stopping MATLAB.")
             self._terminate()
         mi.LOCK_FILE.unlink(missing_ok=True)
+        self._close_console_blocks()
 
     def is_alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -158,6 +167,7 @@ class MatlabSupervisor:
 
     def _monitor(self) -> None:
         while not self._stop.wait(self.poll_s):
+            self.mirror_console()
             # The lock keeps this relaunch from interleaving with a driver
             # abandon(), which kills and relaunches the same process.
             with self._proc_lock:
@@ -351,8 +361,27 @@ class MatlabSupervisor:
                           f"{self.ready_timeout_s:.0f} s.")
                 self._terminate()
                 return False
+            self.mirror_console()
             time.sleep(2.0)
         return False
+
+    # ------------------------------------------------------------------
+    # Console blocks
+    # ------------------------------------------------------------------
+
+    def mirror_console(self) -> None:
+        """Copy whatever the console log gained into logs/console_blocks/.
+
+        Called from the monitor thread and from the startup wait, so the blocks
+        keep up with a launch that takes minutes. LogSplitter.pump swallows its
+        own errors, because a log mirror must not stop a run.
+        """
+        if self.splitter is not None:
+            self.splitter.pump()
+
+    def _close_console_blocks(self) -> None:
+        if self.splitter is not None:
+            self.splitter.close()
 
     def _terminate(self) -> None:
         if self._proc is None or self._proc.poll() is not None:

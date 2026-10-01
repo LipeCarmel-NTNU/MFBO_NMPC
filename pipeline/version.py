@@ -55,6 +55,7 @@ SOURCES: Tuple[str, ...] = (
     "pipeline/provenance.py",
     "pipeline/case_archive.py",
     "pipeline/console_log.py",
+    "pipeline/log_blocks.py",
 )
 
 _DIGEST_CHARS = 8

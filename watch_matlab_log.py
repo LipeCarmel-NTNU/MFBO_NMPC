@@ -11,6 +11,19 @@ server that the desktop gave you.
     python watch_matlab_log.py --no-follow     # print and exit
     python watch_matlab_log.py results/logs/matlab_diary.log
 
+The raw log is one appended file for the whole campaign, so reading it from the
+top is slow by the end of a run. run_supervised.py also mirrors it into bounded
+blocks under logs/console_blocks/ (see pipeline/log_blocks.py). Two options read
+that view instead:
+
+    python watch_matlab_log.py --list          # the block index, newest last
+    python watch_matlab_log.py --blocks        # follow the newest block
+
+--blocks follows the block being written and moves to the next one when it
+opens, so the file open at any moment is at most one block long. --list prints
+which evaluation ids each closed block holds, which is how you find the block
+that covers the evaluation you care about.
+
 Every line is flushed as it is printed, so the output is complete up to the last
 line even when this script is piped into another command or killed.
 
@@ -45,6 +58,10 @@ def parse(argv):
                    help="print what is there and exit")
     p.add_argument("--poll", type=float, default=0.25,
                    help="seconds between reads (default: 0.25)")
+    p.add_argument("--blocks", action="store_true",
+                   help="follow the newest console block instead of the raw log")
+    p.add_argument("--list", action="store_true", dest="list_blocks",
+                   help="print the console block index and exit")
     return p.parse_args(argv)
 
 
@@ -137,10 +154,96 @@ def follow(path: Path, args) -> int:
         handle.close()
 
 
+def blocks_dir_for(log_path: Path) -> Path:
+    """Where the blocks of a given log live. Kept in step with pipeline.log_blocks."""
+    return log_path.parent / "console_blocks"
+
+
+def sorted_blocks(blocks_dir: Path):
+    """The block files in order. The zero-padded index makes the sort chronological."""
+    if not blocks_dir.is_dir():
+        return []
+    return sorted(blocks_dir.glob("block_*.log"))
+
+
+def print_block_index(blocks_dir: Path) -> int:
+    """Print index.csv, plus the block still being written."""
+    index = blocks_dir / "index.csv"
+    blocks = sorted_blocks(blocks_dir)
+    if not index.is_file() and not blocks:
+        print(f"[watch] no console blocks under {blocks_dir}.", file=sys.stderr)
+        print("[watch] they are written by run_supervised.py, or by "
+              "python -m pipeline.log_blocks --follow.", file=sys.stderr)
+        return 1
+    closed = set()
+    if index.is_file():
+        import csv
+        with index.open("r", newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        width = max([len(r["block"]) for r in rows] + [10])
+        print(f"{'block'.ljust(width)}  {'opened':>15}  {'KiB':>8}  {'lines':>7}  evals")
+        for row in rows:
+            closed.add(row["block"])
+            kib = int(row["bytes"] or 0) / 1024.0
+            span = (f"{row['first_eval']}-{row['last_eval']}"
+                    if row["first_eval"] else "")
+            print(f"{row['block'].ljust(width)}  {row['opened_at']:>15}  "
+                  f"{kib:8.1f}  {row['lines']:>7}  {span}")
+    for block in blocks:
+        if block.name not in closed:
+            print(f"{block.name}  (open, {block.stat().st_size / 1024.0:.1f} KiB)")
+    return 0
+
+
+def follow_blocks(blocks_dir: Path, args) -> int:
+    """Follow the newest block, moving on when the next one opens."""
+    announced = False
+    while not sorted_blocks(blocks_dir):
+        if args.no_follow:
+            print(f"[watch] no console blocks under {blocks_dir}.", file=sys.stderr)
+            return 1
+        if not announced:
+            print(f"[watch] waiting for a block under {blocks_dir} ...", flush=True)
+            announced = True
+        time.sleep(1.0)
+
+    current = sorted_blocks(blocks_dir)[-1]
+    print(f"[watch] following {current.name}", flush=True)
+    handle = current.open("rb")
+    try:
+        handle.seek(start_offset(handle, args))
+        while True:
+            chunk = handle.read(65536)
+            if chunk:
+                emit(chunk)
+                continue
+            if args.no_follow:
+                return 0
+
+            newest = sorted_blocks(blocks_dir)[-1]
+            if newest != current:
+                # Drain the block that just closed before moving on, so the last
+                # lines written to it are not lost.
+                emit(handle.read())
+                handle.close()
+                current = newest
+                print(f"\n[watch] block rolled. Following {current.name}", flush=True)
+                handle = current.open("rb")
+                continue
+            time.sleep(args.poll)
+    finally:
+        handle.close()
+
+
 def main(argv=None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
+    path = Path(args.path)
     try:
-        return follow(Path(args.path), args)
+        if args.list_blocks:
+            return print_block_index(blocks_dir_for(path))
+        if args.blocks:
+            return follow_blocks(blocks_dir_for(path), args)
+        return follow(path, args)
     except KeyboardInterrupt:
         print()
         return 130

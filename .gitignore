@@ -19,3 +19,12 @@ slurm_mfbo_*.out
 # Partial state of the evaluation in flight
 checkpoints/
 /symbolic
+
+# The transfer bundle for an offline machine. Built locally, carried by USB.
+/USB_transfer
+
+# Run logs live under $MFBO_RESULTS_DIR, which is not always results/, so the
+# rooted rule above misses them. These patterns catch them at any depth.
+**/logs/*.log
+**/logs/console_blocks/
+HANDOFF.md

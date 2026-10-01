@@ -11,7 +11,7 @@
 % is benchmark_full_f1_no_noise or benchmark_full_f1_same_noise.
 
 clear; close all; clc
-rng(1)
+rng(123)
 
 current_dir = fileparts(mfilename('fullpath'));
 addpath(genpath(current_dir));

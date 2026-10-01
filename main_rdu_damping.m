@@ -66,7 +66,7 @@ addpath(genpath(current_dir))
 %% ------------------------------------------------------------------ knobs
 EPS_X       = 0.90;     % keep at least (1 - EPS_X) of MF_1's loop gain Jx
 SIM_HOURS   = 10;        % horizon of the verification run
-RNG_SEED    = 1;        % fixes base.noise, shared by every simulated theta
+RNG_SEED    = 123;      % fixes base.noise, shared by every simulated theta
 THETA_MAX   = 3;        % upper bound of the r_du exponent in the BO box
 % Every simulation is expensive, so only the blend is run. MF_1's trajectory is
 % already on disk and re-simulating it here buys only the identical noise

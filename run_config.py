@@ -157,9 +157,9 @@ class RunConfig:
     doe_prefix_z: Tuple[float, ...] = (0.25, 0.50, 0.75)
 
     # Seeds.
-    sobol_seed: int = 1234          # scrambled Sobol stream of the DOE
-    torch_seed: int = 0             # GP fitting and acquisition multistarts
-    cv_seed: int = 1                # fold partitions of the surrogate fit
+    sobol_seed: int = 123           # scrambled Sobol stream of the DOE
+    torch_seed: int = 123           # GP fitting and acquisition multistarts
+    cv_seed: int = 123              # fold partitions of the surrogate fit
 
     # Surrogate fit. lambda is the plain argmin of the mean held-out loss over
     # the grid. The fit applies no one-standard-error rule. Each vintage record

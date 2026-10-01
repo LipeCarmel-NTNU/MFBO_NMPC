@@ -59,24 +59,38 @@ value. It is not a fidelity policy.
 
 ## Refit schedule
 
+The cadence is `refit_every` in `run_config.py`, which declares 5. Vintage v is
+fitted on the DOE runs plus the first `v * refit_every` optimization runs, and it
+governs the next `refit_every` iterations.
+
 | Vintage | Fitted on | Governs optimization iterations |
 |---|---|---|
-| 0 | 20 DOE runs | 1 to 10 |
-| 1 | 20 DOE + 10 OPT | 11 to 20 |
+| 0 | 20 DOE runs | 1 to 5 |
+| 1 | 20 DOE + 5 OPT | 6 to 10 |
 | ... | ... | ... |
-| 9 | 20 DOE + 90 OPT | 91 to 100 |
-| 10 | 20 DOE + 100 OPT | none, kept for later analysis |
+| 19 | 20 DOE + 95 OPT | 96 to 100 |
+| 20 | 20 DOE + 100 OPT | none, kept for later analysis |
+
+The terminal vintage is fitted only when `refit_after_last` is true.
 
 Cross-validation selects the L2 strength. It uses 5 folds over runs and one fold
 partition. It takes the plain argmin of the mean held-out loss over
 `[0, 1e-2, 1, 1e2]`. It applies no one-standard-error rule.
 
-The driver never rescales an earlier row. A row keeps the estimate that the
-vintage in force produced. `results.csv` records that vintage next to the
-measured costs and the divisors. You can therefore recompute the whole history
-under one fit without a new simulation:
+The driver never rewrites an earlier row. A row keeps the estimate that the
+vintage in force at the time produced. `results.csv` records that vintage next to
+the measured costs and the divisors. You can therefore recompute the whole
+history under one fit without a new simulation:
 
     SSE_under_new_fit = SSE_measured / I_z(a_new, b_new)
+
+That recomputation is what the driver itself does in memory before every
+proposal. `history_tensors` in `pipeline/driver.py` re-measures every row under
+the vintage in force, so the GP fits one function measured with one instrument
+rather than a mixture left by successive vintages. Two consequences: the best
+value so far is not monotone over a run, and replaying a trajectory needs the
+vintage that each proposal saw, which is why the ledger carries
+`phi_vintage_applied`.
 
 ## Records
 
@@ -123,6 +137,28 @@ coefficient publish.
 
 The end-of-run summary prints the totals and the share of wall time that the
 driver used.
+
+## Watching a headless run
+
+`run_supervised.py` runs MATLAB with no command window and sends what that
+window would have shown to `<results>/logs/matlab_console.log`. That file is
+appended for the whole campaign, so it reaches tens of megabytes.
+
+Beside it, `<results>/logs/console_blocks/` holds the same output cut into
+blocks of at most 1 MiB or 30 minutes, whichever comes first, with `index.csv`
+naming the evaluation ids in each closed block. Read the recent output without
+opening the whole log:
+
+    python watch_matlab_log.py --blocks    # follow the block being written
+    python watch_matlab_log.py --list      # the index, to find one evaluation
+    python watch_matlab_log.py             # the raw log, as before
+
+The blocks are a copy. The raw log is read and never written, so nothing the
+mirror does can lose output. Set `MFBO_LOG_BLOCKS=0` to turn the mirror off, or
+`MFBO_LOG_BLOCK_BYTES` and `MFBO_LOG_BLOCK_SECONDS` to change the limits. These
+are environment variables and not `run_config.py` settings, because every value
+in `run_config.py` reaches the manifest and a manifest difference refuses a
+resume.
 
 ## Interruption
 
