@@ -60,7 +60,7 @@ for s = 1:numel(scenarios)
         run_id = scenario.name, ...
         log_path = cfg.log_path);
 
-    J = out.SSE + 1e4 * out.SSdU;
+    J = out.J;
 
     ts = char(datetime("now", "TimeZone", "Europe/Oslo", "Format", "yyyyMMdd_HHmmss"));
     save(fullfile(out_dir, "out_benchmark.mat"), "ts", "out", "theta", "scenario", "cfg", "base");

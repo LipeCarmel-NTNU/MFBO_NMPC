@@ -21,11 +21,10 @@ cfg_run = struct();
 cfg_run.source_root = "results";
 cfg_run.output_root = fullfile("results", "final_fidelity_same_noise");
 cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
-cfg_run.sigma_y = [0.001 0.1 0.1];          % same measurement noise as the BO phase
 cfg_run.doe_last_iter = 20;                 % initialisation points precede the BO rows
 cfg_run.NumWorkers = NumWorkers;
 
-base = nmpc_base(sigma_y = cfg_run.sigma_y);
+base = nmpc_base();                         % the campaign noise, as in the BO phase
 
 %% Frontier timestamps
 % The stored list is cross-checked against the frontier recomputed from the

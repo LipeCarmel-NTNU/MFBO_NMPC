@@ -19,7 +19,8 @@ function out = run_one_theta(theta_or_id, opts)
 %     phi_coeffs    phi_coeffs.mat path (default results/surrogate/phi_coeffs.mat)
 %     terminal_cost "lqr" (default), "zero" or "none"
 %     x0            initial-condition cases, one row each (default: simulate_nmpc's)
-%     sigma_y       measurement-noise std (default [0.001 0.1 0.1]; [0 0 0] = noiseless)
+%     sigma_y       measurement-noise std (default: the nmpc_base default, the
+%                   campaign noise; [0 0 0] = noiseless)
 %     results_root  where to search for the id .mat (default "results")
 %     plot          draw trajectories (default true)
 %
@@ -35,7 +36,7 @@ function out = run_one_theta(theta_or_id, opts)
         opts.phi_coeffs (1,1) string = ""
         opts.terminal_cost (1,1) string {mustBeMember(opts.terminal_cost, ["lqr" "zero" "none"])} = "lqr"
         opts.x0 (:,:) double = []
-        opts.sigma_y (1,:) double = [0.001 0.1 0.1]
+        opts.sigma_y (1,:) double = []
         opts.results_root (1,1) string = "results"
         opts.plot (1,1) logical = true
     end
@@ -67,7 +68,11 @@ function out = run_one_theta(theta_or_id, opts)
         phi_path = fullfile(here, opts.results_root, "surrogate", "phi_coeffs.mat");
     end
 
-    base = nmpc_base(sigma_y = opts.sigma_y, phi_coeffs_path = phi_path);
+    base_args = {"phi_coeffs_path", phi_path};
+    if ~isempty(opts.sigma_y)
+        base_args = [base_args, {"sigma_y", opts.sigma_y}];
+    end
+    base = nmpc_base(base_args{:});
 
     sim_args = {"horizon", opts.horizon, "extrapolate", opts.extrapolate, ...
                 "terminal_cost", opts.terminal_cost};
