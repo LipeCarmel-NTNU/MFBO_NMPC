@@ -33,7 +33,11 @@ function cfg_run = server_config(serves_phase)
     cfg_run.failures_csv = fullfile(results_root, "failures.csv");
     cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
     cfg_run.lock_path = "matlab.lock";
-    cfg_run.lock_stale_s = 6 * 3600;
+    % Mirrors lock_stale_s in run_config.py, which is the value that acts: the
+    % driver treats an older lock as abandoned and publishes past it, so it must
+    % not sit below eval_timeout_s. acquire_lock removes a leftover lock at any
+    % age, and this value only decides whether the removal warns.
+    cfg_run.lock_stale_s = 10 * 3600;
     % The live value. max_consecutive_failures in run_config.py only records it
     % in the manifest.
     cfg_run.max_consecutive_failures = 5;

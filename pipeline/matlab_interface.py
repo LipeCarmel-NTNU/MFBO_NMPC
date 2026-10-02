@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from run_config import case_from_argv, export_results_dir
+from run_config import RunConfig, case_from_argv, export_results_dir
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -145,7 +145,7 @@ def _validate_theta(theta: Sequence[float] | Iterable[float]) -> List[float]:
 
 
 def send_request(eval_id: int, phase: str, theta: Sequence[float], *,
-                 lock_stale_s: float = 6 * 3600.0) -> None:
+                 lock_stale_s: float = RunConfig.lock_stale_s) -> None:
     """Publish one evaluation request.
 
     The line is
@@ -187,7 +187,7 @@ def send_request(eval_id: int, phase: str, theta: Sequence[float], *,
     raise RuntimeError(f"could not publish the request to {THETA_FILE}") from last
 
 
-def wait_for_lock(stale_s: float = 6 * 3600.0, poll_s: float = 1.0) -> None:
+def wait_for_lock(stale_s: float = RunConfig.lock_stale_s, poll_s: float = 1.0) -> None:
     """Block while MATLAB is busy, ignoring a lock left behind by a crash.
 
     Without the staleness check, a MATLAB process killed mid-evaluation leaves
