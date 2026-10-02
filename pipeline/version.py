@@ -159,11 +159,14 @@ def capabilities(base: Path = BASE_DIR) -> Dict[str, str]:
 
     # Design-prefix rows need both halves: the reader, and the call in run_bo
     # that puts its rows into the history. The run that prompted this module had
-    # neither, while its configuration named the fidelities.
+    # neither, while its configuration named the fidelities. run_bo reaches the
+    # reader through _design_prefix_rows, which also stops on a lost file.
     reader = _defines(_parse(base / "pipeline/fidelity_rows.py"), "doe_prefix_rows")
     run_bo = _defines(driver_tree, "run_bo")
+    gather = _defines(driver_tree, "_design_prefix_rows")
     caps["doe_prefix"] = _both(reader is not None,
-                               _mentions(run_bo, "doe_prefix_rows"),
+                               _mentions(run_bo, "_design_prefix_rows")
+                               and _mentions(gather, "doe_prefix_rows"),
                                "fidelity_rows.doe_prefix_rows", "call in run_bo")
 
     # Re-measuring the whole history under the vintage in force is the second

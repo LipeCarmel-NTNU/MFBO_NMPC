@@ -142,6 +142,9 @@ def _impute_dominated(cfg: RunConfig, phase_key: str, phase_label: str, eval_id:
     which is a true lower bound on how long it ran, and the measured round trip
     for a real-time abort, which ended long before eval_timeout_s. The budget is a
     sum over this column, and the runtime GP of a runtime-aware case fits it.
+
+    The row has wall_build_s and wall_save_s at 0, which no measured row can
+    have, because MATLAB times both stages; _is_imputed reads the row that way.
     """
     pen_sse, pen_ssdu = _timeout_penalty(cfg, history_rows)
     z = min(max(float(theta_list[0]), 0.0), 1.0)
@@ -170,6 +173,51 @@ def _impute_dominated(cfg: RunConfig, phase_key: str, phase_label: str, eval_id:
             f"{failure_reason}; imputed SSE={pen_sse:.6g}, SSdU={pen_ssdu:.6g}",
             theta_list)
     return row, pen_sse, pen_ssdu
+
+
+def _is_imputed(row: Dict) -> bool:
+    """True for a row that _impute_dominated wrote, which has no trends file."""
+    return row["wall_build_s"] == 0.0 and row["wall_save_s"] == 0.0
+
+
+def _design_prefix_rows(cfg: RunConfig, init_rows: List[Dict]) -> List[Dict]:
+    """The design prefix rows of a multi-fidelity run, or a stop if any are lost.
+
+    The rows are read off every measured design run's init/out_<ts>.mat. In an
+    MF clone those files are a copy from the SF clone, and they also feed the
+    vintage-0 fit. A file that is missing or cannot be read would otherwise drop
+    out with at most a print, and a forgotten copy would start the arm with no
+    prefix rows and a vintage-0 fit on nothing. A design row that the driver
+    imputed has no file and is not counted.
+
+    Returns no rows for the baseline: z is fixed there, so space.to_opt drops
+    that column and the rows would collapse onto their own z = 1 point carrying
+    a different objective.
+    """
+    if not cfg.doe_prefix_z or cfg.is_baseline:
+        return []
+
+    mats = [out_dir("init") / f"out_{r['timestamp']}.mat"
+            for r in init_rows if not _is_imputed(r)]
+    missing = [p.name for p in mats if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} design trends file(s) missing from {out_dir('init')}: "
+            f"{', '.join(missing[:5])}{' ...' if len(missing) > 5 else ''}. The "
+            f"multi-fidelity arm reads its design prefix rows and its vintage-0 fit "
+            f"from them. Copy every init/out_<ts>.mat from the SF clone and restart.")
+
+    rows = doe_prefix_rows(mats, cfg.doe_prefix_z)
+    n_z = len([z for z in cfg.doe_prefix_z if z < 1.0])
+    expected = n_z * len(mats)
+    if len(rows) != expected:
+        raise RuntimeError(
+            f"{len(rows)} design prefix row(s) read, expected {expected} "
+            f"({len(mats)} trends files x {n_z} fidelities). The files that could "
+            f"not be read are named in the [prefix] lines above.")
+    print(f"[bo] {len(rows)} design prefix row(s) at z = "
+          f"{', '.join(f'{z:g}' for z in cfg.doe_prefix_z)}")
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -805,17 +853,7 @@ def run_bo(cfg: RunConfig) -> None:
     # with z when the design itself ran at z = 1, and they give the objective GP
     # low-fidelity labels whose error against the full horizon is exactly the
     # extrapolation error the method incurs.
-    #
-    # Off for the baseline: z is fixed there, so space.to_opt drops that column
-    # and the rows would collapse onto their own z = 1 point carrying a
-    # different objective.
-    prefix_rows_extra: List[Dict] = []
-    if cfg.doe_prefix_z and not cfg.is_baseline:
-        init_mats = [out_dir("init") / f"out_{r['timestamp']}.mat" for r in init_rows]
-        prefix_rows_extra = doe_prefix_rows(
-            [p for p in init_mats if p.exists()], cfg.doe_prefix_z)
-        print(f"[bo] {len(prefix_rows_extra)} design prefix row(s) at z = "
-              f"{', '.join(f'{z:g}' for z in cfg.doe_prefix_z)}")
+    prefix_rows_extra = _design_prefix_rows(cfg, init_rows)
 
     # The baseline publishes the identity phi once, here, so a bo phase started on
     # its own, or resumed after the file was removed, still serves against it. It
