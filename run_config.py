@@ -202,11 +202,19 @@ class RunConfig:
     lock_stale_s: float = 10 * 3600.0
     max_consecutive_failures: int = 5
 
-    # Timeout imputation. An evaluation that exceeds eval_timeout_s is recorded as
-    # a dominated point rather than skipped, so the optimiser does not propose it
-    # again. The penalty is per objective, just beyond the worst measured so far,
-    # so the imputed point is strictly dominated without introducing an outlier
-    # that would distort the objective GP or the reference point:
+    # Real-time deadline. A control step that takes longer than one sampling
+    # interval times this tolerance ends the evaluation as real-time infeasible,
+    # and the driver records it like a timeout below. The live value is
+    # base.rt_tolerance in dependencies/simulation/nmpc_base.m; this copy exists
+    # so the manifest records the experiment definition. Keep the two equal.
+    realtime_tolerance: float = 1.10
+
+    # Imputation. An evaluation that exceeds eval_timeout_s, or that misses the
+    # real-time deadline, is recorded as a dominated point rather than skipped, so
+    # the optimiser does not propose it again. The penalty is per objective, just
+    # beyond the worst measured so far, so the imputed point is strictly dominated
+    # without introducing an outlier that would distort the objective GP or the
+    # reference point:
     #     penalty_j = (1 + margin) * max_i observed_j
     # The fallback applies only before any objective has been measured, which can
     # happen if the very first design point times out.

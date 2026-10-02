@@ -115,7 +115,11 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
             sp_state = opts.setpoint_fn(NMPC, t_now, xk, case_id, sp_state, i, i == i_start);
         end
 
+        % The real-time budget is per control step, so it spans both solves that
+        % a flag == -2 retry inside NMPC.solve can make.
         iter_timer = tic;
+        NMPC.rt_t0 = iter_timer;
+        NMPC.rt_violated = false;
 
         Y(i, :) = xk;
         Ysp(i, :) = NMPC.x_sp(1:base.nx);
@@ -165,6 +169,17 @@ function case_out = nmpc_run_case(base, NMPC, N, x0, case_id, opts)
         end
 
         RUNTIME(i) = toc(iter_timer);
+
+        % A controller that cannot compute its move inside the real-time budget
+        % ends the evaluation. RUNTIME(i) is the backstop for a single fmincon
+        % iteration that overran, which the output function cannot interrupt.
+        % The test sits before the checkpoint block, so no checkpoint is written
+        % for a step that aborts the evaluation.
+        if NMPC.rt_violated || RUNTIME(i) >= NMPC.rt_deadline_s
+            error("NMPC:realtimeInfeasible", ...
+                "step %d of case %d used %.1f s against a %.1f s deadline", ...
+                i, case_id, RUNTIME(i), NMPC.rt_deadline_s);
+        end
 
         if opts.verbosity == "full"
             elapsed_min = sum(RUNTIME(1:i)) / 60;

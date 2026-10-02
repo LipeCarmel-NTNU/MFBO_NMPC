@@ -174,7 +174,10 @@ def capabilities(base: Path = BASE_DIR) -> Dict[str, str]:
         ht is not None and len(ht.args.args) >= 2) else "off"
 
     caps["phi_floor"] = "on" if _assigns(driver_tree, "PHI_FLOOR") else "off"
-    caps["timeout_impute"] = "on" if _defines(driver_tree, "_impute_timeout") else "off"
+    caps["timeout_impute"] = "on" if _defines(driver_tree, "_impute_dominated") else "off"
+    # The real-time abort needs the identifier test in the driver; the deadline
+    # itself is MATLAB code, which this module does not parse.
+    caps["realtime_impute"] = "on" if _defines(driver_tree, "_is_realtime_infeasible") else "off"
     return caps
 
 

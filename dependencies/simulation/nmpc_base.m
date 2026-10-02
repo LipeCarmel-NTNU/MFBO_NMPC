@@ -103,6 +103,14 @@ function base = nmpc_base(opts)
     base.T = (0:base.N-1).' * base.dt;
     base.tspan = [0 base.dt];               % one-step integration window
 
+    %% Real-time deadline
+    % A control step that takes longer than one sampling interval, with this
+    % slack, ends the evaluation as real-time infeasible. The deadline derives
+    % from the grid, so the tolerance is the only number set here. Set
+    % base.rt_deadline_s = Inf after this call to disable it.
+    base.rt_tolerance = 1.10;                           % slack on the deadline
+    base.rt_deadline_s = base.dt * 3600 * base.rt_tolerance;
+
     %% Measurement noise
     % One realisation is drawn here and reused by every theta evaluation, so
     % controllers are compared against the same disturbance sequence.

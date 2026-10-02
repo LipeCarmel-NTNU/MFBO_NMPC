@@ -105,4 +105,7 @@ function nmpc = build_nmpc(base, cfg, opts)
     nmpc.optimizer_options.UseParallel = ~pool_empty;
     nmpc.optimizer_options.Display = opts.display;
     nmpc.optimizer_options.FiniteDifferenceType = 'central';
+
+    %% Real-time deadline
+    nmpc.rt_deadline_s = base.rt_deadline_s;
 end

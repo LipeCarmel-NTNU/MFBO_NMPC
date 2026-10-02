@@ -84,7 +84,14 @@ function n_served = serve_requests(cfg, evaluate_fn)
             n_consecutive_failures = 0;
             fprintf("  eval %d served in %.1f s\n", req.eval_id, toc(t_start));
         catch ME
-            n_consecutive_failures = n_consecutive_failures + 1;
+            % A real-time infeasible candidate is a result, not a fault: the
+            % driver imputes a dominated point for it. It therefore does not
+            % count toward the limit, which is there to catch a broken server.
+            if ME.identifier == "NMPC:realtimeInfeasible"
+                n_consecutive_failures = 0;
+            else
+                n_consecutive_failures = n_consecutive_failures + 1;
+            end
             append_failure_row(cfg.failures_csv, req.eval_id, ...
                 timestamp_compact(), ME.identifier, ME.message, req.theta);
             if strlength(cfg.log_path) > 0

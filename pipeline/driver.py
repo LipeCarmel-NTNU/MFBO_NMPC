@@ -114,18 +114,34 @@ def _timeout_penalty(cfg: RunConfig, history_rows: List[Dict]) -> Tuple[float, f
     return pen_sse, pen_ssdu
 
 
-def _impute_timeout(cfg: RunConfig, phase_key: str, phase_label: str, eval_id: int,
-                    theta_list: List[float], vintage: Optional[int],
-                    history_rows: List[Dict], timeout_s: float
-                    ) -> Tuple[Dict, float, float]:
-    """Record a timed-out evaluation as a dominated point, durably.
+# The identifier nmpc_run_case raises when a control step misses the real-time
+# deadline. The candidate is infeasible as a controller, so the driver records it
+# as a dominated point, as it does a timeout, rather than skipping it.
+REALTIME_INFEASIBLE = "NMPC:realtimeInfeasible"
 
-    Writes a results row so the optimiser and every resumed run see the point in
-    the history and do not propose it again, and a failures row with the
-    'timeout' identifier so the point is identifiable afterwards. Returns the
-    in-memory row and the two penalty values. Runtime is set to the timeout, which
-    is a true lower bound on how long the evaluation ran and is the honest value
-    for the runtime GP of a runtime-aware case.
+
+def _is_realtime_infeasible(exc: EvaluationFailed) -> bool:
+    return exc.failure.get("identifier") == REALTIME_INFEASIBLE
+
+
+def _impute_dominated(cfg: RunConfig, phase_key: str, phase_label: str, eval_id: int,
+                      theta_list: List[float], vintage: Optional[int],
+                      history_rows: List[Dict], runtime_s: float,
+                      failure_reason: Optional[str]
+                      ) -> Tuple[Dict, float, float]:
+    """Record an evaluation that produced no usable row as a dominated point.
+
+    Two causes reach here: a timeout, and a real-time abort. Writes a results row
+    so the optimiser and every resumed run see the point in the history and do
+    not propose it again. With a failure_reason it also writes a failures row with
+    the 'timeout' identifier, so the point is identifiable afterwards; a real-time
+    abort passes None, because MATLAB has already written a failures row with its
+    own identifier. Returns the in-memory row and the two penalty values.
+
+    runtime_s is the time the evaluation actually took: the timeout for a timeout,
+    which is a true lower bound on how long it ran, and the measured round trip
+    for a real-time abort, which ended long before eval_timeout_s. The budget is a
+    sum over this column, and the runtime GP of a runtime-aware case fits it.
     """
     pen_sse, pen_ssdu = _timeout_penalty(cfg, history_rows)
     z = min(max(float(theta_list[0]), 0.0), 1.0)
@@ -140,18 +156,19 @@ def _impute_timeout(cfg: RunConfig, phase_key: str, phase_label: str, eval_id: i
         "phi_SSE": 1.0, "phi_SSdU": 1.0,
         "SSE": pen_sse, "SSdU": pen_ssdu,
         "J": pen_sse + 1e4 * pen_ssdu,
-        "runtime_s": float(timeout_s),
+        "runtime_s": float(runtime_s),
         "n_flag_not_one": 0.0,
         "phi_floored": 0.0,
-        "wall_total_s": float(timeout_s), "wall_cases_s": float(timeout_s),
+        "wall_total_s": float(runtime_s), "wall_cases_s": float(runtime_s),
         "wall_phi_s": 0.0, "wall_build_s": 0.0, "wall_save_s": 0.0,
         "theta": [float(v) for v in theta_list],
     }
     append_imputed_result(phase_key, row)
-    append_timeout_failure(
-        phase_key, eval_id, ts,
-        f"evaluation exceeded eval_timeout_s ({timeout_s / 3600:.1f} h); imputed "
-        f"SSE={pen_sse:.6g}, SSdU={pen_ssdu:.6g}", theta_list)
+    if failure_reason is not None:
+        append_timeout_failure(
+            phase_key, eval_id, ts,
+            f"{failure_reason}; imputed SSE={pen_sse:.6g}, SSdU={pen_ssdu:.6g}",
+            theta_list)
     return row, pen_sse, pen_ssdu
 
 
@@ -667,6 +684,28 @@ def run_initialization(cfg: RunConfig) -> None:
             row = wait_for_result(eval_id, path_results, path_failures,
                                   poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)
         except EvaluationFailed as exc:
+            if _is_realtime_infeasible(exc):
+                wall_matlab = time.perf_counter() - t_wait
+                row, pen_sse, pen_ssdu = _impute_dominated(
+                    cfg, "init", "DOE", eval_id, theta_list, None,
+                    load_history([path_results]), wall_matlab, None)
+                registry.append_evaluation({
+                    "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
+                    "doe_index": eval_id, "theta": theta_list,
+                    "sobol_seed": cfg.sobol_seed, "sent_at": sent_at,
+                    "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "phi_vintage_applied": None,
+                    "imputed_realtime": True, "failure": exc.failure,
+                    "realtime_tolerance": cfg.realtime_tolerance,
+                    "penalty": {"SSE": pen_sse, "SSdU": pen_ssdu,
+                                "margin": cfg.timeout_penalty_margin},
+                    "result": row, "wall_s": {"matlab_round_trip": wall_matlab},
+                })
+                done.add(eval_id)
+                print(f"[init] design point {eval_id} missed the real-time deadline: "
+                      f"{exc.failure.get('message', '')}; imputed SSE={pen_sse:.6g}, "
+                      f"SSdU={pen_ssdu:.6g}")
+                continue
             registry.append_evaluation({
                 "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
                 "theta": theta_list, "sent_at": sent_at,
@@ -678,9 +717,10 @@ def run_initialization(cfg: RunConfig) -> None:
             restarted = TIMEOUT_RESTART_HOOK is not None
             if restarted:
                 TIMEOUT_RESTART_HOOK(eval_id)
-            row, pen_sse, pen_ssdu = _impute_timeout(
+            row, pen_sse, pen_ssdu = _impute_dominated(
                 cfg, "init", "DOE", eval_id, theta_list, None,
-                load_history([path_results]), cfg.eval_timeout_s)
+                load_history([path_results]), cfg.eval_timeout_s,
+                f"evaluation exceeded eval_timeout_s ({cfg.eval_timeout_s / 3600:.1f} h)")
             registry.append_evaluation({
                 "eval_id": eval_id, "phase": "DOE", "case": cfg.case,
                 "doe_index": eval_id, "theta": theta_list, "sent_at": sent_at,
@@ -823,6 +863,29 @@ def run_bo(cfg: RunConfig) -> None:
             row = wait_for_result(eval_id, path_results, path_failures,
                                   poll_s=cfg.poll_s, timeout_s=cfg.eval_timeout_s)
         except EvaluationFailed as exc:
+            if _is_realtime_infeasible(exc):
+                wall_matlab = time.perf_counter() - t_wait
+                row, pen_sse, pen_ssdu = _impute_dominated(
+                    cfg, "bo", "OPT", eval_id, theta_list, vintage,
+                    init_rows + bo_rows, wall_matlab, None)
+                registry.append_evaluation({
+                    "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
+                    "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
+                    "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "phi_vintage_expected": vintage, "phi_vintage_applied": vintage,
+                    "proposal": diagnostics, "acquisition_settings": _acq_settings(cfg),
+                    "imputed_realtime": True, "failure": exc.failure,
+                    "realtime_tolerance": cfg.realtime_tolerance,
+                    "penalty": {"SSE": pen_sse, "SSdU": pen_ssdu,
+                                "margin": cfg.timeout_penalty_margin},
+                    "result": row, "wall_s": {"matlab_round_trip": wall_matlab},
+                })
+                bo_rows.append(row)
+                done.add(eval_id)
+                print(f"[bo] iteration {bo_idx} missed the real-time deadline: "
+                      f"{exc.failure.get('message', '')}; imputed SSE={pen_sse:.6g}, "
+                      f"SSdU={pen_ssdu:.6g}")
+                continue
             registry.append_evaluation({
                 "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
                 "case": cfg.case, "theta": theta_list, "sent_at": sent_at,
@@ -840,9 +903,10 @@ def run_bo(cfg: RunConfig) -> None:
             restarted = TIMEOUT_RESTART_HOOK is not None
             if restarted:
                 TIMEOUT_RESTART_HOOK(eval_id)
-            row, pen_sse, pen_ssdu = _impute_timeout(
+            row, pen_sse, pen_ssdu = _impute_dominated(
                 cfg, "bo", "OPT", eval_id, theta_list, vintage,
-                init_rows + bo_rows, cfg.eval_timeout_s)
+                init_rows + bo_rows, cfg.eval_timeout_s,
+                f"evaluation exceeded eval_timeout_s ({cfg.eval_timeout_s / 3600:.1f} h)")
             registry.append_evaluation({
                 "eval_id": eval_id, "phase": "OPT", "bo_index": bo_idx,
                 "case": cfg.case, "theta": theta_list, "sent_at": sent_at,

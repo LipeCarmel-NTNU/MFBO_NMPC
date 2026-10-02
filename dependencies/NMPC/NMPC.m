@@ -87,6 +87,11 @@ classdef NMPC < handle
         %% Runtime state
         latest_wopt = []        % stored in scaled coordinates
         latest_flag = NaN
+
+        %% Real-time deadline
+        rt_deadline_s = Inf     % per control step, seconds; Inf disables
+        rt_t0         = []      % tic handle for the step in progress
+        rt_violated   = false   % set by the output function, read by the caller
     end
 
     properties (SetAccess = private)
@@ -355,11 +360,19 @@ classdef NMPC < handle
             % Linear inequality rows (scaled): static soft + per-call Δu.
             [A, b] = obj.linear_ineq(u_init);
 
+            % The deadline goes on the options of this call only, so the stored
+            % options stay as the caller set them.
+            opts_call = obj.optimizer_options;
+            if isfinite(obj.rt_deadline_s) && ~isempty(obj.rt_t0)
+                opts_call = optimoptions(opts_call, ...
+                    'OutputFcn', @(~, ~, state) obj.rt_stop(state));
+            end
+
             [wopt_s, fval, exitflag] = fmincon( ...
                 @(ws) obj.objfun(ws, u_init), w0, ...
                 A, b, [], [], wL, wU, ...
                 @(ws) obj.confun(ws, x_init), ...
-                obj.optimizer_options);
+                opts_call);
 
             if exitflag >= 0
                 obj.latest_wopt = wopt_s;        % store scaled
@@ -368,6 +381,21 @@ classdef NMPC < handle
 
             [x_phys, u_phys] = obj.unpack_phys(wopt_s);
             uk = u_phys(1, :);
+        end
+
+        function stop = rt_stop(obj, state)
+            % OutputFcn for fmincon. Stops the solve when the control step has
+            % used its real-time budget. fmincon calls this on the client once
+            % per iteration, so a single iteration that overruns is not caught
+            % here; nmpc_run_case carries the post-step backstop.
+            stop = false;
+            if state == "init" || isempty(obj.rt_t0) || ~isfinite(obj.rt_deadline_s)
+                return
+            end
+            if toc(obj.rt_t0) >= obj.rt_deadline_s
+                obj.rt_violated = true;
+                stop = true;
+            end
         end
 
         %% Objective (scaled inputs)
