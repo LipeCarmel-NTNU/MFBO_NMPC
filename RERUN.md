@@ -222,6 +222,7 @@ run.
 | `dependencies/io/serve_requests.m` | the shared serve loop and failure handling |
 | `dependencies/simulation/phi_eval.m` | phi(z) = I_z(a, b) |
 | `dependencies/simulation/load_phi_coeffs.m` | coefficient load with validation |
+| `tests/` | `python tests/python/run_all.py` and `matlab -batch "run('tests/matlab/run_all.m')"`; run both before a campaign |
 
 The Chebyshev evaluator and its loader are removed. The analysis scripts under
 `Result analysis/` still read the stored coefficient text file of the published
