@@ -47,10 +47,17 @@ configure_pool(USE_PARALLEL, NumWorkers);
 
 %% Run configuration
 cfg_run = struct();
-% Results tree, overridable with MFBO_RESULTS_DIR (default "results/case2_v3"); matches
-% pipeline/matlab_interface.py RESULTS_DIR. The exchange stays at the root.
-results_root = getenv("MFBO_RESULTS_DIR");
-if isempty(results_root); results_root = "results/case2_v3"; end
+% Results folder of this campaign. The driver derives it from the case and the
+% Sobol seed (RESULTS_DIR in pipeline/matlab_interface.py), and run_supervised.py
+% passes it in MFBO_RESULTS_DIR. This server does not know the case, so it cannot
+% derive the folder itself. The exchange stays at the project root.
+results_root = string(getenv("MFBO_RESULTS_DIR"));
+if strlength(results_root) == 0
+    error("MFBO:resultsDir", ...
+        "MFBO_RESULTS_DIR is not set. run_supervised.py sets it. When you " + ...
+        "start MATLAB yourself, first run setenv(""MFBO_RESULTS_DIR"", " + ...
+        """<folder>"") with the folder that run_pipeline.py prints.");
+end
 cfg_run.theta_txt = fullfile("inbox", "theta.txt");
 cfg_run.poll_s = 2.0;
 cfg_run.out_dir = fullfile(results_root, "init");

@@ -1,23 +1,25 @@
 """Print the MATLAB console log as it is written.
 
 A headless MATLAB has no command window. run_supervised.py sends everything that
-window would have shown to results/logs/matlab_console.log, and this script
-prints that file line by line, so a second shell gives you the same view of the
-server that the desktop gave you.
+window would have shown to <results folder>/logs/matlab_console.log, and this
+script prints that file line by line, so a second shell gives you the same view
+of the server that the desktop gave you. --case names the campaign, and the
+folder resolves as the driver resolves it: MFBO_RESULTS_DIR when it is set,
+else results/<arm>_<case>_s<sobol_seed>.
 
-    python watch_matlab_log.py                 # last 40 lines, then follow
-    python watch_matlab_log.py --lines 0       # follow only what arrives next
-    python watch_matlab_log.py --all           # the whole file, then follow
-    python watch_matlab_log.py --no-follow     # print and exit
-    python watch_matlab_log.py results/logs/matlab_diary.log
+    python watch_matlab_log.py --case baseline              # last 40 lines, then follow
+    python watch_matlab_log.py --case baseline --lines 0    # follow only what arrives next
+    python watch_matlab_log.py --case baseline --all        # the whole file, then follow
+    python watch_matlab_log.py --case baseline --no-follow  # print and exit
+    python watch_matlab_log.py results/SF_baseline_s123/logs/matlab_diary.log
 
 The raw log is one appended file for the whole campaign, so reading it from the
 top is slow by the end of a run. run_supervised.py also mirrors it into bounded
 blocks under logs/console_blocks/ (see pipeline/log_blocks.py). Two options read
 that view instead:
 
-    python watch_matlab_log.py --list          # the block index, newest last
-    python watch_matlab_log.py --blocks        # follow the newest block
+    python watch_matlab_log.py --case baseline --list    # the block index, newest last
+    python watch_matlab_log.py --case baseline --blocks  # follow the newest block
 
 --blocks follows the block being written and moves to the next one when it
 opens, so the file open at any moment is at most one block long. --list prints
@@ -40,16 +42,21 @@ import sys
 import time
 from pathlib import Path
 
-# Same override as pipeline.matlab_interface.RESULTS_DIR: MFBO_RESULTS_DIR, default results.
-DEFAULT_LOG = (Path(__file__).resolve().parent
-               / os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3") / "logs" / "matlab_console.log")
+from run_config import CASES, resolve_results_dir
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def parse(argv):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("path", nargs="?", default=str(DEFAULT_LOG),
-                   help="the log to follow (default: results/logs/matlab_console.log)")
+    p.add_argument("path", nargs="?", default=None,
+                   help="the log to follow (default: <results folder>/logs/"
+                        "matlab_console.log, the folder that --case names)")
+    p.add_argument("--case", default=None, choices=sorted(CASES),
+                   help="the campaign whose log to follow, resolved as the driver "
+                        "resolves it: MFBO_RESULTS_DIR when set, else "
+                        "results/<arm>_<case>_s<sobol_seed>")
     p.add_argument("--lines", type=int, default=40,
                    help="lines of existing output to print before following (default: 40)")
     p.add_argument("--all", action="store_true",
@@ -237,7 +244,8 @@ def follow_blocks(blocks_dir: Path, args) -> int:
 
 def main(argv=None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
-    path = Path(args.path)
+    path = (Path(args.path) if args.path else
+            BASE_DIR / resolve_results_dir(args.case) / "logs" / "matlab_console.log")
     try:
         if args.list_blocks:
             return print_block_index(blocks_dir_for(path))

@@ -13,8 +13,9 @@ Select a case on the command line:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Fidelity limits
@@ -328,3 +329,51 @@ def parse_args(argv: List[str]) -> Tuple[str, RunConfig]:
     cfg = RunConfig(case=case)
     cfg.spec()   # validates the case name
     return phase, cfg
+
+
+# ---------------------------------------------------------------------------
+# Results folder
+# ---------------------------------------------------------------------------
+# One folder per campaign, named after the arm, the case and the Sobol seed:
+# results/SF_baseline_s123 for the single-fidelity arm, results/MF_case2_s123 for
+# the multi-fidelity one. The result analysis tells the arms apart by the
+# substring "baseline", so the SF name keeps the case name in it. The seed is in
+# the name so the campaigns of several clones can be gathered under one results/
+# without a collision.
+
+def results_dir_for(case: str) -> str:
+    """Results folder of a campaign, relative to the project root."""
+    cfg = RunConfig(case=case)
+    cfg.spec()   # validates the case name
+    arm = "SF" if cfg.is_baseline else "MF"
+    return f"results/{arm}_{case}_s{cfg.sobol_seed}"
+
+
+def case_from_argv(argv: List[str]) -> Optional[str]:
+    """The value of --case on a command line, or None when it is absent."""
+    for i, token in enumerate(argv):
+        if token == "--case" and i + 1 < len(argv):
+            return argv[i + 1]
+        if token.startswith("--case="):
+            return token.split("=", 1)[1]
+    return None
+
+
+def resolve_results_dir(case: Optional[str]) -> str:
+    """MFBO_RESULTS_DIR when it is set, else the folder derived from the case.
+
+    A missing case falls back to the RunConfig default, as parse_args does.
+    """
+    return (os.environ.get("MFBO_RESULTS_DIR")
+            or results_dir_for(case or RunConfig().case))
+
+
+def export_results_dir(case: Optional[str]) -> str:
+    """Resolve the results folder and set MFBO_RESULTS_DIR to it.
+
+    Both halves read the variable: the Python modules when they are imported,
+    and the MATLAB servers through getenv, which they inherit from the process
+    that launches them. An explicit value still overrides the derived one.
+    """
+    os.environ["MFBO_RESULTS_DIR"] = resolve_results_dir(case)
+    return os.environ["MFBO_RESULTS_DIR"]

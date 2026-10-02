@@ -365,10 +365,10 @@ class LogSplitter:
 # ----------------------------------------------------------------------
 # Standalone use
 # ----------------------------------------------------------------------
-def _default_source() -> Path:
+def _default_source(case: Optional[str]) -> Path:
+    from run_config import resolve_results_dir
     base = Path(__file__).resolve().parents[1]
-    results = os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3")
-    return base / results / "logs" / "matlab_console.log"
+    return base / resolve_results_dir(case) / "logs" / "matlab_console.log"
 
 
 def print_index(blocks_dir: Path) -> int:
@@ -394,8 +394,12 @@ def print_index(blocks_dir: Path) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("source", nargs="?", default=str(_default_source()),
-                        help="the console log to mirror")
+    parser.add_argument("source", nargs="?", default=None,
+                        help="the console log to mirror (default: the one under "
+                             "the results folder that --case names)")
+    parser.add_argument("--case", default=None,
+                        help="the campaign: MFBO_RESULTS_DIR when set, else "
+                             "results/<arm>_<case>_s<sobol_seed>")
     parser.add_argument("--follow", action="store_true",
                         help="keep mirroring until interrupted")
     parser.add_argument("--index", action="store_true",
@@ -404,7 +408,7 @@ def main(argv=None) -> int:
                         help="seconds between reads when following (default: 2.0)")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    source = Path(args.source)
+    source = Path(args.source) if args.source else _default_source(args.case)
     if args.index:
         return print_index(blocks_dir_for(source))
 

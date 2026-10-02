@@ -1,14 +1,15 @@
 #!/bin/bash
 # Run one case on an Idun compute node.
 #
+#   sbatch run_idun.slurm baseline        # SF arm, both phases
+#   sbatch run_idun.slurm case2 bo        # MF arm, optimisation phase only
 #   sbatch run_idun.slurm                 # case1, both phases
-#   sbatch run_idun.slurm case2           # case2, both phases
-#   sbatch run_idun.slurm all             # case1, then case2, unattended
-#   sbatch run_idun.slurm case1 bo        # resume the optimisation phase only
 #
-# With `all`, the job runs case1 to the end, moves results/ to
-# results_archive/case1_<timestamp>/, and starts case2 in a fresh results/. Size
-# --time for both cases in that mode.
+# The run writes to results/<arm>_<case>_s<sobol_seed>, which run_config.py
+# derives from the case and the Sobol seed of this checkout, or to
+# MFBO_RESULTS_DIR when it is exported before sbatch. One job runs one case. Two
+# campaigns started from one checkout would share inbox/theta.txt and
+# matlab.lock, so each campaign that runs at the same time needs its own clone.
 #
 # The job runs run_supervised.py, which starts MATLAB itself, watches it, and
 # relaunches it for as long as the run needs. Neither half runs on a login node,
@@ -16,10 +17,10 @@
 # session can take down.
 #
 # MATLAB has no command window in this mode. Its output goes to
-# results/logs/matlab_console.log. To watch it while the job runs:
+# <results folder>/logs/matlab_console.log. To watch it while the job runs:
 #
 #   ssh <the node in squeue>
-#   cd <this directory> && python watch_matlab_log.py
+#   cd <this directory> && python watch_matlab_log.py --case <case>
 #
 # The account below is the one association this user holds, at normal priority.
 # `sacctmgr show assoc format=Account%15,User,QOS | grep $USER` lists them, and
@@ -42,7 +43,6 @@ set -uo pipefail
 # Settings
 CASE="${1:-case1}"
 PHASE="${2:-both}"
-[ "$CASE" = "all" ] && CASE="case1 case2"
 MATLAB_MODULE="MATLAB/2025a"
 CONDA_MODULE="Anaconda3/2024.02-1"   # `module spider anaconda` lists what is installed
 CONDA_ENV="mfbo-nmpc"                # the name declared in environment.yml
@@ -56,12 +56,6 @@ case "$PHASE" in
     *) echo "[wrapper] phase must be both, init or bo, got '$PHASE'" >&2
        exit 2 ;;
 esac
-
-if [ "$PHASE" = "bo" ] && [ ! -f results/surrogate/phi_coeffs.mat ]; then
-    echo "[wrapper] the bo phase needs results/surrogate/phi_coeffs.mat, which the" >&2
-    echo "[wrapper] design phase publishes. Run the init phase first." >&2
-    exit 2
-fi
 
 CORES="${SLURM_CPUS_PER_TASK:-0}"
 if [ "$CORES" -le "$MATLAB_WORKERS" ]; then
@@ -115,28 +109,47 @@ command -v matlab >/dev/null || {
     exit 2
 }
 
+# Results folder
+# The same derivation the driver makes, so the checks and the log paths below
+# look at the tree the run writes. Exported, so the driver and MATLAB use it.
+if [ -z "${MFBO_RESULTS_DIR:-}" ]; then
+    MFBO_RESULTS_DIR="$(python -c 'import sys; from run_config import results_dir_for; print(results_dir_for(sys.argv[1]))' "$CASE")" || {
+        echo "[wrapper] could not derive the results folder for case '$CASE'." >&2
+        exit 2
+    }
+fi
+export MFBO_RESULTS_DIR
+echo "[wrapper] results folder $MFBO_RESULTS_DIR"
+
+# The optimisation phase reads the design rows, which an earlier init phase, or
+# a copy from the SF clone, puts there. It fits or publishes phi itself.
+if [ "$PHASE" = "bo" ] && [ ! -f "$MFBO_RESULTS_DIR/init/results.csv" ]; then
+    echo "[wrapper] the bo phase needs $MFBO_RESULTS_DIR/init/results.csv, which" >&2
+    echo "[wrapper] the init phase writes. Run it first, or copy the design in." >&2
+    exit 2
+fi
+
 # The run
 # run_supervised.py owns the MATLAB process: it waits for the serve loop before
 # the first request is published, relaunches MATLAB whenever it exits or stops
 # holding matlab.lock with a request pending, and stops it on the way out. Its
 # SIGTERM handler runs that teardown when Slurm ends the step, so `python -u`
 # keeps the wrapper log in order up to that point.
-echo "[wrapper] MATLAB console: results/logs/matlab_console.log"
-# CASE may name more than one case, so the split is intended here.
-# shellcheck disable=SC2086
-python -u run_supervised.py --case $CASE --phase "$PHASE"
+LOGS="$MFBO_RESULTS_DIR/logs"
+echo "[wrapper] MATLAB console: $LOGS/matlab_console.log"
+python -u run_supervised.py --case "$CASE" --phase "$PHASE"
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
     echo "[wrapper] the run exited with status $STATUS. Last lines of the MATLAB console:" >&2
-    tail -n 40 results/logs/matlab_console.log >&2
+    tail -n 40 "$LOGS/matlab_console.log" >&2
 else
     echo "[wrapper] the run finished."
 fi
 
-if [ -f results/logs/restarts.csv ]; then
+if [ -f "$LOGS/restarts.csv" ]; then
     echo "[wrapper] MATLAB restarts recorded this run and earlier ones:"
-    tail -n 20 results/logs/restarts.csv
+    tail -n 20 "$LOGS/restarts.csv"
 fi
 
 # Peak resident memory of this job step, for sizing --mem on the next run.

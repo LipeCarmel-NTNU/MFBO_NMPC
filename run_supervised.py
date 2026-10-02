@@ -1,31 +1,22 @@
-"""Run one case, or several in sequence, with Python owning the MATLAB server.
+"""Run one case with Python owning the MATLAB server.
 
-    python run_supervised.py --case case1
-    python run_supervised.py --case case1 case2
+    python run_supervised.py --case baseline
 
 This is run_pipeline.py with the MATLAB half started, watched and relaunched by
 the driver's own process. You type one command instead of two, and you do not
 start MATLAB yourself.
 
+The campaign writes to its own folder, results/<arm>_<case>_s<sobol_seed>, which
+pipeline/matlab_interface.py derives from --case unless MFBO_RESULTS_DIR is set.
+MATLAB inherits the variable, so both halves use the same folder. One process
+runs one case: two campaigns started from one checkout would share
+inbox/theta.txt and matlab.lock, so a second campaign needs its own clone.
+
 MATLAB runs headless, so its command window does not exist. Everything it would
-have printed goes to results/logs/matlab_console.log. To watch it as it is
-written, in a second shell:
+have printed goes to <results folder>/logs/matlab_console.log. To watch it as it
+is written, in a second shell:
 
-    python watch_matlab_log.py
-
-Several cases in one command
----------------------------
-Both cases write the same paths, and the driver refuses to resume under a
-manifest that declares a different case, so a sequence has to move the finished
-tree aside between cases. That is what RERUN.md describes doing by hand, and
-pipeline/case_archive.py does it here: results/ becomes
-results_archive/<case>_<timestamp>/ and an empty results/ is left behind. The
-move is a rename, so the earlier run is recoverable by moving it back.
-
-Each case starts a MATLAB of its own at main_initialization. A case that ends in
-a non-zero status stops the sequence, so the state that produced it stays where
-it is and you can resume that case with the same command. Pass --keep-going to
-run the remaining cases anyway.
+    python watch_matlab_log.py --case baseline
 
 The relaunch count is unbounded. Both halves resume from the records they wrote,
 so a relaunch continues the run rather than restarting it.
@@ -45,8 +36,8 @@ import signal
 import sys
 
 import run_pipeline
-from pipeline import case_archive
 from pipeline import driver
+from pipeline.matlab_interface import RESULTS_DIR
 from pipeline.matlab_supervisor import CONSOLE_LOG, MatlabSupervisor
 from run_config import CASES
 
@@ -54,16 +45,12 @@ from run_config import CASES
 def parse(argv):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--case", nargs="+", default=["case1"], choices=sorted(CASES),
-                   metavar="CASE",
-                   help="one or more search spaces to optimize, in order "
-                        f"(choices: {', '.join(sorted(CASES))}; default: case1)")
+    p.add_argument("--case", default="case1", choices=sorted(CASES),
+                   help="which search space to optimize (default: case1)")
     p.add_argument("--phase", default="both", choices=("both", "init", "bo"),
                    help="run one phase instead of the whole case")
     p.add_argument("--pause", type=float, default=run_pipeline.HANDOVER_PAUSE_S,
                    help="seconds to wait between the two phases")
-    p.add_argument("--keep-going", action="store_true",
-                   help="start the next case even when this one failed")
     p.add_argument("--matlab", default="matlab",
                    help="the MATLAB executable to launch (default: matlab)")
     p.add_argument("--ready-timeout", type=float, default=900.0,
@@ -74,17 +61,7 @@ def parse(argv):
     p.add_argument("--diary", action="store_true",
                    help="also write the MATLAB console through diary(), which "
                         "flushes each line, in case the redirected output lags")
-    args = p.parse_args(argv)
-
-    if len(args.case) > 1 and args.phase != "both":
-        p.error("--phase applies to a single case. Name one case, or drop --phase.")
-    seen = set()
-    for case in args.case:
-        if case in seen:
-            p.error(f"case {case!r} is named twice, and the second run would archive "
-                    f"the first")
-        seen.add(case)
-    return args
+    return p.parse_args(argv)
 
 
 def _raise_on_sigterm() -> None:
@@ -108,8 +85,6 @@ def run_case(case: str, args) -> int:
     print("#" * 70)
     print(f"CASE {case}")
     print("#" * 70)
-
-    case_archive.prepare_for(case)
 
     # The optimisation phase has its own entry point, so resuming it does not go
     # through the design server.
@@ -149,52 +124,16 @@ def main(argv=None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
     _raise_on_sigterm()
 
-    print(f"[run_supervised] cases: {', '.join(args.case)}")
+    print(f"[run_supervised] case: {args.case}")
+    print(f"[run_supervised] results: {RESULTS_DIR}")
     print(f"[run_supervised] MATLAB console: {CONSOLE_LOG}")
-    print("[run_supervised] follow it with: python watch_matlab_log.py")
+    print(f"[run_supervised] follow it with: python watch_matlab_log.py --case {args.case}")
 
-    # A sequence restarted after an interruption must not begin again at the
-    # first case. results/ names the case it holds, and the cases before that one
-    # in this sequence have already run and been archived. Beginning at the first
-    # case again would archive a tree that is still being filled and then rerun
-    # an earlier case from nothing.
-    cases = list(args.case)
-    declared = case_archive.declared_case()
-    if declared in cases and cases.index(declared) > 0:
-        skipped = cases[:cases.index(declared)]
-        cases = cases[cases.index(declared):]
-        print(f"[run_supervised] results/ holds {declared}, so {', '.join(skipped)} "
-              f"ran already and is under {case_archive.ARCHIVE_ROOT.name}/. "
-              f"Continuing with {', '.join(cases)}. To run {skipped[0]} again, "
-              f"name it on its own.")
-
-    status = 0
-    for index, case in enumerate(cases):
-        try:
-            code = run_case(case, args)
-        except KeyboardInterrupt:
-            print(f"\n[run_supervised] interrupted during {case}. MATLAB is stopped.")
-            return 130
-        if code == 0:
-            continue
-
-        status = code
-        remaining = cases[index + 1:]
-        if remaining and not args.keep_going:
-            print(f"\n[run_supervised] {case} stopped with code {code}. "
-                  f"{', '.join(remaining)} will not start, so the state that "
-                  f"produced it stays in results/. Resume with the same command, "
-                  f"or pass --keep-going to move on regardless.")
-            return status
-        if remaining:
-            print(f"\n[run_supervised] {case} stopped with code {code}. "
-                  f"Continuing to {remaining[0]} because --keep-going was given.")
-
-    if len(cases) > 1 and status == 0:
-        print(f"[run_supervised] all cases finished: {', '.join(cases)}. "
-              f"Earlier cases are under {case_archive.ARCHIVE_ROOT.name}/, and the "
-              f"last one is still in results/.")
-    return status
+    try:
+        return run_case(args.case, args)
+    except KeyboardInterrupt:
+        print(f"\n[run_supervised] interrupted during {args.case}. MATLAB is stopped.")
+        return 130
 
 
 if __name__ == "__main__":

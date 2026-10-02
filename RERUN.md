@@ -9,11 +9,21 @@ requests until you stop it with Ctrl-C. Python owns the budget, and
 
 Start MATLAB first. The driver waits for the results file that MATLAB creates.
 
+Each campaign writes to its own folder, `<results>` below:
+`results/<arm>_<case>_s<sobol_seed>`, for example `results/SF_baseline_s123` or
+`results/MF_case2_s123`, or the folder that `MFBO_RESULTS_DIR` names when it is
+set. The driver derives it from `--case` and the `sobol_seed` in
+`run_config.py`, and prints it at start.
+
 ## Sequence
 
 Two commands per case.
 
-1. In MATLAB, run `main_initialization`.
+1. In MATLAB, run `setenv("MFBO_RESULTS_DIR", "<results>")` with the folder
+   that the launcher prints, then `main_initialization`. A MATLAB started by
+   hand does not see the launcher's environment, so without this it stops with
+   `MFBO:resultsDir`. `run_supervised.py` starts MATLAB itself and passes the
+   folder on.
 2. In a shell, run `python run_pipeline.py --case case1`.
 
 That is the whole run. The launcher runs the design phase, fits phi as vintage
@@ -27,8 +37,9 @@ request from the inbox and serves it, and the rest of the run.
 
 Press Ctrl-C in MATLAB when the launcher reports that it is done.
 
-For the second case, move `results/` aside and repeat with `--case case2`. The
-two cases write the same paths.
+For the second case, repeat with `--case case2`. It writes to a folder of its
+own. Two campaigns running at the same time need two clones, because
+`inbox/theta.txt` and `matlab.lock` sit at the project root.
 
 To run one phase alone:
 
@@ -94,14 +105,14 @@ vintage that each proposal saw, which is why the ledger carries
 
 ## Records
 
-`results/results.csv` and `results/init/results.csv` hold one row for each
+`<results>/results.csv` and `<results>/init/results.csv` hold one row for each
 evaluation. Each row carries the evaluation index, the timestamp, the phase, the
 phi vintage, z, the measured costs before scaling, the two divisors, the scaled
 costs, J, the solver time, the count of fmincon exit flags other than 1, whether
 the divisor floor acted, five wall times, and the twelve theta components at
 `%.17g`.
 
-`results/registry/` holds four kinds of file.
+`<results>/registry/` holds four kinds of file.
 
 - `manifest_<phase>.json`. The declared configuration, every optimizer flag, the
   seeds, the package versions, the git commit, and whether the working tree was
@@ -117,7 +128,7 @@ the divisor floor acted, five wall times, and the twelve theta components at
   that informed the fit, the iterations that the vintage governs, and the wall
   time of each stage of the fit.
 
-`results/failures.csv` holds the evaluations that raised in MATLAB, with the
+`<results>/failures.csv` holds the evaluations that raised in MATLAB, with the
 identifier and the message.
 
 ## Wall time
@@ -149,9 +160,9 @@ blocks of at most 1 MiB or 30 minutes, whichever comes first, with `index.csv`
 naming the evaluation ids in each closed block. Read the recent output without
 opening the whole log:
 
-    python watch_matlab_log.py --blocks    # follow the block being written
-    python watch_matlab_log.py --list      # the index, to find one evaluation
-    python watch_matlab_log.py             # the raw log, as before
+    python watch_matlab_log.py --case case2 --blocks    # follow the block being written
+    python watch_matlab_log.py --case case2 --list      # the index, to find one evaluation
+    python watch_matlab_log.py --case case2             # the raw log, as before
 
 The blocks are a copy. The raw log is read and never written, so nothing the
 mirror does can lose output. Set `MFBO_LOG_BLOCKS=0` to turn the mirror off, or
@@ -192,8 +203,9 @@ Two conditions stop a run instead of continuing.
 Edit `run_config.py`. Do not edit the drivers. Every value in `run_config.py`
 reaches the manifest.
 
-The driver refuses a value that changed in the middle of a run. Move `results/`
-aside to start a new run.
+The driver refuses a value that changed in the middle of a run. Move
+`<results>` aside, or set `MFBO_RESULTS_DIR` to a new folder, to start a new
+run.
 
 ## Files
 

@@ -53,7 +53,6 @@ SOURCES: Tuple[str, ...] = (
     "pipeline/matlab_interface.py",
     "pipeline/matlab_supervisor.py",
     "pipeline/provenance.py",
-    "pipeline/case_archive.py",
     "pipeline/console_log.py",
     "pipeline/log_blocks.py",
 )

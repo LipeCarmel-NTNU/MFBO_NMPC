@@ -5,7 +5,11 @@ then runs the optimization phase.
 
     python run_pipeline.py --case case1
 
-Start MATLAB on main_initialization first. MATLAB stays on that one command for
+The campaign writes to results/<arm>_<case>_s<sobol_seed>, or to
+MFBO_RESULTS_DIR when it is set; the folder is printed at start. Start MATLAB on
+main_initialization first, after setenv("MFBO_RESULTS_DIR", "<that folder>"),
+because a MATLAB started by hand does not see this process's environment.
+MATLAB stays on that one command for
 the whole run. When the design phase finishes, the driver sends its first
 optimization request. main_initialization sees the phase code on that request,
 stops serving, and calls main_BO, which serves the rest of the run.
@@ -22,6 +26,7 @@ command.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -56,6 +61,12 @@ def parse(argv):
 
 def main(argv=None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
+
+    # A MATLAB started by hand does not inherit this process's environment, so it
+    # is told the folder here. run_supervised.py passes it on by itself.
+    print(f"[run_pipeline] results: {RESULTS_DIR}")
+    print(f'[run_pipeline] MATLAB started by hand needs: '
+          f'setenv("MFBO_RESULTS_DIR", "{os.environ["MFBO_RESULTS_DIR"]}")')
 
     if args.phase in ("both", "init"):
         with ConsoleLog(LOG_ROOT, "init"):

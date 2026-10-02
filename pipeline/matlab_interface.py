@@ -15,24 +15,28 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
+
+from run_config import case_from_argv, export_results_dir
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 LOCK_FILE = BASE_DIR / "matlab.lock"
 THETA_FILE = BASE_DIR / "inbox" / "theta.txt"
 
-# The results tree may live in a subfolder instead of results/, so several cases
-# can sit side by side without moving files between runs. MFBO_RESULTS_DIR sets
-# it (relative to the project root, e.g. "results/running"); it defaults to
-# "results". The MATLAB entry scripts read the same variable with getenv. The
+# Each campaign has its own results folder, relative to the project root.
+# MFBO_RESULTS_DIR names it. When the variable is unset, the folder is derived
+# from the --case on the command line of the process and the Sobol seed in
+# run_config.py (see run_config.results_dir_for), and the variable is set, so the
+# MATLAB server that this process launches reads the same folder with getenv.
+# The derivation reads sys.argv because every entry point (run_pipeline.py,
+# run_supervised.py, python -m pipeline.driver) takes --case, and the paths below
+# are fixed when this module is imported, before any of them parses it. The
 # exchange (inbox/theta.txt, matlab.lock) stays at the project root regardless.
-# The default names the campaign this checkout is set up to run, so no
-# environment variable has to be exported before starting. Point a run
-# somewhere else with MFBO_RESULTS_DIR, which still overrides.
-RESULTS_DIR = BASE_DIR / os.environ.get("MFBO_RESULTS_DIR", "results/case2_v3")
+RESULTS_DIR = BASE_DIR / export_results_dir(case_from_argv(sys.argv[1:]))
 
 # The initialisation phase and the optimisation phase write separate files, so
 # that the costs measured at the simulated fidelity stay distinguishable from
