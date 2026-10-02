@@ -1,0 +1,15 @@
+# init phase, started 2026-09-08T17:29:15+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/init_20260908_172915.log
+======================================================================
+PHASE 1 of 2: design of experiments, baseline
+======================================================================
+[run] phase=init case=baseline (7 free dimensions) budget=20+100
+[registry] resuming under manifest manifest_init.json (6 restart(s) recorded)
+[init] 20 of 20 design points already evaluated
+
+[init] initialisation complete: 20 evaluations
+[init] baseline: static phi (a = b = 1, vintage 0) published; no fit, because z = 1 makes phi = 1 exactly
+[init] MATLAB hands over to main_BO on the first optimization request.
+
+[run_pipeline] design complete. Waiting 10 s for MATLAB to hand over to main_BO.
+# ended 2026-09-08T17:29:21+0200

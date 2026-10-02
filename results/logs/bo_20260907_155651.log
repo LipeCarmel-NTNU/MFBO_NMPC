@@ -1,0 +1,39 @@
+# bo phase, started 2026-09-07T15:56:51+0200
+[log] console output is copied to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/logs/bo_20260907_155651.log
+======================================================================
+PHASE 2 of 2: optimization, baseline
+======================================================================
+[run] phase=bo case=baseline (7 free dimensions) budget=20+100
+[registry] working tree was dirty; diff saved to working_tree_bo.diff
+[registry] manifest written to /cluster/home/vitorn/Matlab/NMPC_BO/MFBO_NMPC/results/registry/manifest_bo.json
+[bo] resuming with 20 DOE and 0 OPT evaluations
+[wait] evaluation 21 running for 10 min
+[wait] evaluation 21 running for 20 min
+[wait] evaluation 21 running for 30 min
+[wait] evaluation 21 running for 40 min
+[bo]   1/100 [phi v0]  z=1.0000  SSE=12366.8  SSdU=0.0620608  acq=13.3
+       wall: propose 31.3s (gp 4.6+0.0s, acq 3.6s), matlab 2529.0s, ledger 0.032s, iteration 2560.5s
+[wait] evaluation 22 running for 10 min
+[wait] evaluation 22 running for 20 min
+[wait] evaluation 22 running for 30 min
+[wait] evaluation 22 running for 40 min
+[wait] evaluation 22 running for 50 min
+[wait] evaluation 22 running for 60 min
+[bo]   2/100 [phi v0]  z=1.0000  SSE=43608.1  SSdU=1.66214  acq=13.38
+       wall: propose 4.7s (gp 1.3+0.0s, acq 3.3s), matlab 4144.7s, ledger 0.112s, iteration 4149.5s
+       98 left, eta 91.3 h [69.7 h-113.0 h], finish ~Fri 13:08
+[wait] evaluation 23 running for 10 min
+[wait] evaluation 23 running for 20 min
+[wait] evaluation 23 running for 30 min
+[wait] evaluation 23 running for 40 min
+[wait] evaluation 23 running for 50 min
+[wait] evaluation 23 running for 60 min
+[wait] evaluation 23 running for 70 min
+[wait] evaluation 23 running for 80 min
+[wait] evaluation 23 running for 90 min
+[wait] evaluation 23 running for 100 min
+[wait] evaluation 23 running for 110 min
+[wait] evaluation 23 running for 120 min
+[wait] evaluation 23 running for 130 min
+[wait] evaluation 23 running for 140 min
+[wait] evaluation 23 running for 150 min
