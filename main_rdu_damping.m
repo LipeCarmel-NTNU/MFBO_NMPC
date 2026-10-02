@@ -66,7 +66,6 @@ addpath(genpath(current_dir))
 %% ------------------------------------------------------------------ knobs
 EPS_X       = 0.90;     % keep at least (1 - EPS_X) of MF_1's loop gain Jx
 SIM_HOURS   = 10;        % horizon of the verification run
-RNG_SEED    = 123;      % fixes base.noise, shared by every simulated theta
 THETA_MAX   = 3;        % upper bound of the r_du exponent in the BO box
 % Every simulation is expensive, so only the blend is run. MF_1's trajectory is
 % already on disk and re-simulating it here buys only the identical noise
@@ -85,8 +84,7 @@ assert(isfile(BO_FILE), 'BO_1 trends file not found: %s', BO_FILE);
 Smf = load(MF_FILE, 'out');  theta_mf = Smf.out.theta(:).';
 Sbo = load(BO_FILE, 'out');  theta_bo = Sbo.out.theta(:).';
 
-rng(RNG_SEED)
-base = nmpc_base();                 % same sigma_y, Ts, tf and setpoint as the campaign
+base = nmpc_base();                 % same sigma_y, noise, Ts, tf and setpoint as the campaign
 nx = base.nx;  nu = base.nu;
 
 cfg_mf = decode_theta(theta_mf, nx, nu);
@@ -244,7 +242,7 @@ synth = struct('rho', rho, 'active_constraint', active, 'EPS_X', EPS_X, ...
     'theta_mf', theta_mf, 'theta_bo', theta_bo, 'theta_blend', theta_new, ...
     'Jx', [Jx_mf Jx_new Jx_bo], 'Jdu', [Jdu_mf Jdu_new Jdu_bo], ...
     'Jx_tr', [Jxt_mf Jxt_new Jxt_bo], 'Jdu_tr', [Jdut_mf Jdut_new Jdut_bo], ...
-    'Ai', Ai, 'Bi', Bi, 'W', W, 'sim_hours', SIM_HOURS, 'rng_seed', RNG_SEED);
+    'Ai', Ai, 'Bi', Bi, 'W', W, 'sim_hours', SIM_HOURS, 'rng_seed', base.noise_seed);
 save(fullfile(OUT_DIR, DAMPING_FILENAME), 'synth', 'runs');
 fprintf('\nwrote %s\n', fullfile(OUT_DIR, DAMPING_FILENAME));
 

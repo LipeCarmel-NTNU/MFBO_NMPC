@@ -12,8 +12,6 @@ addpath(genpath(current_dir))
 delete_if_exists('.lock')
 delete_if_exists('matlab.lock')
 
-rng(123)
-
 USE_PARALLEL = true;
 NumWorkers = 8;
 configure_pool(USE_PARALLEL, NumWorkers);

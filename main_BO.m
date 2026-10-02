@@ -27,9 +27,9 @@
 %   results/out_<timestamp>.mat   the full per-step trends
 %   SIMULATIONS_LOG.txt           fmincon exit flags other than 1, and failures
 %
-% Reproducibility: rng(123) fixes the measurement-noise realization. nmpc_base
-% draws it once and every evaluation reuses it. main_initialization.m uses the
-% same seed, so both phases see the same disturbance sequence.
+% Reproducibility: nmpc_base draws the measurement-noise realization once, from
+% its noise_seed, and every evaluation reuses it. main_initialization.m builds
+% its base the same way, so both phases see the same disturbance sequence.
 
 % The clear runs whether you start this script yourself or main_initialization
 % calls it. Both scripts share the base workspace, so the clear also empties the
@@ -46,8 +46,6 @@ addpath(genpath(current_dir))
 % with an unserved request already in the inbox, and this server has to read it.
 delete_if_exists('.lock')
 delete_if_exists('matlab.lock')
-
-rng(123)
 
 USE_PARALLEL = true;
 NumWorkers = 8;
@@ -78,7 +76,6 @@ cfg_run.lock_stale_s = 6 * 3600;
 cfg_run.max_consecutive_failures = 5;
 cfg_run.sigma_y = [0.001 0.1 0.1];
 cfg_run.NumWorkers = NumWorkers;
-cfg_run.rng_seed = 123;
 cfg_run.serves_phase = 1;      % 1 = optimization
 
 base = nmpc_base( ...

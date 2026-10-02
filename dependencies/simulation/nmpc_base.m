@@ -9,6 +9,8 @@ function base = nmpc_base(opts)
 %   Name-value options:
 %     sigma_y           measurement noise std dev per state (default
 %                       [0.001 0.1 0.1]; pass [0 0 0] for a noise-free run)
+%     noise_seed        seed of the measurement-noise realisation (default
+%                       123, the seed of every campaign)
 %     Ts                sampling time in hours (default 1/60)
 %     tf                horizon in hours (default 10)
 %     Vsp, Xsp          setpoints passed to find_ss (default 1 and 20)
@@ -26,11 +28,12 @@ function base = nmpc_base(opts)
 %                       coefficients from this file into base.phi
 %     optimizer_max_iter  fmincon MaxIterations (default 100)
 %
-%   The noise realisation depends on the random state at call time, so seed
-%   with rng before calling to keep runs comparable.
+%   The noise realisation depends only on noise_seed, the grid and sigma_y,
+%   not on the random state at call time.
 
     arguments
         opts.sigma_y (1,:) double = [0.001 0.1 0.1]
+        opts.noise_seed (1,1) double {mustBeInteger, mustBeNonnegative} = 123
         opts.Ts (1,1) double {mustBePositive} = 1/60
         opts.tf (1,1) double {mustBePositive} = 10
         opts.Vsp (1,1) double = 1
@@ -113,9 +116,15 @@ function base = nmpc_base(opts)
 
     %% Measurement noise
     % One realisation is drawn here and reused by every theta evaluation, so
-    % controllers are compared against the same disturbance sequence.
+    % controllers are compared against the same disturbance sequence. The draw
+    % uses a stream of its own, seeded with noise_seed, so every base built with
+    % the same seed, grid and sigma_y carries the same realisation whatever the
+    % caller drew before, and the global random state is left alone. The stream
+    % matches rng(noise_seed), so the realisation is the one the campaigns used.
     base.sigma_y = opts.sigma_y;
-    base.noise = randn(base.N, base.nx) .* base.sigma_y;
+    base.noise_seed = opts.noise_seed;
+    noise_stream = RandStream("twister", "Seed", opts.noise_seed);
+    base.noise = randn(noise_stream, base.N, base.nx) .* base.sigma_y;
 
     %% Setpoints
     base.V_sp = opts.Vsp;

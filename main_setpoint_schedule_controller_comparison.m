@@ -16,7 +16,6 @@
 % Output root: results/setpoint_schedule_xsp_7_13_16/
 
 clear; close all; clc
-rng(123)
 
 current_dir = fileparts(mfilename("fullpath"));
 addpath(genpath(current_dir));
