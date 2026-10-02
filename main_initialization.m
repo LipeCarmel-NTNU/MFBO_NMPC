@@ -39,37 +39,16 @@ delete_if_exists('.lock')
 delete_if_exists('matlab.lock')
 delete_if_exists(fullfile('inbox', 'theta.txt'))
 
-USE_PARALLEL = true;
-NumWorkers = 8;
-configure_pool(USE_PARALLEL, NumWorkers);
-
 %% Run configuration
-cfg_run = struct();
-% Results folder of this campaign. The driver derives it from the case and the
-% Sobol seed (RESULTS_DIR in pipeline/matlab_interface.py), and run_supervised.py
-% passes it in MFBO_RESULTS_DIR. This server does not know the case, so it cannot
-% derive the folder itself. The exchange stays at the project root.
-results_root = string(getenv("MFBO_RESULTS_DIR"));
-if strlength(results_root) == 0
-    error("MFBO:resultsDir", ...
-        "MFBO_RESULTS_DIR is not set. run_supervised.py sets it. When you " + ...
-        "start MATLAB yourself, first run setenv(""MFBO_RESULTS_DIR"", " + ...
-        """<folder>"") with the folder that run_pipeline.py prints.");
-end
-cfg_run.theta_txt = fullfile("inbox", "theta.txt");
-cfg_run.poll_s = 2.0;
-cfg_run.out_dir = fullfile(results_root, "init");
-cfg_run.results_csv = fullfile(results_root, "init", "results.csv");
-cfg_run.failures_csv = fullfile(results_root, "failures.csv");
-cfg_run.log_path = fullfile("SIMULATIONS_LOG.txt");
-cfg_run.lock_path = "matlab.lock";
-cfg_run.lock_stale_s = 6 * 3600;
-cfg_run.max_consecutive_failures = 5;
-cfg_run.sigma_y = [0.001 0.1 0.1];
-cfg_run.NumWorkers = NumWorkers;
-cfg_run.serves_phase = 0;      % 0 = design of experiments
+% The settings both servers share, and the campaign folder, come from
+% server_config. Only the paths of this phase are set here.
+cfg_run = server_config(0);    % 0 = design of experiments
+cfg_run.out_dir = fullfile(cfg_run.results_root, "init");
+cfg_run.results_csv = fullfile(cfg_run.results_root, "init", "results.csv");
 
-base = nmpc_base(sigma_y = cfg_run.sigma_y);
+configure_pool(true, cfg_run.NumWorkers);
+
+base = nmpc_base();
 
 cfg_run.theta_len = 1 + 2 + base.nx + 2*base.nu;
 

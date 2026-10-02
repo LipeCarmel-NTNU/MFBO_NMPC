@@ -46,7 +46,7 @@ PHASE="${2:-both}"
 MATLAB_MODULE="MATLAB/2025a"
 CONDA_MODULE="Anaconda3/2024.02-1"   # `module spider anaconda` lists what is installed
 CONDA_ENV="mfbo-nmpc"                # the name declared in environment.yml
-MATLAB_WORKERS=8                     # NumWorkers in main_initialization.m and main_BO.m
+MATLAB_WORKERS=8                     # NumWorkers in dependencies/io/server_config.m
 
 # Argument and resource checks
 # These run before MATLAB starts, so a mistake costs a few seconds of queue time
